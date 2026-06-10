@@ -25,8 +25,10 @@ function strip(src) {
     .join('\n');
 }
 
+// Import directo desde el CDN (sin importmap) -> máxima compatibilidad, también file://
+const THREE_CDN = 'https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.module.js';
 const merged = [
-  "import * as THREE from 'three';",
+  `import * as THREE from '${THREE_CDN}';`,
   strip(read('src/geometry.js')),
   strip(read('src/engine.js')),
   strip(read('src/layouts.js')),
@@ -47,6 +49,9 @@ if (!html.includes(importBlock)) {
 
 const out = html
   .replace('<title>Conveyor Sim</title>', '<title>Conveyor Sim (standalone)</title>')
+  // el standalone no usa importmap (importa three por URL directa); quítalo para evitar
+  // incompatibilidades en navegadores móviles.
+  .replace(/\s*<!-- Three\.js desde CDN[^>]*-->\s*<script type="importmap">[\s\S]*?<\/script>/, '')
   .replace(importBlock, merged);
 
 mkdirSync(join(root, 'dist'), { recursive: true });

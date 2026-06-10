@@ -59,6 +59,9 @@
 </head>
 <body>
   <div id="app"></div>
+  <div id="err" style="position:fixed;left:8px;top:8px;right:8px;z-index:40;display:none;
+       font:12px monospace;color:#ffb3b3;background:rgba(40,10,10,.92);border:1px solid #b71c1c;
+       border-radius:8px;padding:10px;white-space:pre-wrap"></div>
   <button id="fab" title="Mostrar / ocultar controles">⚙</button>
 
   <div id="panel">
@@ -96,6 +99,17 @@
     </div>
   </div>
 
+  <!-- diagnóstico: muestra cualquier error en pantalla (útil en móvil) -->
+  <script>
+    function showErr(msg) {
+      var e = document.getElementById('err');
+      e.style.display = 'block';
+      e.textContent = 'Error al cargar la simulación:\n' + msg +
+        '\n\nSi abriste el archivo localmente (file://), el navegador móvil bloquea los módulos. Ábrelo desde una URL https.';
+    }
+    addEventListener('error', e => showErr((e.message || e.error || '') + (e.filename ? '\n' + e.filename : '')));
+    addEventListener('unhandledrejection', e => showErr((e.reason && e.reason.message) || String(e.reason)));
+  </script>
   <!-- Three.js desde CDN: no requiere npm install -->
   <script type="importmap">
   { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.module.js" } }
@@ -149,7 +163,7 @@
     $('fab').addEventListener('click', () => panel.classList.toggle('hidden'));
     $('closeP').addEventListener('click', () => panel.classList.add('hidden'));
 
-    build();
+    try { build(); } catch (err) { showErr((err && err.stack) || String(err)); }
   </script>
 </body>
 </html>
