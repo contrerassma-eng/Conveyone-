@@ -26,8 +26,10 @@ function strip(src) {
 }
 
 // Three.js se INCRUSTA (build global UMD vendor/three.min.js): cero dependencias de
-// red, funciona offline y desde file://. El código usa el global THREE.
+// red, funciona offline y desde file://. El código usa el global THREE. OrbitControls
+// va en su variante "global" (usa el THREE global) e inline en el mismo módulo.
 const merged = [
+  strip(read('vendor/OrbitControls.global.js')),
   strip(read('src/geometry.js')),
   strip(read('src/engine.js')),
   strip(read('src/layouts.js')),

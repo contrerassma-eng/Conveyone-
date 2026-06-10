@@ -345,6 +345,7 @@ export class ConveyorSim {
       boxes.push({
         id: b.id,
         x: p[0], y, z: p[1],
+        dx: d[0], dz: d[1],
         angle: Math.atan2(d[1], d[0]),
         held: b.held > 0,
         color: b.color || (seg.color || null),
