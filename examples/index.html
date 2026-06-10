@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Conveyor Sim — ejemplo navegable</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #0e1116; overflow: hidden; }
+    #app { position: absolute; inset: 0; }
+    #panel {
+      position: absolute; top: 8px; right: 8px; z-index: 10;
+      font: 12px system-ui, sans-serif; color: #cdd6e0;
+      background: rgba(14,17,22,.85); padding: 10px 12px; border-radius: 8px;
+      display: grid; gap: 6px; width: 210px;
+    }
+    #panel label { display: grid; gap: 2px; }
+    #panel .row { display: flex; gap: 6px; }
+    #panel button {
+      flex: 1; background: #1b2330; color: #cdd6e0; border: 1px solid #2a3645;
+      border-radius: 5px; padding: 5px; cursor: pointer; font: 11px monospace;
+    }
+    #panel button:hover { background: #243044; }
+    #panel h1 { font-size: 13px; margin: 0 0 2px; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <div id="panel">
+    <h1>Conveyor Sim</h1>
+    <label>Carriles (peine): <b id="lanesV">7</b>
+      <input id="lanes" type="range" min="1" max="12" value="7" step="1" />
+    </label>
+    <label>Velocidad ×<b id="speedV">1.0</b>
+      <input id="speed" type="range" min="0.2" max="3" value="1" step="0.1" />
+    </label>
+    <label>Fatiga (carga) <b id="rateV">1.0</b>
+      <input id="rate" type="range" min="0.3" max="2" value="1" step="0.1" />
+    </label>
+    <div class="row">
+      <button data-view="iso">ISO</button>
+      <button data-view="top">TOP</button>
+      <button data-view="front">FRONT</button>
+    </div>
+    <div class="row">
+      <button id="toggle">Pausa</button>
+      <button id="reset">Reset</button>
+    </div>
+  </div>
+
+  <!-- Three.js local (npm install three@0.158) -->
+  <script type="importmap">
+  { "imports": { "three": "../node_modules/three/build/three.module.js" } }
+  </script>
+  <script type="module">
+    import { ConveyorSim } from '../src/engine.js';
+    import { mountSim } from '../src/render.js';
+    import { buildComb } from '../src/layouts.js';
+
+    const app = document.getElementById('app');
+    let sim, api, running = true;
+    let lanes = 7, speedMul = 1, rateMul = 1;
+
+    function build() {
+      if (api) api.stop();
+      app.innerHTML = '';
+      sim = new ConveyorSim(buildComb({ lanes, rate: 600 * lanes * rateMul }), { seed: 1 });
+      api = mountSim(sim, { container: app, warmup: 8 });
+      api.setSpeed(speedMul).start();
+      running = true;
+      document.getElementById('toggle').textContent = 'Pausa';
+    }
+
+    const bind = (id, fn) => document.getElementById(id).addEventListener('input', fn);
+    bind('lanes', e => { lanes = +e.target.value; lanesV.textContent = lanes; build(); });
+    bind('speed', e => { speedMul = +e.target.value; speedV.textContent = speedMul.toFixed(1); api.setSpeed(speedMul); });
+    bind('rate', e => { rateMul = +e.target.value; rateV.textContent = rateMul.toFixed(1); build(); });
+    document.querySelectorAll('[data-view]').forEach(b =>
+      b.addEventListener('click', () => api.view(b.dataset.view)));
+    document.getElementById('toggle').addEventListener('click', () => {
+      running = !running; running ? api.start() : api.stop();
+      document.getElementById('toggle').textContent = running ? 'Pausa' : 'Reanudar';
+    });
+    document.getElementById('reset').addEventListener('click', build);
+
+    build();
+  </script>
+</body>
+</html>
