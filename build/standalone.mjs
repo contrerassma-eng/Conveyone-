@@ -25,15 +25,15 @@ function strip(src) {
     .join('\n');
 }
 
-// Import directo desde el CDN (sin importmap) -> máxima compatibilidad, también file://
-const THREE_CDN = 'https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.module.js';
+// Three.js se INCRUSTA (build global UMD vendor/three.min.js): cero dependencias de
+// red, funciona offline y desde file://. El código usa el global THREE.
 const merged = [
-  `import * as THREE from '${THREE_CDN}';`,
   strip(read('src/geometry.js')),
   strip(read('src/engine.js')),
   strip(read('src/layouts.js')),
   strip(read('src/render.js')),
 ].join('\n\n');
+const threeUMD = read('vendor/three.min.js');
 
 // En examples/index.html, reemplaza las 3 importaciones desde ../src por el código fundido.
 const html = read('examples/index.html');
@@ -47,11 +47,17 @@ if (!html.includes(importBlock)) {
   process.exit(1);
 }
 
+if (threeUMD.includes('</script>')) {
+  console.error('three.min.js contiene "</script>"; habría que escaparlo.');
+  process.exit(1);
+}
+
 const out = html
   .replace('<title>Conveyor Sim</title>', '<title>Conveyor Sim (standalone)</title>')
-  // el standalone no usa importmap (importa three por URL directa); quítalo para evitar
-  // incompatibilidades en navegadores móviles.
+  // el standalone no usa importmap ni CDN: Three.js va incrustado (global UMD).
   .replace(/\s*<!-- Three\.js desde CDN[^>]*-->\s*<script type="importmap">[\s\S]*?<\/script>/, '')
+  // incrusta Three.js (clásico, define el global THREE) antes del módulo
+  .replace('<script type="module">', `<script>\n${threeUMD}\n</script>\n  <script type="module">`)
   .replace(importBlock, merged);
 
 mkdirSync(join(root, 'dist'), { recursive: true });
