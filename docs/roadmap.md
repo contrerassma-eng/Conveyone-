@@ -14,6 +14,11 @@ simula.
 - [x] Clasificador Intralox Serie 4500 (`buildSorter4500`): 6 salidas perpendiculares
       por color, buffers de cero presión (cap. 20), línea principal (cap. 60) y
       **Virtual Pocket** con recetas (cadena / lote / FIFO / dinámicas).
+- [x] **Transporte vertical**: elevadores cíclicos de una caja (Kímarox subida/descenso)
+      con tiempo de ciclo y retorno; alturas interpoladas (`geom: 'lift'`).
+- [x] **Sistema completo** (`buildBufferedSorter`): por salida, cero presión → elevador
+      ↑ → buffer vertical de 4 niveles (15 c/u) → elevador ↓ → cero presión → Virtual
+      Pocket. Salidas regulables.
 - [x] Render 3D con HUD y vistas ISO/TOP/FRONT (`src/render.js`).
 - [x] Arnés de validación headless (`test/harness.mjs`).
 

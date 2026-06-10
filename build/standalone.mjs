@@ -40,7 +40,7 @@ const html = read('examples/index.html');
 const importBlock =
   "import { ConveyorSim } from '../src/engine.js';\n" +
   "    import { mountSim } from '../src/render.js';\n" +
-  "    import { buildComb, buildSorter4500 } from '../src/layouts.js';";
+  "    import { buildComb, buildSorter4500, buildBufferedSorter } from '../src/layouts.js';";
 
 if (!html.includes(importBlock)) {
   console.error('No se encontró el bloque de imports esperado en examples/index.html');

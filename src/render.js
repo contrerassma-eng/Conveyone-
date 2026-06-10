@@ -14,7 +14,7 @@ import * as THREE from 'three';
 const COLORS = {
   belt: 0x3a4150, source: 0x2e7d32, sink: 0x8e24aa, reject: 0xb71c1c,
   process: 0xf9a825, pull: 0x00897b, buffer: 0x4558a8, sort: 0x546e7a,
-  box: 0xc98a3b, boxHeld: 0xe53935,
+  elevator: 0x26c6da, box: 0xc98a3b, boxHeld: 0xe53935,
 };
 
 // Paleta para cajas con color (salidas por color del sorter).

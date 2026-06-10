@@ -60,14 +60,25 @@ export class ConveyorSim {
     this.segments = new Map();
     for (const s of this.model.segments) {
       const path = makePath(s.geom);
+      // alturas: planas por defecto; verticales en elevadores (geom 'lift').
+      let heightFrom = s.height != null ? s.height : 0.9;
+      let heightTo = heightFrom;
+      if (s.geom.type === 'lift') { heightFrom = s.geom.h0; heightTo = s.geom.h1; }
+      else if (Array.isArray(s.height)) { heightFrom = s.height[0]; heightTo = s.height[1]; }
+      const elevator = s.elevator || null;
       const seg = {
         id: s.id,
         raw: s,
         path,
         length: path.length,
-        height: s.height != null ? s.height : 0.9,
-        speed: s.speed != null ? s.speed : 0.5,
-        pitch: s.pitch != null ? s.pitch : 0.4,
+        height: heightFrom,
+        heightFrom, heightTo,
+        elevator,
+        speed: elevator ? path.length / (elevator.cycle || 3) : (s.speed != null ? s.speed : 0.5),
+        // un elevador admite UNA caja: pitch >= longitud impide que entre una segunda.
+        pitch: elevator ? path.length : (s.pitch != null ? s.pitch : 0.4),
+        _cooldown: elevator ? (elevator.cooldown != null ? elevator.cooldown : (elevator.cycle || 3)) : 0,
+        _cooldownUntil: 0,
         next: s.next || [],
         source: s.source || null,
         process: s.process || null,
@@ -131,6 +142,8 @@ export class ConveyorSim {
   }
 
   _hasRoomAtStart(seg) {
+    // un elevador en su tiempo de retorno (cooldown) no admite otra caja
+    if (seg.elevator && this.time < seg._cooldownUntil) return false;
     // hay hueco si la caja más atrasada del tramo está al menos a `pitch` del inicio
     let minS = Infinity;
     for (const b of this.boxes) if (b.segId === seg.id) minS = Math.min(minS, b.s);
@@ -239,6 +252,8 @@ export class ConveyorSim {
         box.s = 0;
         box._done = false;          // reinicia estado de proceso en el nuevo tramo
         box._stationIx = null;
+        // un elevador que acaba de soltar su caja entra en tiempo de retorno
+        if (seg.elevator) seg._cooldownUntil = this.time + seg._cooldown;
         if (seg.pocketBuffer && this.pocket) {
           this.pocket.consume(box.color);
           this.stats.released++;
@@ -311,7 +326,7 @@ export class ConveyorSim {
 
     // cuellos: media móvil de ocupación por tramo (cajas / capacidad teórica)
     for (const seg of this.segments.values()) {
-      const cap = Math.max(1, Math.floor(seg.length / seg.pitch));
+      const cap = Math.max(1, Math.round(seg.length / seg.pitch));
       const occ = (seg.boxes.length) / cap;
       seg._occAvg = seg._occAvg * 0.9 + occ * 0.1;
     }
@@ -325,9 +340,11 @@ export class ConveyorSim {
       if (!seg) continue;
       const p = seg.path.pointAt(b.s);
       const d = seg.path.dirAt(b.s);
+      const frac = seg.length > 0 ? b.s / seg.length : 0;
+      const y = seg.heightFrom + (seg.heightTo - seg.heightFrom) * frac;
       boxes.push({
         id: b.id,
-        x: p[0], y: seg.height, z: p[1],
+        x: p[0], y, z: p[1],
         angle: Math.atan2(d[1], d[0]),
         held: b.held > 0,
         color: b.color || (seg.color || null),
@@ -350,7 +367,7 @@ export class ConveyorSim {
     const out = [];
     for (const seg of this.segments.values()) {
       if (!seg.pocketBuffer) continue;
-      const cap = Math.max(1, Math.floor(seg.length / seg.pitch));
+      const cap = Math.max(1, Math.round(seg.length / seg.pitch));
       out.push({ id: seg.id, color: seg.color, count: seg.boxes.length, cap });
     }
     return out;
@@ -362,9 +379,10 @@ export class ConveyorSim {
       const N = Math.max(2, Math.ceil(seg.length / 0.5));
       const pts = [];
       for (let i = 0; i <= N; i++) {
-        const s = (i / N) * seg.length;
-        const p = seg.path.pointAt(s);
-        pts.push([p[0], seg.height, p[1]]);
+        const f = i / N;
+        const p = seg.path.pointAt(f * seg.length);
+        const y = seg.heightFrom + (seg.heightTo - seg.heightFrom) * f;
+        pts.push([p[0], y, p[1]]);
       }
       out.push({ id: seg.id, points: pts, kind: kindOf(seg) });
     }
@@ -421,6 +439,7 @@ function stationProcTime(st, ix, rng, process) {
 }
 
 function kindOf(seg) {
+  if (seg.elevator) return 'elevator';
   if (seg.source) return 'source';
   if (seg.reject) return 'reject';
   if (seg.sink) return 'sink';

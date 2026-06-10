@@ -68,14 +68,18 @@
     <h1>Conveyor Sim <span id="closeP" style="cursor:pointer;opacity:.7">✕</span></h1>
     <label>Layout
       <select id="layout">
-        <option value="sorter">Sorter 4500 (Virtual Pocket)</option>
+        <option value="buffered">Sistema 4500 + Kímarox + buffers</option>
+        <option value="sorter">Sorter 4500 (simple)</option>
         <option value="comb">Peine AC301</option>
       </select>
+    </label>
+    <label id="outputsWrap">Salidas: <b id="outputsV">6</b>
+      <input id="outputs" type="range" min="1" max="8" value="6" step="1" />
     </label>
     <label>Receta del Virtual Pocket
       <select id="recipe">
         <option value="chain">Cadena · 3 por color, en ciclo</option>
-        <option value="together">Todo junto · lote de 12</option>
+        <option value="together">Todo junto · un lote</option>
         <option value="fifo">FIFO · sin receta</option>
       </select>
     </label>
@@ -215,12 +219,26 @@ function locate(segs, t) {
 
 function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
 
+// ---------- Elevador (camino vertical) ----------
+// Footprint fijo en el plano (`at`), pero recorre en ALTURA de h0 a h1. La longitud
+// del camino es el recorrido vertical; la altura la interpola el motor (heightFrom/To).
+function lift(geom) {
+  const at = geom.at || [0, 0];
+  const length = Math.max(1e-6, Math.abs((geom.h1 != null ? geom.h1 : 1) - (geom.h0 != null ? geom.h0 : 0)));
+  return {
+    type: 'lift', length, h0: geom.h0, h1: geom.h1, at,
+    pointAt() { return [at[0], at[1]]; },
+    dirAt() { return [1, 0]; },
+  };
+}
+
 // Fábrica: a partir de un descriptor `geom` produce el camino compilado.
 function makePath(geom) {
   switch (geom.type) {
     case 'straight': return straight(geom);
     case 'arc': return arc(geom);
     case 'polyline': return polyline(geom);
+    case 'lift': return lift(geom);
     default: throw new Error(`geometry: tipo desconocido '${geom.type}'`);
   }
 }
@@ -289,14 +307,25 @@ class ConveyorSim {
     this.segments = new Map();
     for (const s of this.model.segments) {
       const path = makePath(s.geom);
+      // alturas: planas por defecto; verticales en elevadores (geom 'lift').
+      let heightFrom = s.height != null ? s.height : 0.9;
+      let heightTo = heightFrom;
+      if (s.geom.type === 'lift') { heightFrom = s.geom.h0; heightTo = s.geom.h1; }
+      else if (Array.isArray(s.height)) { heightFrom = s.height[0]; heightTo = s.height[1]; }
+      const elevator = s.elevator || null;
       const seg = {
         id: s.id,
         raw: s,
         path,
         length: path.length,
-        height: s.height != null ? s.height : 0.9,
-        speed: s.speed != null ? s.speed : 0.5,
-        pitch: s.pitch != null ? s.pitch : 0.4,
+        height: heightFrom,
+        heightFrom, heightTo,
+        elevator,
+        speed: elevator ? path.length / (elevator.cycle || 3) : (s.speed != null ? s.speed : 0.5),
+        // un elevador admite UNA caja: pitch >= longitud impide que entre una segunda.
+        pitch: elevator ? path.length : (s.pitch != null ? s.pitch : 0.4),
+        _cooldown: elevator ? (elevator.cooldown != null ? elevator.cooldown : (elevator.cycle || 3)) : 0,
+        _cooldownUntil: 0,
         next: s.next || [],
         source: s.source || null,
         process: s.process || null,
@@ -360,6 +389,8 @@ class ConveyorSim {
   }
 
   _hasRoomAtStart(seg) {
+    // un elevador en su tiempo de retorno (cooldown) no admite otra caja
+    if (seg.elevator && this.time < seg._cooldownUntil) return false;
     // hay hueco si la caja más atrasada del tramo está al menos a `pitch` del inicio
     let minS = Infinity;
     for (const b of this.boxes) if (b.segId === seg.id) minS = Math.min(minS, b.s);
@@ -468,6 +499,8 @@ class ConveyorSim {
         box.s = 0;
         box._done = false;          // reinicia estado de proceso en el nuevo tramo
         box._stationIx = null;
+        // un elevador que acaba de soltar su caja entra en tiempo de retorno
+        if (seg.elevator) seg._cooldownUntil = this.time + seg._cooldown;
         if (seg.pocketBuffer && this.pocket) {
           this.pocket.consume(box.color);
           this.stats.released++;
@@ -540,7 +573,7 @@ class ConveyorSim {
 
     // cuellos: media móvil de ocupación por tramo (cajas / capacidad teórica)
     for (const seg of this.segments.values()) {
-      const cap = Math.max(1, Math.floor(seg.length / seg.pitch));
+      const cap = Math.max(1, Math.round(seg.length / seg.pitch));
       const occ = (seg.boxes.length) / cap;
       seg._occAvg = seg._occAvg * 0.9 + occ * 0.1;
     }
@@ -554,9 +587,11 @@ class ConveyorSim {
       if (!seg) continue;
       const p = seg.path.pointAt(b.s);
       const d = seg.path.dirAt(b.s);
+      const frac = seg.length > 0 ? b.s / seg.length : 0;
+      const y = seg.heightFrom + (seg.heightTo - seg.heightFrom) * frac;
       boxes.push({
         id: b.id,
-        x: p[0], y: seg.height, z: p[1],
+        x: p[0], y, z: p[1],
         angle: Math.atan2(d[1], d[0]),
         held: b.held > 0,
         color: b.color || (seg.color || null),
@@ -579,7 +614,7 @@ class ConveyorSim {
     const out = [];
     for (const seg of this.segments.values()) {
       if (!seg.pocketBuffer) continue;
-      const cap = Math.max(1, Math.floor(seg.length / seg.pitch));
+      const cap = Math.max(1, Math.round(seg.length / seg.pitch));
       out.push({ id: seg.id, color: seg.color, count: seg.boxes.length, cap });
     }
     return out;
@@ -591,9 +626,10 @@ class ConveyorSim {
       const N = Math.max(2, Math.ceil(seg.length / 0.5));
       const pts = [];
       for (let i = 0; i <= N; i++) {
-        const s = (i / N) * seg.length;
-        const p = seg.path.pointAt(s);
-        pts.push([p[0], seg.height, p[1]]);
+        const f = i / N;
+        const p = seg.path.pointAt(f * seg.length);
+        const y = seg.heightFrom + (seg.heightTo - seg.heightFrom) * f;
+        pts.push([p[0], y, p[1]]);
       }
       out.push({ id: seg.id, points: pts, kind: kindOf(seg) });
     }
@@ -650,6 +686,7 @@ function stationProcTime(st, ix, rng, process) {
 }
 
 function kindOf(seg) {
+  if (seg.elevator) return 'elevator';
   if (seg.source) return 'source';
   if (seg.reject) return 'reject';
   if (seg.sink) return 'sink';
@@ -938,6 +975,116 @@ function buildSorter4500(opts = {}) {
   };
 }
 
+// ---------------- buildBufferedSorter: sistema completo con buffers verticales ----------------
+// Cadena por cada salida del clasificador 4500 (según el render real):
+//   sorter 4500 -> cero presión -> elevador Kímarox (sube) -> buffer vertical de N
+//   niveles (cero presión) -> elevador de descenso (baja) -> cero presión -> Virtual Pocket.
+// Cada salida está dedicada a un color. La cantidad de salidas es regulable.
+//
+//   outputs    número de salidas (cada una un color)          default 6
+//   levels     niveles del buffer vertical por salida          default 4
+//   perLevel   cajas por nivel (cero presión)                  default 15
+//   upCycle/downCycle/cooldown   tiempos de los elevadores (s)
+const PALETTE8 = ['red', 'blue', 'green', 'yellow', 'orange', 'purple', 'cyan', 'pink'];
+
+function buildBufferedSorter(opts = {}) {
+  const outputs = Math.max(1, Math.min(opts.outputs || 6, PALETTE8.length));
+  const colors = (opts.colors || PALETTE8).slice(0, outputs);
+  const levels = opts.levels != null ? opts.levels : 4;
+  const perLevel = opts.perLevel != null ? opts.perLevel : 15;
+  const mainCapacity = opts.mainCapacity != null ? opts.mainCapacity : 60;
+  const speed = opts.speed != null ? opts.speed : 0.6;
+  const pitch = opts.pitch != null ? opts.pitch : 0.5;
+  const upCycle = opts.upCycle != null ? opts.upCycle : 3;
+  const downCycle = opts.downCycle != null ? opts.downCycle : 3;
+  const cooldown = opts.cooldown != null ? opts.cooldown : 2;
+  const rate = opts.rate != null ? opts.rate : 600 * outputs;
+
+  const cellCap = Math.ceil(mainCapacity / Math.max(1, Math.ceil(mainCapacity / 10)));
+  const cellLen = 10 * pitch;                 // celda de la línea principal (~10 cajas)
+  const levelLen = perLevel * pitch;          // largo de cada nivel de buffer
+  const baseH = 1.2, levelStep = 0.6;         // alturas de los niveles
+  const topH = baseH + (levels - 1) * levelStep;
+  const yLevels0 = 2.8;                        // inicio de los niveles (+y)
+  const yDown = yLevels0 + levelLen + 0.6;     // elevador de descenso
+  const yZp0 = yDown + 0.6;                    // cero presión final
+  const outY = yZp0 + 3.0;                     // línea de salida (outfeed)
+
+  const segments = [];
+
+  // Alimentación con mezcla de colores (uno por salida).
+  segments.push({
+    id: 'infeed', geom: { type: 'straight', from: [0, 0], to: [cellLen, 0] },
+    height: 0.9, speed, pitch,
+    source: { rate, cv: 0.3, colors, weights: opts.weights, max: opts.max },
+    next: ['main0'],
+  });
+
+  for (let i = 0; i < outputs; i++) {
+    const x = (i + 2) * cellLen;               // x del divert (fin de la celda i)
+    const color = colors[i];
+    const contId = i < outputs - 1 ? `main${i + 1}` : 'overflow';
+    const O = `o${i}`;
+
+    // celda de la línea principal con divert por color
+    segments.push({
+      id: `main${i}`, geom: { type: 'straight', from: [(i + 1) * cellLen, 0], to: [x, 0] },
+      height: 0.9, speed, pitch,
+      sort: { by: 'color', divertColor: color, lane: `${O}_in`, cont: contId },
+      next: [`${O}_in`, contId],
+    });
+    // 1) cero presión de entrada a la salida (perpendicular, +y)
+    segments.push({
+      id: `${O}_in`, geom: { type: 'straight', from: [x, 0.6], to: [x, yLevels0 - 0.4] },
+      height: 0.9, speed, pitch, color, next: [`${O}_up`],
+    });
+    // 2) elevador Kímarox: sube (cíclico, una caja)
+    segments.push({
+      id: `${O}_up`, geom: { type: 'lift', at: [x, yLevels0 - 0.2], h0: 0.9, h1: topH },
+      elevator: { cycle: upCycle, cooldown }, color,
+      next: Array.from({ length: levels }, (_, k) => `${O}_lvl${k}`),
+    });
+    // 3) buffer vertical de N niveles (cada nivel cero presión)
+    for (let k = 0; k < levels; k++) {
+      const xk = x + k * 0.35;                 // leve stagger para distinguirlos en vista superior
+      segments.push({
+        id: `${O}_lvl${k}`, geom: { type: 'straight', from: [xk, yLevels0], to: [xk, yLevels0 + levelLen] },
+        height: baseH + k * levelStep, speed, pitch, color, next: [`${O}_down`],
+      });
+    }
+    // 4) elevador de descenso: baja (cíclico, una caja)
+    segments.push({
+      id: `${O}_down`, geom: { type: 'lift', at: [x + 0.5, yDown], h0: topH, h1: 0.9 },
+      elevator: { cycle: downCycle, cooldown }, color, next: [`${O}_zp`],
+    });
+    // 5) cero presión final, gobernado por el Virtual Pocket
+    segments.push({
+      id: `${O}_zp`, geom: { type: 'straight', from: [x + 0.5, yZp0], to: [x + 0.5, yZp0 + 2.2] },
+      height: 0.9, speed, pitch, color, pocketBuffer: true, next: ['outfeed'],
+    });
+  }
+
+  // overflow (no clasificado) y línea de salida del Virtual Pocket
+  const xEnd = (outputs + 1) * cellLen;
+  segments.push({
+    id: 'overflow', geom: { type: 'straight', from: [xEnd, 0], to: [xEnd + cellLen, 0] },
+    height: 0.9, speed, pitch, sink: true, reject: true,
+  });
+  segments.push({
+    id: 'outfeed', geom: { type: 'straight', from: [cellLen, outY], to: [xEnd + cellLen, outY] },
+    height: 0.9, speed: speed * 1.3, pitch, sink: true,
+  });
+
+  // Virtual Pocket: por defecto, cadena de 3 cajas por color en ciclo.
+  const pocket = opts.pocket || { loop: true, steps: colors.map(c => ({ color: c, qty: 3 })) };
+
+  return {
+    meta: { name: `buffered-sorter-${outputs}`, boxSize: [0.4, 0.13, 0.3], rollerDia: 0.048, family: 'Intralox-4500+Kimarox' },
+    segments,
+    pocket,
+  };
+}
+
 
 
 // render.js — Render 3D (Three.js) que SOLO dibuja lo que el motor entrega.
@@ -955,7 +1102,7 @@ function buildSorter4500(opts = {}) {
 const COLORS = {
   belt: 0x3a4150, source: 0x2e7d32, sink: 0x8e24aa, reject: 0xb71c1c,
   process: 0xf9a825, pull: 0x00897b, buffer: 0x4558a8, sort: 0x546e7a,
-  box: 0xc98a3b, boxHeld: 0xe53935,
+  elevator: 0x26c6da, box: 0xc98a3b, boxHeld: 0xe53935,
 };
 
 // Paleta para cajas con color (salidas por color del sorter).
@@ -1146,26 +1293,30 @@ function clampNum(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
 
     const app = document.getElementById('app');
     let sim, api, running = true;
-    let lanes = 7, speedMul = 1, rateMul = 1, layout = 'sorter', recipe = 'chain';
-    const SORT_COLORS = ['red', 'blue', 'green', 'yellow', 'orange', 'purple'];
+    let lanes = 7, outputs = 6, speedMul = 1, rateMul = 1, layout = 'buffered', recipe = 'chain';
+    const UI_PALETTE = ['red', 'blue', 'green', 'yellow', 'orange', 'purple', 'cyan', 'pink'];
 
-    function recipeSpec() {
-      if (recipe === 'together') return { loop: true, steps: [{ color: SORT_COLORS, qty: 12 }] };
+    function recipeSpec(colors) {
+      if (recipe === 'together') return { loop: true, steps: [{ color: colors, qty: colors.length * 2 }] };
       if (recipe === 'fifo') return { loop: true, steps: [] };
-      return { loop: true, steps: SORT_COLORS.map(c => ({ color: c, qty: 3 })) };
+      return { loop: true, steps: colors.map(c => ({ color: c, qty: 3 })) };
     }
     function build() {
       if (api) api.stop();
       app.innerHTML = '';
-      document.getElementById('lanesWrap').style.display = layout === 'comb' ? 'grid' : 'none';
-      const model = layout === 'sorter'
-        ? buildSorter4500({ rate: 3600 * rateMul, pocket: recipeSpec() })
-        : buildComb({ lanes, rate: 600 * lanes * rateMul });
+      const isComb = layout === 'comb';
+      $('lanesWrap').style.display = isComb ? 'grid' : 'none';
+      $('outputsWrap').style.display = isComb ? 'none' : 'grid';
+      const colors = UI_PALETTE.slice(0, outputs);
+      let model;
+      if (layout === 'buffered') model = buildBufferedSorter({ outputs, rate: 600 * outputs * rateMul, pocket: recipeSpec(colors) });
+      else if (layout === 'sorter') model = buildSorter4500({ rate: 3600 * rateMul, pocket: recipeSpec(['red','blue','green','yellow','orange','purple']) });
+      else model = buildComb({ lanes, rate: 600 * lanes * rateMul });
       sim = new ConveyorSim(model, { seed: 1 });
       api = mountSim(sim, { container: app, warmup: 8 });
-      api.setSpeed(speedMul).view('top').start();
+      api.setSpeed(speedMul).view(layout === 'buffered' ? 'iso' : 'top').start();
       running = true;
-      document.getElementById('toggle').textContent = 'Pausa';
+      $('toggle').textContent = 'Pausa';
     }
 
     const $ = id => document.getElementById(id);
@@ -1173,6 +1324,7 @@ function clampNum(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
     const onChange = (id, fn) => $(id).addEventListener('change', fn);
     onChange('layout', e => { layout = e.target.value; build(); });
     onChange('recipe', e => { recipe = e.target.value; build(); });
+    onInput('outputs', e => { outputs = +e.target.value; $('outputsV').textContent = outputs; build(); });
     onInput('lanes', e => { lanes = +e.target.value; $('lanesV').textContent = lanes; build(); });
     onInput('speed', e => { speedMul = +e.target.value; $('speedV').textContent = speedMul.toFixed(1); api.setSpeed(speedMul); });
     onInput('rate', e => { rateMul = +e.target.value; $('rateV').textContent = rateMul.toFixed(1); build(); });

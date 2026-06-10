@@ -120,6 +120,32 @@ hambre"): así se ve la interacción demanda vs. inventario.
 > arma un clasificador Intralox Serie 4500 con 6 salidas perpendiculares por color,
 > buffers de cero presión y Virtual Pocket.
 
+### Transporte vertical: `geom: 'lift'` + `elevator`
+
+Un tramo puede ser un **elevador** (Kímarox de subida / descenso). Su geometría es
+vertical y cambia la altura de la caja:
+
+```js
+{ id: 'up', geom: { type: 'lift', at: [x, y], h0: 0.9, h1: 3.0 },
+  elevator: { cycle: 3, cooldown: 2 }, next: ['lvl0','lvl1','lvl2','lvl3'] }
+```
+
+- `geom.lift` recorre de `h0` a `h1` en el footprint `at`; la longitud es el recorrido.
+- `elevator.cycle`   segundos en subir/bajar una caja (velocidad = recorrido/cycle).
+- `elevator.cooldown` tiempo de retorno antes de admitir la siguiente caja.
+- Capacidad **una sola caja** (es un cuello potencial, como en la realidad).
+- La altura se interpola; también puede darse `height: [h0, h1]` en tramos no-lift.
+
+### Sistema completo: `buildBufferedSorter`
+
+```js
+buildBufferedSorter({ outputs: 6, levels: 4, perLevel: 15, upCycle: 3, downCycle: 3 })
+```
+
+Arma, por cada salida (dedicada a un color): cero presión → elevador Kímarox (sube) →
+buffer vertical de `levels` niveles (cero presión, `perLevel` c/u) → elevador de
+descenso (baja) → cero presión → Virtual Pocket → salida. `outputs` es regulable.
+
 ## Ejemplo mínimo
 
 Ver el bloque `mini` en el README. Para modelos grandes, usar los generadores
