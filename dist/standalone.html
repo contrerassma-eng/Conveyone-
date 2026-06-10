@@ -1,0 +1,1184 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <meta name="theme-color" content="#0e1116" />
+  <title>Conveyor Sim (standalone)</title>
+  <style>
+    :root { --bg: #0e1116; --fg: #cdd6e0; --panel: rgba(20,26,34,.94); --line: #2a3645; }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { margin: 0; height: 100%; background: var(--bg); overflow: hidden; }
+    body { font: 13px system-ui, sans-serif; color: var(--fg); }
+    #app { position: fixed; inset: 0; }
+
+    /* botón flotante para mostrar/ocultar controles */
+    #fab {
+      position: fixed; top: env(safe-area-inset-top, 10px); right: 10px; z-index: 30;
+      width: 44px; height: 44px; border-radius: 12px; border: 1px solid var(--line);
+      background: var(--panel); color: var(--fg); font-size: 20px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+    }
+    #fab:active { background: #243044; }
+
+    /* panel: hoja inferior en móvil, tarjeta lateral en escritorio */
+    #panel {
+      position: fixed; z-index: 20; background: var(--panel);
+      border: 1px solid var(--line); display: grid; gap: 10px;
+      transition: transform .22s ease, opacity .22s ease;
+    }
+    @media (max-width: 720px) {
+      #panel {
+        left: 0; right: 0; bottom: 0; border-radius: 16px 16px 0 0;
+        padding: 14px 16px calc(16px + env(safe-area-inset-bottom, 0));
+      }
+      #panel.hidden { transform: translateY(110%); opacity: 0; pointer-events: none; }
+    }
+    @media (min-width: 721px) {
+      #panel { top: 64px; right: 10px; width: 250px; border-radius: 12px; padding: 14px; }
+      #panel.hidden { transform: translateX(120%); opacity: 0; pointer-events: none; }
+    }
+
+    #panel h1 { font-size: 14px; margin: 0; display: flex; justify-content: space-between; align-items: center; }
+    #panel label { display: grid; gap: 4px; font-size: 12px; color: #aeb9c6; }
+    #panel select, #panel input[type=range] { width: 100%; }
+    #panel select {
+      background: #121821; color: var(--fg); border: 1px solid var(--line);
+      border-radius: 8px; padding: 9px; font-size: 13px;
+    }
+    input[type=range] { height: 28px; }
+    .row { display: flex; gap: 8px; }
+    .row button {
+      flex: 1; background: #1b2330; color: var(--fg); border: 1px solid var(--line);
+      border-radius: 8px; padding: 11px 6px; cursor: pointer; font: 12px monospace;
+    }
+    .row button:active { background: #243044; }
+    /* HUD compacto en móvil */
+    @media (max-width: 720px) { #app :is(div) { font-size: 11px !important; } }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <button id="fab" title="Mostrar / ocultar controles">⚙</button>
+
+  <div id="panel">
+    <h1>Conveyor Sim <span id="closeP" style="cursor:pointer;opacity:.7">✕</span></h1>
+    <label>Layout
+      <select id="layout">
+        <option value="sorter">Sorter 4500 (Virtual Pocket)</option>
+        <option value="comb">Peine AC301</option>
+      </select>
+    </label>
+    <label>Receta del Virtual Pocket
+      <select id="recipe">
+        <option value="chain">Cadena · 3 por color, en ciclo</option>
+        <option value="together">Todo junto · lote de 12</option>
+        <option value="fifo">FIFO · sin receta</option>
+      </select>
+    </label>
+    <label>Velocidad ×<b id="speedV">1.0</b>
+      <input id="speed" type="range" min="0.2" max="3" value="1" step="0.1" />
+    </label>
+    <label>Carga ×<b id="rateV">1.0</b>
+      <input id="rate" type="range" min="0.3" max="2" value="1" step="0.1" />
+    </label>
+    <label id="lanesWrap" style="display:none">Carriles (peine): <b id="lanesV">7</b>
+      <input id="lanes" type="range" min="1" max="12" value="7" step="1" />
+    </label>
+    <div class="row">
+      <button data-view="iso">ISO</button>
+      <button data-view="top">TOP</button>
+      <button data-view="front">FRONT</button>
+    </div>
+    <div class="row">
+      <button id="toggle">Pausa</button>
+      <button id="reset">Reset</button>
+    </div>
+  </div>
+
+  <!-- Three.js desde CDN: no requiere npm install -->
+  <script type="importmap">
+  { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.module.js" } }
+  </script>
+  <script type="module">
+    import * as THREE from 'three';
+
+// geometry.js — Caminos paramétricos para los tramos del transportador.
+//
+// Cada camino expone una parametrización por longitud de arco `s` (en metros):
+//   - length        longitud total del camino
+//   - pointAt(s)    -> [x, y] posición en el plano a distancia s del inicio
+//   - dirAt(s)      -> [dx, dy] vector unitario tangente (sentido de avance)
+//
+// El motor (engine.js) trabaja SOLO en términos de `s`; nunca necesita saber si el
+// tramo es recta, arco o polilínea. El render usa pointAt/dirAt para dibujar y para
+// orientar las cajas. Esta abstracción es la que permite curvas (Hytrol y demás)
+// sin tocar la física.
+
+const TWO_PI = Math.PI * 2;
+
+function sub(a, b) { return [a[0] - b[0], a[1] - b[1]]; }
+function len2(a) { return Math.hypot(a[0], a[1]); }
+
+// ---------- Recta ----------
+function straight(geom) {
+  const from = geom.from, to = geom.to;
+  const d = sub(to, from);
+  const length = len2(d);
+  const ux = length > 0 ? d[0] / length : 1;
+  const uy = length > 0 ? d[1] / length : 0;
+  return {
+    type: 'straight',
+    length,
+    pointAt(s) {
+      const t = clamp(s, 0, length);
+      return [from[0] + ux * t, from[1] + uy * t];
+    },
+    dirAt() { return [ux, uy]; },
+  };
+}
+
+// ---------- Arco ----------
+// Gira desde a0 hasta a1 alrededor de `center` con radio `radius`. El sentido
+// (horario / antihorario) se infiere del signo de (a1 - a0).
+function arc(geom) {
+  const center = geom.center, radius = geom.radius;
+  const a0 = geom.a0, a1 = geom.a1;
+  const sweep = a1 - a0;                 // con signo
+  const length = Math.abs(sweep) * radius;
+  const sign = sweep >= 0 ? 1 : -1;
+  return {
+    type: 'arc',
+    length,
+    center, radius, a0, a1,
+    pointAt(s) {
+      const t = clamp(s, 0, length);
+      const a = a0 + sign * (t / radius);
+      return [center[0] + radius * Math.cos(a), center[1] + radius * Math.sin(a)];
+    },
+    dirAt(s) {
+      const t = clamp(s, 0, length);
+      const a = a0 + sign * (t / radius);
+      // tangente: derivada de (cos,sin) -> (-sin,cos), por el sentido
+      return [-sign * Math.sin(a), sign * Math.cos(a)];
+    },
+  };
+}
+
+// ---------- Polilínea ----------
+// Secuencia de puntos unidos por rectas. Útil para trazados libres del modelador.
+function polyline(geom) {
+  const pts = geom.points;
+  const segs = [];
+  let length = 0;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i], b = pts[i + 1];
+    const d = sub(b, a);
+    const l = len2(d);
+    if (l === 0) continue;
+    segs.push({ a, ux: d[0] / l, uy: d[1] / l, l, s0: length });
+    length += l;
+  }
+  return {
+    type: 'polyline',
+    length,
+    pointAt(s) {
+      const t = clamp(s, 0, length);
+      const seg = locate(segs, t);
+      const local = t - seg.s0;
+      return [seg.a[0] + seg.ux * local, seg.a[1] + seg.uy * local];
+    },
+    dirAt(s) {
+      const t = clamp(s, 0, length);
+      const seg = locate(segs, t);
+      return [seg.ux, seg.uy];
+    },
+  };
+}
+
+function locate(segs, t) {
+  for (let i = 0; i < segs.length; i++) {
+    if (t <= segs[i].s0 + segs[i].l) return segs[i];
+  }
+  return segs[segs.length - 1];
+}
+
+function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
+
+// Fábrica: a partir de un descriptor `geom` produce el camino compilado.
+function makePath(geom) {
+  switch (geom.type) {
+    case 'straight': return straight(geom);
+    case 'arc': return arc(geom);
+    case 'polyline': return polyline(geom);
+    default: throw new Error(`geometry: tipo desconocido '${geom.type}'`);
+  }
+}
+
+const _internals = { clamp, TWO_PI };
+
+
+// engine.js — Motor headless de simulación de transportadores.
+//
+// No dibuja nada. Calcula, paso a paso (`step(dt)`), el movimiento de las cajas
+// sobre una red de tramos. El render consume `frame()`. Toda la física vive aquí y
+// se valida con test/harness.mjs antes de cualquier trabajo visual.
+//
+// Comportamientos preservados (ver docs/principles.md):
+//   - Cero presión: una caja nunca invade el `pitch` de la de adelante.
+//   - Transferencias con hueco: solo pasa al siguiente tramo si hay espacio al inicio.
+//   - Generación realista: fuentes lognormal con tasa, dispersión (cv) y ráfagas.
+//   - Procesos con fatiga: estaciones que retienen cajas con tiempo variable.
+//   - Cuellos de botella: detección por media móvil de la ocupación.
+
+
+// --------- RNG determinista (mulberry32) ---------
+function makeRng(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// Muestra una variable lognormal con media `mean` y coef. de variación `cv`.
+function sampleLognormal(rng, mean, cv) {
+  if (!cv || cv <= 0) return mean;
+  const sigma = Math.sqrt(Math.log(1 + cv * cv));
+  const mu = Math.log(mean) - 0.5 * sigma * sigma;
+  // Box-Muller
+  const u1 = Math.max(rng(), 1e-9);
+  const u2 = rng();
+  const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+  return Math.exp(mu + sigma * z);
+}
+
+let _boxSeq = 0;
+
+class ConveyorSim {
+  constructor(model, opts = {}) {
+    this.model = model;
+    this.meta = model.meta || {};
+    this.boxSize = this.meta.boxSize || [0.4, 0.13, 0.3];
+    this.rng = makeRng(opts.seed != null ? opts.seed : 12345);
+    this.time = 0;             // segundos simulados
+    this.boxes = [];           // todas las cajas vivas
+    this.stats = {
+      generated: 0, delivered: 0, extracted: 0, rejected: 0, released: 0,
+      inSystem: 0, throughput: 0,
+    };
+    this._deliveredWindow = [];   // marcas de tiempo de entregas (para throughput)
+    // Virtual Pocket: controlador de liberación por demanda (recetas).
+    this.pocket = model.pocket ? new VirtualPocket(model.pocket) : null;
+    this._compile();
+  }
+
+  _compile() {
+    this.segments = new Map();
+    for (const s of this.model.segments) {
+      const path = makePath(s.geom);
+      const seg = {
+        id: s.id,
+        raw: s,
+        path,
+        length: path.length,
+        height: s.height != null ? s.height : 0.9,
+        speed: s.speed != null ? s.speed : 0.5,
+        pitch: s.pitch != null ? s.pitch : 0.4,
+        next: s.next || [],
+        source: s.source || null,
+        process: s.process || null,
+        sink: !!s.sink,
+        reject: !!s.reject,          // sink de rechazo/overflow (no cuenta como entrega)
+        pull: s.pull || null,
+        sort: s.sort || null,        // enrutado por atributo (clasificador / divert)
+        pocketBuffer: !!s.pocketBuffer, // buffer de cero presión gobernado por el Virtual Pocket
+        color: s.color || null,      // color asociado al tramo (salida por color)
+        // estado de fuente
+        _nextGen: 0,
+        _routeIx: 0,
+        _colorIx: 0,
+        // estado de proceso (estaciones)
+        _station: s.process ? makeStation(s.process) : null,
+        // media móvil de ocupación (cuellos)
+        _occAvg: 0,
+        boxes: [],   // cajas en este tramo, se rellena cada step (ordenadas por s desc)
+      };
+      this.segments.set(s.id, seg);
+    }
+    // primeras fuentes: programa el primer arribo
+    for (const seg of this.segments.values()) {
+      if (seg.source) seg._nextGen = this._genInterval(seg);
+    }
+  }
+
+  _genInterval(seg) {
+    // rate en cajas/hora -> intervalo medio en segundos
+    const rate = seg.source.rate || 600;
+    const meanGap = 3600 / rate;
+    const cv = seg.source.cv != null ? seg.source.cv : 0.2;
+    return sampleLognormal(this.rng, meanGap, cv);
+  }
+
+  // ---------------- paso de simulación ----------------
+  step(dt) {
+    this.time += dt;
+    this._generate(dt);
+    this._advance(dt);
+    this._transferAndSink();
+    this._updateStats(dt);
+  }
+
+  _generate(dt) {
+    for (const seg of this.segments.values()) {
+      if (!seg.source) continue;
+      const cap = seg.source.max != null ? seg.source.max : Infinity;
+      seg._nextGen -= dt;
+      let guard = 0;
+      while (seg._nextGen <= 0 && guard++ < 50) {
+        if (this.stats.inSystem < cap && this._hasRoomAtStart(seg)) {
+          this._spawn(seg);
+        }
+        // ráfaga: con prob `burst` encadena otra generación inmediata
+        const burst = seg.source.burst || 0;
+        const extra = this._genInterval(seg);
+        seg._nextGen += (burst > 0 && this.rng() < burst) ? extra * 0.15 : extra;
+      }
+    }
+  }
+
+  _hasRoomAtStart(seg) {
+    // hay hueco si la caja más atrasada del tramo está al menos a `pitch` del inicio
+    let minS = Infinity;
+    for (const b of this.boxes) if (b.segId === seg.id) minS = Math.min(minS, b.s);
+    return minS === Infinity || minS >= seg.pitch;
+  }
+
+  _spawn(seg) {
+    const box = { id: ++_boxSeq, segId: seg.id, s: 0, held: 0, bornAt: this.time };
+    const colors = seg.source && seg.source.colors;
+    if (colors && colors.length) box.color = this._pickColor(seg, colors);
+    this.boxes.push(box);
+    this.stats.generated++;
+  }
+
+  _pickColor(seg, colors) {
+    const w = seg.source.weights;
+    if (w && w.length === colors.length) {
+      const total = w.reduce((a, b) => a + b, 0);
+      let r = this.rng() * total;
+      for (let i = 0; i < colors.length; i++) { r -= w[i]; if (r <= 0) return colors[i]; }
+      return colors[colors.length - 1];
+    }
+    // sin pesos: round-robin determinista (mezcla pareja)
+    return colors[seg._colorIx++ % colors.length];
+  }
+
+  // Avance con cero-presión, resuelto tramo por tramo de adelante hacia atrás.
+  _advance(dt) {
+    // agrupa cajas por tramo y ordénalas por s descendente (frente primero)
+    for (const seg of this.segments.values()) seg.boxes.length = 0;
+    for (const b of this.boxes) {
+      const seg = this.segments.get(b.segId);
+      if (seg) seg.boxes.push(b);
+    }
+    for (const seg of this.segments.values()) {
+      seg.boxes.sort((a, b) => b.s - a.s);
+      const pitch = seg.pitch;
+      let frontLimit = Infinity; // límite que impone la caja de adelante
+      for (let i = 0; i < seg.boxes.length; i++) {
+        const box = seg.boxes[i];
+        // proceso: si la caja está retenida en una estación, no avanza
+        if (this._heldByStation(seg, box, dt)) {
+          frontLimit = box.s - pitch;
+          continue;
+        }
+        const target = Math.min(box.s + seg.speed * dt, seg.length, frontLimit - 0);
+        box.s = Math.max(box.s, Math.min(target, frontLimit));
+        if (box.s > seg.length) box.s = seg.length;
+        frontLimit = box.s - pitch; // la siguiente no puede pasar de aquí
+      }
+    }
+  }
+
+  _heldByStation(seg, box, dt) {
+    if (!seg.process || !seg._station) return false;
+    const st = seg._station;
+    const at = seg.process.at;
+    // ¿la caja llegó a la posición de trabajo y aún no fue procesada?
+    if (box._done) return false;
+    if (box.s + 1e-6 < at) return false;
+    // fija la caja en `at`
+    box.s = at;
+    // asigna a una estación libre si no tiene
+    if (box._stationIx == null) {
+      const free = st.free();
+      if (free < 0) { box.held += dt; return true; } // espera turno
+      box._stationIx = free;
+      box._procTime = stationProcTime(st, free, this.rng, seg.process);
+      box._procElapsed = 0;
+      st.busy[free] = true;
+    }
+    box._procElapsed += dt;
+    box.held += dt;
+    if (box._procElapsed >= box._procTime) {
+      st.busy[box._stationIx] = false;
+      st.completed++;
+      st.tick(dt); // avanza fatiga al completar
+      box._done = true;
+      box._stationIx = null;
+      return false;
+    }
+    return true;
+  }
+
+  _transferAndSink() {
+    for (const box of this.boxes) {
+      const seg = this.segments.get(box.segId);
+      if (!seg) continue;
+      if (box.s < seg.length - 1e-6) continue; // aún no llega al final
+
+      // punto de extracción (pull): retira con probabilidad/condición
+      if (seg.pull && this._shouldPull(seg, box)) {
+        box._remove = true; box._extracted = true; continue;
+      }
+      if (seg.sink) { box._remove = true; box._delivered = true; box._reject = seg.reject; continue; }
+
+      // Virtual Pocket: una caja en un buffer solo se libera si el controlador la
+      // demanda ahora (receta). Si no, espera (acumulación de cero presión).
+      if (seg.pocketBuffer && this.pocket && !this.pocket.wants(box.color)) continue;
+
+      const nextId = this._pickNext(seg, box);
+      if (!nextId) { box._remove = true; box._delivered = true; continue; }
+      const nseg = this.segments.get(nextId);
+      if (nseg && this._hasRoomAtStart(nseg)) {
+        box.segId = nextId;
+        box.s = 0;
+        box._done = false;          // reinicia estado de proceso en el nuevo tramo
+        box._stationIx = null;
+        if (seg.pocketBuffer && this.pocket) {
+          this.pocket.consume(box.color);
+          this.stats.released++;
+        }
+      }
+      // si no hay hueco, la caja espera en el final (acumulación / cero presión)
+    }
+    // limpia removidas y contabiliza
+    if (this.boxes.some(b => b._remove)) {
+      const kept = [];
+      for (const b of this.boxes) {
+        if (b._remove) {
+          if (b._delivered) {
+            if (b._reject) this.stats.rejected++;
+            else { this.stats.delivered++; this._deliveredWindow.push(this.time); }
+          }
+          if (b._extracted) this.stats.extracted++;
+        } else kept.push(b);
+      }
+      this.boxes = kept;
+    }
+  }
+
+  _pickNext(seg, box) {
+    // Clasificación (sorter / divert): si la caja es del color de esta celda y el
+    // carril destino tiene hueco, deriva; si no, continúa por la línea principal.
+    if (seg.sort && box) {
+      const matches = box.color != null && box.color === seg.sort.divertColor;
+      if (matches) {
+        const lane = this.segments.get(seg.sort.lane);
+        if (lane && this._hasRoomAtStart(lane)) return seg.sort.lane;
+        // carril lleno: la caja sigue (recirculación / overflow)
+      }
+      return seg.sort.cont;
+    }
+    if (!seg.next || seg.next.length === 0) return null;
+    if (seg.next.length === 1) return seg.next[0];
+    // enrutado round-robin balanceado por hueco disponible
+    const n = seg.next.length;
+    for (let k = 0; k < n; k++) {
+      const ix = (seg._routeIx + k) % n;
+      const cand = this.segments.get(seg.next[ix]);
+      if (cand && this._hasRoomAtStart(cand)) {
+        seg._routeIx = (ix + 1) % n;
+        return seg.next[ix];
+      }
+    }
+    return seg.next[seg._routeIx % n];
+  }
+
+  _shouldPull(seg, box) {
+    const p = seg.pull;
+    if (typeof p.every === 'number' && p.every > 0) {
+      seg._pullCount = (seg._pullCount || 0) + 1;
+      return seg._pullCount % p.every === 0;
+    }
+    if (typeof p.rate === 'number') return this.rng() < p.rate;
+    return false;
+  }
+
+  _updateStats(dt) {
+    this.stats.inSystem = this.boxes.length;
+    // throughput: entregas en los últimos 60 s -> por hora
+    const cutoff = this.time - 60;
+    while (this._deliveredWindow.length && this._deliveredWindow[0] < cutoff) {
+      this._deliveredWindow.shift();
+    }
+    const span = Math.min(this.time, 60) || 1;
+    this.stats.throughput = (this._deliveredWindow.length / span) * 3600;
+
+    // cuellos: media móvil de ocupación por tramo (cajas / capacidad teórica)
+    for (const seg of this.segments.values()) {
+      const cap = Math.max(1, Math.floor(seg.length / seg.pitch));
+      const occ = (seg.boxes.length) / cap;
+      seg._occAvg = seg._occAvg * 0.9 + occ * 0.1;
+    }
+  }
+
+  // ---------------- lectura para el render / HUD ----------------
+  frame() {
+    const boxes = [];
+    for (const b of this.boxes) {
+      const seg = this.segments.get(b.segId);
+      if (!seg) continue;
+      const p = seg.path.pointAt(b.s);
+      const d = seg.path.dirAt(b.s);
+      boxes.push({
+        id: b.id,
+        x: p[0], y: seg.height, z: p[1],
+        angle: Math.atan2(d[1], d[0]),
+        held: b.held > 0,
+        color: b.color || (seg.color || null),
+      });
+    }
+    return {
+      time: this.time,
+      boxes,
+      segments: this._segmentGeometry(),
+      stats: { ...this.stats },
+      bottlenecks: this.bottlenecks(),
+      boxSize: this.boxSize,
+      pocket: this.pocket ? this.pocket.status() : null,
+      buffers: this._bufferLevels(),
+    };
+  }
+
+  // Nivel de cada buffer del Virtual Pocket (para HUD: ocupación vs capacidad).
+  _bufferLevels() {
+    const out = [];
+    for (const seg of this.segments.values()) {
+      if (!seg.pocketBuffer) continue;
+      const cap = Math.max(1, Math.floor(seg.length / seg.pitch));
+      out.push({ id: seg.id, color: seg.color, count: seg.boxes.length, cap });
+    }
+    return out;
+  }
+
+  _segmentGeometry() {
+    const out = [];
+    for (const seg of this.segments.values()) {
+      const N = Math.max(2, Math.ceil(seg.length / 0.5));
+      const pts = [];
+      for (let i = 0; i <= N; i++) {
+        const s = (i / N) * seg.length;
+        const p = seg.path.pointAt(s);
+        pts.push([p[0], seg.height, p[1]]);
+      }
+      out.push({ id: seg.id, points: pts, kind: kindOf(seg) });
+    }
+    return out;
+  }
+
+  // Detección de cuellos: tramos con ocupación media alta y sostenida.
+  bottlenecks(threshold = 0.7) {
+    const list = [];
+    for (const seg of this.segments.values()) {
+      if (seg._occAvg >= threshold) {
+        // ¿el límite está aguas abajo (evacuación) o arriba (alimentación)?
+        const downstreamFull = seg.next.some(id => {
+          const n = this.segments.get(id);
+          return n && n._occAvg >= threshold;
+        });
+        list.push({ id: seg.id, occupancy: seg._occAvg, cause: downstreamFull ? 'evacuation' : 'feed' });
+      }
+    }
+    return list;
+  }
+
+  // Conveniencia: corre N segundos a paso fijo (para warmup/headless).
+  run(seconds, dt = 1 / 30) {
+    const steps = Math.round(seconds / dt);
+    for (let i = 0; i < steps; i++) this.step(dt);
+    return this;
+  }
+}
+
+// ---------------- Estaciones con fatiga ----------------
+function makeStation(process) {
+  const operators = process.operators || 1;
+  return {
+    operators,
+    busy: new Array(operators).fill(false),
+    completed: 0,
+    fatigue: 0,        // 0..1, sube con el trabajo, baja en pausas
+    free() { return this.busy.findIndex(b => !b); },
+    tick(dt) {
+      // cada completado añade fatiga; se recupera lentamente
+      this.fatigue = Math.min(1, this.fatigue + 0.004);
+    },
+    rest(dt) { this.fatigue = Math.max(0, this.fatigue - 0.02 * dt); },
+  };
+}
+
+function stationProcTime(st, ix, rng, process) {
+  const base = process.time || 2.0;
+  const cv = process.cv != null ? process.cv : 0.25;
+  // la fatiga estira el tiempo hasta +40%
+  const fatigueFactor = 1 + 0.4 * st.fatigue;
+  return sampleLognormal(rng, base * fatigueFactor, cv);
+}
+
+function kindOf(seg) {
+  if (seg.source) return 'source';
+  if (seg.reject) return 'reject';
+  if (seg.sink) return 'sink';
+  if (seg.process) return 'process';
+  if (seg.pull) return 'pull';
+  if (seg.pocketBuffer) return 'buffer';
+  if (seg.sort) return 'sort';
+  return 'belt';
+}
+
+// ---------------- Virtual Pocket ----------------
+// Controlador de liberación por DEMANDA. Decide, en cada momento, qué color quiere
+// dejar salir de los buffers de cero presión. Una "receta" es una lista de pasos:
+//
+//   { loop: true, steps: [ { color: 'red', qty: 3 }, { color: ['blue','green'], qty: 6 } ] }
+//
+//   - color string  -> cadena: libera `qty` cajas de ese color, en orden.
+//   - color array   -> lote "todo junto": libera `qty` cajas de cualquiera de esos
+//                      colores (lo que haya disponible).
+//   - loop          -> al terminar la receta, vuelve a empezar (demanda continua).
+//
+// Si el color demandado no está disponible en su buffer, el pocket espera (la línea
+// de salida se "muere de hambre"): así se ve la interacción demanda vs. inventario.
+class VirtualPocket {
+  constructor(spec = {}) {
+    this.steps = spec.steps || [];
+    this.loop = spec.loop !== false;
+    this.ix = 0;
+    this.remaining = this.steps.length ? this.steps[0].qty : 0;
+    this.released = 0;
+    this.byColor = {};
+    this.done = false;
+  }
+
+  _currentColors() {
+    if (!this.steps.length || this.done) return null; // sin receta -> FIFO (libera todo)
+    const c = this.steps[this.ix].color;
+    return Array.isArray(c) ? c : [c];
+  }
+
+  // ¿El pocket quiere dejar salir una caja de este color ahora mismo?
+  wants(color) {
+    const cs = this._currentColors();
+    if (!cs) return true;                 // sin receta: libera lo que llegue
+    return cs.includes(color) && this.remaining > 0;
+  }
+
+  // Registra una liberación efectiva y avanza la receta.
+  consume(color) {
+    this.released++;
+    this.byColor[color] = (this.byColor[color] || 0) + 1;
+    if (!this.steps.length || this.done) return;
+    this.remaining--;
+    if (this.remaining <= 0) {
+      this.ix++;
+      if (this.ix >= this.steps.length) {
+        if (this.loop) this.ix = 0;
+        else { this.done = true; return; }
+      }
+      this.remaining = this.steps[this.ix].qty;
+    }
+  }
+
+  status() {
+    return {
+      demand: this._currentColors(),
+      remaining: this.remaining,
+      step: this.ix,
+      released: this.released,
+      byColor: { ...this.byColor },
+      done: this.done,
+    };
+  }
+
+  // Cambia la receta en caliente (recetas dinámicas).
+  setRecipe(spec = {}) {
+    this.steps = spec.steps || [];
+    this.loop = spec.loop !== false;
+    this.ix = 0;
+    this.remaining = this.steps.length ? this.steps[0].qty : 0;
+    this.done = false;
+  }
+}
+
+
+
+// layouts.js — Generadores PARAMÉTRICOS de modelos y biblioteca de componentes.
+//
+// Esta es la "semilla del modelador": funciones que reciben parámetros y devuelven
+// un modelo `{ meta, segments }` listo para el motor. El modelador online hará
+// exactamente esto: traducir lo que el usuario dibuja (entradas, salidas, curvas,
+// desviadores) a un modelo como los de aquí.
+//
+// La biblioteca de componentes (COMPONENTS) está pensada para crecer con el catálogo
+// Hytrol y otros: cada componente expone parámetros físicos configurables
+//   - width      ancho del transportador (m)
+//   - pitch      paso mínimo entre cajas / cero presión (m)
+//   - rollerDia  diámetro de rodillo (m)  [metadato físico, afecta velocidad mínima]
+//   - speed      velocidad de banda (m/s)
+// y produce uno o varios `segments`.
+
+// ---------------- Biblioteca de componentes ----------------
+// Cada generador devuelve { segments, exits } donde `exits` son los ids de salida
+// para encadenar componentes entre sí.
+
+const COMPONENTS = {
+  // Tramo recto (Hytrol TA/ABEZ etc.): banda/rodillos en línea.
+  straight({ id, from, to, height = 0.9, speed = 0.5, pitch = 0.4, rollerDia = 0.048 }) {
+    return {
+      meta: { rollerDia },
+      segments: [{ id, geom: { type: 'straight', from, to }, height, speed, pitch }],
+      exits: [id],
+    };
+  },
+
+  // Curva (Hytrol 190-NSPEZ / curva de banda): arco de `angle` grados.
+  // `center` y `radius` definen la curva; el ancho informa el radio interior real.
+  curve({ id, center, radius, a0, angleDeg = 90, dir = 'ccw', height = 0.9,
+          speed = 0.5, pitch = 0.4, width = 0.6, rollerDia = 0.048 }) {
+    const sweep = (Math.PI / 180) * angleDeg * (dir === 'ccw' ? 1 : -1);
+    return {
+      meta: { width, rollerDia, family: 'curve' },
+      segments: [{
+        id, geom: { type: 'arc', center, radius, a0, a1: a0 + sweep },
+        height, speed, pitch,
+      }],
+      exits: [id],
+    };
+  },
+
+  // Desviador / clasificador (Hytrol divert): un tramo de entrada con dos salidas.
+  // El motor enruta balanceando por hueco (round-robin). `branches` son los ids
+  // de los tramos a los que apunta.
+  diverter({ id, from, to, branches, height = 0.9, speed = 0.5, pitch = 0.4,
+             width = 0.6, rollerDia = 0.048 }) {
+    return {
+      meta: { width, rollerDia, family: 'diverter' },
+      segments: [{ id, geom: { type: 'straight', from, to }, height, speed, pitch, next: branches }],
+      exits: branches,
+    };
+  },
+};
+
+// ---------------- buildDemo: layout mínimo navegable ----------------
+// recta de entrada -> curva 90° -> estación de trabajo -> salida.
+function buildDemo(opts = {}) {
+  const speed = opts.speed != null ? opts.speed : 0.5;
+  const pitch = opts.pitch != null ? opts.pitch : 0.45;
+  const rate = opts.rate != null ? opts.rate : 1500;
+  return {
+    meta: { name: 'demo', boxSize: [0.4, 0.13, 0.3], rollerDia: 0.048 },
+    segments: [
+      { id: 'in', geom: { type: 'straight', from: [0, 0], to: [6, 0] }, height: 0.9,
+        speed, pitch, source: { rate, cv: 0.25, burst: 0.1 }, next: ['curve'] },
+      { id: 'curve', geom: { type: 'arc', center: [6, 2], radius: 2, a0: -Math.PI / 2, a1: 0 },
+        height: 0.9, speed, pitch, next: ['work'] },
+      { id: 'work', geom: { type: 'straight', from: [8, 2], to: [14, 2] }, height: 0.9,
+        speed: speed * 0.9, pitch, process: { at: 3, time: 2.0, operators: 2, cv: 0.3 }, next: ['out'] },
+      { id: 'out', geom: { type: 'straight', from: [14, 2], to: [20, 2] }, height: 0.9,
+        speed: speed * 1.2, pitch, sink: true },
+    ],
+  };
+}
+
+// ---------------- buildComb: fila tipo "peine" (AC301) ----------------
+// Un transportador principal del que cuelgan `lanes` carriles de trabajo en paralelo,
+// cada uno con su estación, que vuelven a una línea de evacuación. Demuestra cómo
+// un parámetro (`lanes`) arma un modelo grande.
+function buildComb(opts = {}) {
+  const lanes = opts.lanes != null ? opts.lanes : 7;
+  const speed = opts.speed != null ? opts.speed : 0.5;
+  const pitch = opts.pitch != null ? opts.pitch : 0.45;
+  const rate = opts.rate != null ? opts.rate : 600 * lanes;
+  const laneGap = 2.0;          // separación entre carriles (m)
+  const mainLen = lanes * laneGap + 2;
+
+  const segments = [];
+  // espina dorsal de alimentación
+  segments.push({
+    id: 'feed', geom: { type: 'straight', from: [0, 0], to: [mainLen, 0] }, height: 0.9,
+    speed, pitch, source: { rate, cv: 0.3, burst: 0.15, max: opts.max },
+    next: Array.from({ length: lanes }, (_, i) => `lane${i}_in`),
+  });
+  // evacuación
+  segments.push({
+    id: 'evac', geom: { type: 'straight', from: [0, 6], to: [mainLen, 6] }, height: 0.9,
+    speed: speed * 1.3, pitch, sink: true,
+  });
+  // carriles
+  for (let i = 0; i < lanes; i++) {
+    const x = 1 + i * laneGap;
+    segments.push({
+      id: `lane${i}_in`, geom: { type: 'straight', from: [x, 0], to: [x, 2.5] }, height: 0.9,
+      speed, pitch, next: [`lane${i}_work`],
+    });
+    segments.push({
+      id: `lane${i}_work`, geom: { type: 'straight', from: [x, 2.5], to: [x, 4] }, height: 0.9,
+      speed: speed * 0.85, pitch,
+      process: { at: 0.7, time: 2.5, operators: 1, cv: 0.35 }, next: [`lane${i}_out`],
+    });
+    segments.push({
+      id: `lane${i}_out`, geom: { type: 'straight', from: [x, 4], to: [x, 6] }, height: 0.9,
+      speed, pitch, next: ['evac'],
+    });
+  }
+  return { meta: { name: `comb-${lanes}`, boxSize: [0.4, 0.13, 0.3], rollerDia: 0.048 }, segments };
+}
+
+// ---------------- buildSorter4500: clasificador Intralox Serie 4500 ----------------
+// Línea principal de clasificación (ARB / sorter) con salidas PERPENDICULARES por
+// color. Cada salida acumula un buffer de cero presión, y un Virtual Pocket libera
+// las cajas a una línea de salida en función de la demanda (receta).
+//
+// Parámetros físicos configurables:
+//   colors          paleta (cada salida = un color)               default 6 colores
+//   mainCapacity    capacidad de la línea principal (cajas)        default 60
+//   bufferCapacity  capacidad de cada buffer de cero presión       default 20
+//   speed, pitch, rollerDia, width
+//   pocket          receta del Virtual Pocket (ver VirtualPocket)
+function buildSorter4500(opts = {}) {
+  const colors = opts.colors || ['red', 'blue', 'green', 'yellow', 'orange', 'purple'];
+  const outputs = opts.outputs || colors.length;
+  const mainCapacity = opts.mainCapacity != null ? opts.mainCapacity : 60;
+  const bufferCapacity = opts.bufferCapacity != null ? opts.bufferCapacity : 20;
+  const speed = opts.speed != null ? opts.speed : 0.6;
+  const pitch = opts.pitch != null ? opts.pitch : 0.5;
+  const rollerDia = opts.rollerDia != null ? opts.rollerDia : 0.048;
+  const width = opts.width != null ? opts.width : 0.6;
+  const rate = opts.rate != null ? opts.rate : 3600;
+
+  const cellCap = Math.ceil(mainCapacity / outputs);  // cajas por celda de la línea
+  const cellLen = cellCap * pitch;                     // largo de cada celda (m)
+  const bufLen = bufferCapacity * pitch;               // largo de cada buffer (m)
+  const outY = 0.6 + bufLen + 1.5;                     // y de la línea de salida
+
+  const segments = [];
+
+  // Alimentación: genera cajas con mezcla de colores.
+  segments.push({
+    id: 'infeed', geom: { type: 'straight', from: [0, 0], to: [cellLen, 0] },
+    height: 0.9, speed, pitch,
+    source: { rate, cv: 0.3, colors, weights: opts.weights, max: opts.max },
+    next: ['main0'],
+  });
+
+  // Celdas de la línea principal: cada una deriva su color a un carril perpendicular.
+  for (let i = 0; i < outputs; i++) {
+    const x0 = (i + 1) * cellLen;
+    const x1 = (i + 2) * cellLen;
+    const color = colors[i];
+    const laneId = `lane_${color}`;
+    const contId = i < outputs - 1 ? `main${i + 1}` : 'overflow';
+    segments.push({
+      id: `main${i}`, geom: { type: 'straight', from: [x0, 0], to: [x1, 0] },
+      height: 0.9, speed, pitch,
+      sort: { by: 'color', divertColor: color, lane: laneId, cont: contId },
+      next: [laneId, contId],
+    });
+    // Carril/buffer perpendicular (+y), cero presión, gobernado por el Virtual Pocket.
+    segments.push({
+      id: laneId, geom: { type: 'straight', from: [x1, 0.6], to: [x1, 0.6 + bufLen] },
+      height: 0.9, speed, pitch, color, pocketBuffer: true, next: ['outfeed'],
+    });
+  }
+
+  // Overflow: cajas no clasificadas (buffer lleno) -> rechazo.
+  const xEnd = (outputs + 1) * cellLen;
+  segments.push({
+    id: 'overflow', geom: { type: 'straight', from: [xEnd, 0], to: [xEnd + cellLen, 0] },
+    height: 0.9, speed, pitch, sink: true, reject: true,
+  });
+
+  // Línea de salida del Virtual Pocket: recibe el flujo ordenado por la receta.
+  segments.push({
+    id: 'outfeed', geom: { type: 'straight', from: [cellLen, outY], to: [xEnd + cellLen, outY] },
+    height: 0.9, speed: speed * 1.3, pitch, sink: true,
+  });
+
+  // Receta por defecto: cadena de 3 cajas por color, en ciclo.
+  const pocket = opts.pocket || { loop: true, steps: colors.map(c => ({ color: c, qty: 3 })) };
+
+  return {
+    meta: { name: 'sorter4500', boxSize: [0.4, 0.13, 0.3], rollerDia, width, family: 'Intralox-4500' },
+    segments,
+    pocket,
+  };
+}
+
+
+
+// render.js — Render 3D (Three.js) que SOLO dibuja lo que el motor entrega.
+//
+// El render no contiene física: en cada cuadro lee `sim.frame()` y actualiza la
+// escena. Toda la lógica vive en engine.js. Esto permite reutilizar el mismo render
+// en cualquier layout y cambiar el motor sin tocar el dibujo (y viceversa).
+//
+//   import { ConveyorSim } from './src/engine.js';
+//   import { mountSim }   from './src/render.js';
+//   const sim = new ConveyorSim(model);
+//   mountSim(sim, { container: document.body }).start();
+
+
+const COLORS = {
+  belt: 0x3a4150, source: 0x2e7d32, sink: 0x8e24aa, reject: 0xb71c1c,
+  process: 0xf9a825, pull: 0x00897b, buffer: 0x4558a8, sort: 0x546e7a,
+  box: 0xc98a3b, boxHeld: 0xe53935,
+};
+
+// Paleta para cajas con color (salidas por color del sorter).
+const PALETTE = {
+  red: 0xe53935, blue: 0x1e88e5, green: 0x43a047, yellow: 0xfdd835,
+  orange: 0xfb8c00, purple: 0x8e24aa, cyan: 0x00acc1, pink: 0xd81b60,
+};
+function boxColor(b) {
+  if (b.held) return COLORS.boxHeld;
+  if (b.color && PALETTE[b.color] != null) return PALETTE[b.color];
+  return COLORS.box;
+}
+
+function mountSim(sim, opts = {}) {
+  const container = opts.container || document.body;
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(container.clientWidth || window.innerWidth, container.clientHeight || window.innerHeight);
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  container.appendChild(renderer.domElement);
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0e1116);
+
+  const camera = new THREE.PerspectiveCamera(55, renderer.domElement.width / renderer.domElement.height, 0.1, 500);
+  scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+  const sun = new THREE.DirectionalLight(0xffffff, 0.8);
+  sun.position.set(10, 20, 10);
+  scene.add(sun);
+  scene.add(new THREE.GridHelper(60, 60, 0x223044, 0x182230));
+
+  // --- tramos (líneas) ---
+  const segGroup = new THREE.Group();
+  scene.add(segGroup);
+  const frame0 = sim.frame();
+  const center = sceneCenter(frame0.segments);
+  for (const seg of frame0.segments) {
+    const pts = seg.points.map(p => new THREE.Vector3(p[0], p[1], p[2]));
+    const geom = new THREE.BufferGeometry().setFromPoints(pts);
+    const mat = new THREE.LineBasicMaterial({ color: COLORS[seg.kind] || COLORS.belt });
+    segGroup.add(new THREE.Line(geom, mat));
+  }
+
+  // --- cajas (instancias) ---
+  const [bw, bh, bd] = frame0.boxSize;
+  const boxGeom = new THREE.BoxGeometry(bw, bh, bd);
+  const boxMat = new THREE.MeshLambertMaterial({ color: COLORS.box });
+  const heldMat = new THREE.MeshLambertMaterial({ color: COLORS.boxHeld });
+  const MAX = 4000;
+  const mesh = new THREE.InstancedMesh(boxGeom, boxMat, MAX);
+  mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  scene.add(mesh);
+  const dummy = new THREE.Object3D();
+
+  // --- cámara / navegación (órbita táctil: arrastrar = rotar, pellizcar/rueda = zoom) ---
+  const extent = sceneExtent(frame0.segments);
+  const target = new THREE.Vector3(center.x, 0, center.z);
+  const orbit = { radius: extent * 1.4, theta: Math.PI / 4, phi: Math.PI / 3.2 };
+  const PHI_MIN = 0.15, PHI_MAX = Math.PI / 2 - 0.02;
+
+  function updateCamera() {
+    const r = orbit.radius, t = orbit.theta, p = orbit.phi;
+    camera.position.set(
+      target.x + r * Math.sin(p) * Math.sin(t),
+      target.y + r * Math.cos(p),
+      target.z + r * Math.sin(p) * Math.cos(t),
+    );
+    camera.lookAt(target);
+  }
+  const views = {
+    iso: () => { orbit.theta = Math.PI / 4; orbit.phi = Math.PI / 3.2; orbit.radius = extent * 1.4; updateCamera(); },
+    top: () => { orbit.phi = PHI_MIN; orbit.radius = extent * 1.5; updateCamera(); },
+    front: () => { orbit.theta = 0; orbit.phi = Math.PI / 2.1; orbit.radius = extent * 1.5; updateCamera(); },
+  };
+  views.iso();
+
+  // gestos: 1 dedo/ratón = rotar; 2 dedos = pellizco para zoom; rueda = zoom.
+  const el = renderer.domElement;
+  el.style.touchAction = 'none';
+  const ptrs = new Map();
+  let pinch0 = 0;
+  el.addEventListener('pointerdown', e => { el.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY }); });
+  el.addEventListener('pointermove', e => {
+    const prev = ptrs.get(e.pointerId); if (!prev) return;
+    if (ptrs.size >= 2) {
+      ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      const pts = [...ptrs.values()];
+      const d = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+      if (pinch0) orbit.radius = clampNum(orbit.radius * (pinch0 / d), extent * 0.4, extent * 4);
+      pinch0 = d;
+    } else {
+      orbit.theta -= (e.clientX - prev.x) * 0.006;
+      orbit.phi = clampNum(orbit.phi - (e.clientY - prev.y) * 0.006, PHI_MIN, PHI_MAX);
+      ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    }
+    updateCamera();
+  });
+  const endPtr = e => { ptrs.delete(e.pointerId); if (ptrs.size < 2) pinch0 = 0; };
+  el.addEventListener('pointerup', endPtr);
+  el.addEventListener('pointercancel', endPtr);
+  el.addEventListener('wheel', e => { e.preventDefault(); orbit.radius = clampNum(orbit.radius * (1 + Math.sign(e.deltaY) * 0.1), extent * 0.4, extent * 4); updateCamera(); }, { passive: false });
+
+  // --- HUD ---
+  const hud = document.createElement('div');
+  Object.assign(hud.style, {
+    position: 'absolute', top: '8px', left: '8px', font: '12px monospace',
+    color: '#cdd6e0', background: 'rgba(14,17,22,.7)', padding: '8px 10px',
+    borderRadius: '6px', whiteSpace: 'pre', pointerEvents: 'none',
+  });
+  container.appendChild(hud);
+
+  let running = false, raf = 0, last = 0, speedMul = 1;
+
+  function tick(now) {
+    raf = requestAnimationFrame(tick);
+    const dt = Math.min(0.05, (now - last) / 1000 || 0); last = now;
+    if (running) sim.step(dt * speedMul);
+    draw();
+  }
+
+  function draw() {
+    const f = sim.frame();
+    const n = Math.min(f.boxes.length, MAX);
+    for (let i = 0; i < n; i++) {
+      const b = f.boxes[i];
+      dummy.position.set(b.x, b.y, b.z);
+      dummy.rotation.set(0, -b.angle, 0);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(i, dummy.matrix);
+      mesh.setColorAt && mesh.setColorAt(i, new THREE.Color(boxColor(b)));
+    }
+    mesh.count = n;
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    const s = f.stats;
+    let txt =
+      `t=${f.time.toFixed(1)}s\n` +
+      `generadas ${s.generated}  liberadas ${s.released || 0}  rechazo ${s.rejected || 0}\n` +
+      `en sistema ${s.inSystem}  throughput ${Math.round(s.throughput)}/h\n`;
+    if (f.buffers && f.buffers.length) {
+      txt += `buffers: ${f.buffers.map(b => `${b.color} ${b.count}/${b.cap}`).join('  ')}\n`;
+    }
+    if (f.pocket) {
+      txt += `virtual pocket -> demanda: ${(f.pocket.demand || ['FIFO']).join('+')} (x${f.pocket.remaining})\n`;
+    }
+    txt += `cuellos: ${f.bottlenecks.map(b => `${b.id}(${b.cause})`).join(', ') || '—'}`;
+    hud.textContent = txt;
+    renderer.render(scene, camera);
+  }
+
+  addEventListener('resize', () => {
+    const w = container.clientWidth || innerWidth, h = container.clientHeight || innerHeight;
+    renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix();
+  });
+
+  const api = {
+    start() { if (!running) { running = true; last = performance.now(); } if (!raf) raf = requestAnimationFrame(tick); return api; },
+    stop() { running = false; return api; },
+    setSpeed(m) { speedMul = m; return api; },
+    view(name) { (views[name] || views.iso)(); return api; },
+    sim, scene, camera, renderer,
+  };
+  // warmup: corre headless unos segundos para abrir ya con cajas en movimiento
+  if (opts.warmup !== false) sim.run(opts.warmup || 8);
+  raf = requestAnimationFrame(tick);
+  return api;
+}
+
+function sceneCenter(segments) {
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  for (const seg of segments) for (const p of seg.points) {
+    minX = Math.min(minX, p[0]); maxX = Math.max(maxX, p[0]);
+    minZ = Math.min(minZ, p[2]); maxZ = Math.max(maxZ, p[2]);
+  }
+  return { x: (minX + maxX) / 2, z: (minZ + maxZ) / 2 };
+}
+
+function sceneExtent(segments) {
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  for (const seg of segments) for (const p of seg.points) {
+    minX = Math.min(minX, p[0]); maxX = Math.max(maxX, p[0]);
+    minZ = Math.min(minZ, p[2]); maxZ = Math.max(maxZ, p[2]);
+  }
+  return Math.max(8, Math.hypot(maxX - minX, maxZ - minZ));
+}
+
+function clampNum(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
+
+
+    const app = document.getElementById('app');
+    let sim, api, running = true;
+    let lanes = 7, speedMul = 1, rateMul = 1, layout = 'sorter', recipe = 'chain';
+    const SORT_COLORS = ['red', 'blue', 'green', 'yellow', 'orange', 'purple'];
+
+    function recipeSpec() {
+      if (recipe === 'together') return { loop: true, steps: [{ color: SORT_COLORS, qty: 12 }] };
+      if (recipe === 'fifo') return { loop: true, steps: [] };
+      return { loop: true, steps: SORT_COLORS.map(c => ({ color: c, qty: 3 })) };
+    }
+    function build() {
+      if (api) api.stop();
+      app.innerHTML = '';
+      document.getElementById('lanesWrap').style.display = layout === 'comb' ? 'grid' : 'none';
+      const model = layout === 'sorter'
+        ? buildSorter4500({ rate: 3600 * rateMul, pocket: recipeSpec() })
+        : buildComb({ lanes, rate: 600 * lanes * rateMul });
+      sim = new ConveyorSim(model, { seed: 1 });
+      api = mountSim(sim, { container: app, warmup: 8 });
+      api.setSpeed(speedMul).view('top').start();
+      running = true;
+      document.getElementById('toggle').textContent = 'Pausa';
+    }
+
+    const $ = id => document.getElementById(id);
+    const onInput = (id, fn) => $(id).addEventListener('input', fn);
+    const onChange = (id, fn) => $(id).addEventListener('change', fn);
+    onChange('layout', e => { layout = e.target.value; build(); });
+    onChange('recipe', e => { recipe = e.target.value; build(); });
+    onInput('lanes', e => { lanes = +e.target.value; $('lanesV').textContent = lanes; build(); });
+    onInput('speed', e => { speedMul = +e.target.value; $('speedV').textContent = speedMul.toFixed(1); api.setSpeed(speedMul); });
+    onInput('rate', e => { rateMul = +e.target.value; $('rateV').textContent = rateMul.toFixed(1); build(); });
+    document.querySelectorAll('[data-view]').forEach(b => b.addEventListener('click', () => api.view(b.dataset.view)));
+    $('toggle').addEventListener('click', () => {
+      running = !running; running ? api.start() : api.stop();
+      $('toggle').textContent = running ? 'Pausa' : 'Reanudar';
+    });
+    $('reset').addEventListener('click', build);
+
+    // mostrar / ocultar controles
+    const panel = $('panel');
+    $('fab').addEventListener('click', () => panel.classList.toggle('hidden'));
+    $('closeP').addEventListener('click', () => panel.classList.add('hidden'));
+
+    build();
+  </script>
+</body>
+</html>

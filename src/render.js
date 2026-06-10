@@ -68,17 +68,53 @@ export function mountSim(sim, opts = {}) {
   scene.add(mesh);
   const dummy = new THREE.Object3D();
 
-  // --- cámara / vistas ---
-  const views = {
-    iso: () => place(18, 16, 18),
-    top: () => place(0.01, 30, 0.01),
-    front: () => place(0, 6, 26),
-  };
-  function place(x, y, z) {
-    camera.position.set(center.x + x, y, center.z + z);
-    camera.lookAt(center.x, 0, center.z);
+  // --- cámara / navegación (órbita táctil: arrastrar = rotar, pellizcar/rueda = zoom) ---
+  const extent = sceneExtent(frame0.segments);
+  const target = new THREE.Vector3(center.x, 0, center.z);
+  const orbit = { radius: extent * 1.4, theta: Math.PI / 4, phi: Math.PI / 3.2 };
+  const PHI_MIN = 0.15, PHI_MAX = Math.PI / 2 - 0.02;
+
+  function updateCamera() {
+    const r = orbit.radius, t = orbit.theta, p = orbit.phi;
+    camera.position.set(
+      target.x + r * Math.sin(p) * Math.sin(t),
+      target.y + r * Math.cos(p),
+      target.z + r * Math.sin(p) * Math.cos(t),
+    );
+    camera.lookAt(target);
   }
+  const views = {
+    iso: () => { orbit.theta = Math.PI / 4; orbit.phi = Math.PI / 3.2; orbit.radius = extent * 1.4; updateCamera(); },
+    top: () => { orbit.phi = PHI_MIN; orbit.radius = extent * 1.5; updateCamera(); },
+    front: () => { orbit.theta = 0; orbit.phi = Math.PI / 2.1; orbit.radius = extent * 1.5; updateCamera(); },
+  };
   views.iso();
+
+  // gestos: 1 dedo/ratón = rotar; 2 dedos = pellizco para zoom; rueda = zoom.
+  const el = renderer.domElement;
+  el.style.touchAction = 'none';
+  const ptrs = new Map();
+  let pinch0 = 0;
+  el.addEventListener('pointerdown', e => { el.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY }); });
+  el.addEventListener('pointermove', e => {
+    const prev = ptrs.get(e.pointerId); if (!prev) return;
+    if (ptrs.size >= 2) {
+      ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      const pts = [...ptrs.values()];
+      const d = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+      if (pinch0) orbit.radius = clampNum(orbit.radius * (pinch0 / d), extent * 0.4, extent * 4);
+      pinch0 = d;
+    } else {
+      orbit.theta -= (e.clientX - prev.x) * 0.006;
+      orbit.phi = clampNum(orbit.phi - (e.clientY - prev.y) * 0.006, PHI_MIN, PHI_MAX);
+      ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    }
+    updateCamera();
+  });
+  const endPtr = e => { ptrs.delete(e.pointerId); if (ptrs.size < 2) pinch0 = 0; };
+  el.addEventListener('pointerup', endPtr);
+  el.addEventListener('pointercancel', endPtr);
+  el.addEventListener('wheel', e => { e.preventDefault(); orbit.radius = clampNum(orbit.radius * (1 + Math.sign(e.deltaY) * 0.1), extent * 0.4, extent * 4); updateCamera(); }, { passive: false });
 
   // --- HUD ---
   const hud = document.createElement('div');
@@ -154,3 +190,14 @@ function sceneCenter(segments) {
   }
   return { x: (minX + maxX) / 2, z: (minZ + maxZ) / 2 };
 }
+
+function sceneExtent(segments) {
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  for (const seg of segments) for (const p of seg.points) {
+    minX = Math.min(minX, p[0]); maxX = Math.max(maxX, p[0]);
+    minZ = Math.min(minZ, p[2]); maxZ = Math.max(maxZ, p[2]);
+  }
+  return Math.max(8, Math.hypot(maxX - minX, maxZ - minZ));
+}
+
+function clampNum(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
