@@ -12,9 +12,21 @@
 import * as THREE from 'three';
 
 const COLORS = {
-  belt: 0x3a4150, source: 0x2e7d32, sink: 0x8e24aa,
-  process: 0xf9a825, pull: 0x00897b, box: 0xc98a3b, boxHeld: 0xe53935,
+  belt: 0x3a4150, source: 0x2e7d32, sink: 0x8e24aa, reject: 0xb71c1c,
+  process: 0xf9a825, pull: 0x00897b, buffer: 0x4558a8, sort: 0x546e7a,
+  box: 0xc98a3b, boxHeld: 0xe53935,
 };
+
+// Paleta para cajas con color (salidas por color del sorter).
+const PALETTE = {
+  red: 0xe53935, blue: 0x1e88e5, green: 0x43a047, yellow: 0xfdd835,
+  orange: 0xfb8c00, purple: 0x8e24aa, cyan: 0x00acc1, pink: 0xd81b60,
+};
+function boxColor(b) {
+  if (b.held) return COLORS.boxHeld;
+  if (b.color && PALETTE[b.color] != null) return PALETTE[b.color];
+  return COLORS.box;
+}
 
 export function mountSim(sim, opts = {}) {
   const container = opts.container || document.body;
@@ -95,17 +107,24 @@ export function mountSim(sim, opts = {}) {
       dummy.rotation.set(0, -b.angle, 0);
       dummy.updateMatrix();
       mesh.setMatrixAt(i, dummy.matrix);
-      mesh.setColorAt && mesh.setColorAt(i, new THREE.Color(b.held ? COLORS.boxHeld : COLORS.box));
+      mesh.setColorAt && mesh.setColorAt(i, new THREE.Color(boxColor(b)));
     }
     mesh.count = n;
     mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     const s = f.stats;
-    hud.textContent =
+    let txt =
       `t=${f.time.toFixed(1)}s\n` +
-      `generadas ${s.generated}  entregadas ${s.delivered}\n` +
-      `en sistema ${s.inSystem}  throughput ${Math.round(s.throughput)}/h\n` +
-      `cuellos: ${f.bottlenecks.map(b => `${b.id}(${b.cause})`).join(', ') || '—'}`;
+      `generadas ${s.generated}  liberadas ${s.released || 0}  rechazo ${s.rejected || 0}\n` +
+      `en sistema ${s.inSystem}  throughput ${Math.round(s.throughput)}/h\n`;
+    if (f.buffers && f.buffers.length) {
+      txt += `buffers: ${f.buffers.map(b => `${b.color} ${b.count}/${b.cap}`).join('  ')}\n`;
+    }
+    if (f.pocket) {
+      txt += `virtual pocket -> demanda: ${(f.pocket.demand || ['FIFO']).join('+')} (x${f.pocket.remaining})\n`;
+    }
+    txt += `cuellos: ${f.bottlenecks.map(b => `${b.id}(${b.cause})`).join(', ') || '—'}`;
+    hud.textContent = txt;
     renderer.render(scene, camera);
   }
 

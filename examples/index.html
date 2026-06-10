@@ -27,6 +27,19 @@
   <div id="app"></div>
   <div id="panel">
     <h1>Conveyor Sim</h1>
+    <label>Layout
+      <select id="layout">
+        <option value="sorter">Sorter 4500 (Virtual Pocket)</option>
+        <option value="comb">Peine AC301</option>
+      </select>
+    </label>
+    <label>Receta del Virtual Pocket
+      <select id="recipe">
+        <option value="chain">Cadena (3 por color, en ciclo)</option>
+        <option value="together">Todo junto (lote de 12, cualquier color)</option>
+        <option value="fifo">FIFO (sin receta)</option>
+      </select>
+    </label>
     <label>Carriles (peine): <b id="lanesV">7</b>
       <input id="lanes" type="range" min="1" max="12" value="7" step="1" />
     </label>
@@ -54,23 +67,37 @@
   <script type="module">
     import { ConveyorSim } from '../src/engine.js';
     import { mountSim } from '../src/render.js';
-    import { buildComb } from '../src/layouts.js';
+    import { buildComb, buildSorter4500 } from '../src/layouts.js';
 
     const app = document.getElementById('app');
     let sim, api, running = true;
     let lanes = 7, speedMul = 1, rateMul = 1;
+    let layout = 'sorter', recipe = 'chain';
+
+    const COLORS = ['red', 'blue', 'green', 'yellow', 'orange', 'purple'];
+    function recipeSpec() {
+      if (recipe === 'together') return { loop: true, steps: [{ color: COLORS, qty: 12 }] };
+      if (recipe === 'fifo') return { loop: true, steps: [] };
+      return { loop: true, steps: COLORS.map(c => ({ color: c, qty: 3 })) };
+    }
 
     function build() {
       if (api) api.stop();
       app.innerHTML = '';
-      sim = new ConveyorSim(buildComb({ lanes, rate: 600 * lanes * rateMul }), { seed: 1 });
+      const model = layout === 'sorter'
+        ? buildSorter4500({ rate: 3600 * rateMul, pocket: recipeSpec() })
+        : buildComb({ lanes, rate: 600 * lanes * rateMul });
+      sim = new ConveyorSim(model, { seed: 1 });
       api = mountSim(sim, { container: app, warmup: 8 });
-      api.setSpeed(speedMul).start();
+      api.setSpeed(speedMul).view('top').start();
       running = true;
       document.getElementById('toggle').textContent = 'Pausa';
     }
 
     const bind = (id, fn) => document.getElementById(id).addEventListener('input', fn);
+    const onChange = (id, fn) => document.getElementById(id).addEventListener('change', fn);
+    onChange('layout', e => { layout = e.target.value; build(); });
+    onChange('recipe', e => { recipe = e.target.value; build(); });
     bind('lanes', e => { lanes = +e.target.value; lanesV.textContent = lanes; build(); });
     bind('speed', e => { speedMul = +e.target.value; speedV.textContent = speedMul.toFixed(1); api.setSpeed(speedMul); });
     bind('rate', e => { rateMul = +e.target.value; rateV.textContent = rateMul.toFixed(1); build(); });

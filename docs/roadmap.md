@@ -11,6 +11,9 @@ simula.
 - [x] Geometría paramétrica: rectas, arcos, polilíneas (`src/geometry.js`).
 - [x] Generadores paramétricos y biblioteca de componentes inicial
       (`src/layouts.js`: `COMPONENTS`, `buildDemo`, `buildComb`).
+- [x] Clasificador Intralox Serie 4500 (`buildSorter4500`): 6 salidas perpendiculares
+      por color, buffers de cero presión (cap. 20), línea principal (cap. 60) y
+      **Virtual Pocket** con recetas (cadena / lote / FIFO / dinámicas).
 - [x] Render 3D con HUD y vistas ISO/TOP/FRONT (`src/render.js`).
 - [x] Arnés de validación headless (`test/harness.mjs`).
 

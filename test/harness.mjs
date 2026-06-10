@@ -115,5 +115,48 @@ check('determinismo: misma semilla -> mismo resultado', s1.stats.generated === s
 const fr = sim.frame();
 check('frame: expone cajas, tramos y stats', Array.isArray(fr.boxes) && Array.isArray(fr.segments) && !!fr.stats);
 
+// ---------- clasificador Intralox 4500 + Virtual Pocket ----------
+import { buildSorter4500 } from '../src/layouts.js';
+
+// capacidades configuradas
+let sorter = new ConveyorSim(buildSorter4500(), { seed: 3 });
+let mainCap = 0;
+for (const s of sorter.segments.values()) if (/^main/.test(s.id)) mainCap += Math.floor(s.length / s.pitch);
+check('sorter: capacidad de línea principal = 60', mainCap === 60);
+const bufCaps = sorter.frame().buffers.map(b => b.cap);
+check('sorter: cada buffer tiene capacidad 20', bufCaps.length === 6 && bufCaps.every(c => c === 20));
+
+sorter.run(180);
+const sf = sorter.frame();
+
+// clasificación por color: cada buffer solo contiene su color
+let pureLanes = true;
+for (const seg of sorter.segments.values()) {
+  if (!seg.pocketBuffer) continue;
+  for (const b of sorter.boxes) if (b.segId === seg.id && b.color !== seg.color) pureLanes = false;
+}
+check('sorter: cada salida acumula solo su color', pureLanes);
+check('sorter: las fuentes asignan color a las cajas', sorter.boxes.every(b => b.segId === 'infeed' || b.color != null));
+
+// buffer de cero presión: nunca excede su capacidad
+const overCap = sf.buffers.some(b => b.count > b.cap);
+check('sorter: el buffer respeta la capacidad (cero presión)', !overCap);
+
+// virtual pocket: libera y reparte por la receta cíclica (3 por color)
+check('virtual pocket: libera cajas a la salida', sf.stats.released > 0);
+const counts = Object.values(sf.pocket.byColor);
+const spread = Math.max(...counts) - Math.min(...counts);
+check('virtual pocket: receta cíclica reparte parejo entre colores', counts.length === 6 && spread <= 3);
+
+// receta "todo junto": un solo lote de cualquier color
+const together = new ConveyorSim(buildSorter4500({ pocket: { loop: true, steps: [{ color: ['red', 'blue', 'green', 'yellow', 'orange', 'purple'], qty: 12 }] } }), { seed: 5 });
+together.run(120);
+check('virtual pocket: receta "todo junto" libera en lote', together.frame().stats.released > 0);
+
+// receta que ignora un color -> ese buffer se llena y rebosa al rechazo
+const partial = new ConveyorSim(buildSorter4500({ pocket: { loop: true, steps: [{ color: 'red', qty: 5 }] } }), { seed: 9 });
+partial.run(300);
+check('sorter: color no demandado se acumula y rebosa (rejected>0)', partial.frame().stats.rejected > 0);
+
 console.log(`\n${passed} ok, ${failed} fail` + (failed ? `  -> ${fails.join(', ')}` : ''));
 process.exit(failed ? 1 : 0);

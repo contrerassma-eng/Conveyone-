@@ -120,4 +120,84 @@ export function buildComb(opts = {}) {
   return { meta: { name: `comb-${lanes}`, boxSize: [0.4, 0.13, 0.3], rollerDia: 0.048 }, segments };
 }
 
-export default { COMPONENTS, buildDemo, buildComb };
+// ---------------- buildSorter4500: clasificador Intralox Serie 4500 ----------------
+// Línea principal de clasificación (ARB / sorter) con salidas PERPENDICULARES por
+// color. Cada salida acumula un buffer de cero presión, y un Virtual Pocket libera
+// las cajas a una línea de salida en función de la demanda (receta).
+//
+// Parámetros físicos configurables:
+//   colors          paleta (cada salida = un color)               default 6 colores
+//   mainCapacity    capacidad de la línea principal (cajas)        default 60
+//   bufferCapacity  capacidad de cada buffer de cero presión       default 20
+//   speed, pitch, rollerDia, width
+//   pocket          receta del Virtual Pocket (ver VirtualPocket)
+export function buildSorter4500(opts = {}) {
+  const colors = opts.colors || ['red', 'blue', 'green', 'yellow', 'orange', 'purple'];
+  const outputs = opts.outputs || colors.length;
+  const mainCapacity = opts.mainCapacity != null ? opts.mainCapacity : 60;
+  const bufferCapacity = opts.bufferCapacity != null ? opts.bufferCapacity : 20;
+  const speed = opts.speed != null ? opts.speed : 0.6;
+  const pitch = opts.pitch != null ? opts.pitch : 0.5;
+  const rollerDia = opts.rollerDia != null ? opts.rollerDia : 0.048;
+  const width = opts.width != null ? opts.width : 0.6;
+  const rate = opts.rate != null ? opts.rate : 3600;
+
+  const cellCap = Math.ceil(mainCapacity / outputs);  // cajas por celda de la línea
+  const cellLen = cellCap * pitch;                     // largo de cada celda (m)
+  const bufLen = bufferCapacity * pitch;               // largo de cada buffer (m)
+  const outY = 0.6 + bufLen + 1.5;                     // y de la línea de salida
+
+  const segments = [];
+
+  // Alimentación: genera cajas con mezcla de colores.
+  segments.push({
+    id: 'infeed', geom: { type: 'straight', from: [0, 0], to: [cellLen, 0] },
+    height: 0.9, speed, pitch,
+    source: { rate, cv: 0.3, colors, weights: opts.weights, max: opts.max },
+    next: ['main0'],
+  });
+
+  // Celdas de la línea principal: cada una deriva su color a un carril perpendicular.
+  for (let i = 0; i < outputs; i++) {
+    const x0 = (i + 1) * cellLen;
+    const x1 = (i + 2) * cellLen;
+    const color = colors[i];
+    const laneId = `lane_${color}`;
+    const contId = i < outputs - 1 ? `main${i + 1}` : 'overflow';
+    segments.push({
+      id: `main${i}`, geom: { type: 'straight', from: [x0, 0], to: [x1, 0] },
+      height: 0.9, speed, pitch,
+      sort: { by: 'color', divertColor: color, lane: laneId, cont: contId },
+      next: [laneId, contId],
+    });
+    // Carril/buffer perpendicular (+y), cero presión, gobernado por el Virtual Pocket.
+    segments.push({
+      id: laneId, geom: { type: 'straight', from: [x1, 0.6], to: [x1, 0.6 + bufLen] },
+      height: 0.9, speed, pitch, color, pocketBuffer: true, next: ['outfeed'],
+    });
+  }
+
+  // Overflow: cajas no clasificadas (buffer lleno) -> rechazo.
+  const xEnd = (outputs + 1) * cellLen;
+  segments.push({
+    id: 'overflow', geom: { type: 'straight', from: [xEnd, 0], to: [xEnd + cellLen, 0] },
+    height: 0.9, speed, pitch, sink: true, reject: true,
+  });
+
+  // Línea de salida del Virtual Pocket: recibe el flujo ordenado por la receta.
+  segments.push({
+    id: 'outfeed', geom: { type: 'straight', from: [cellLen, outY], to: [xEnd + cellLen, outY] },
+    height: 0.9, speed: speed * 1.3, pitch, sink: true,
+  });
+
+  // Receta por defecto: cadena de 3 cajas por color, en ciclo.
+  const pocket = opts.pocket || { loop: true, steps: colors.map(c => ({ color: c, qty: 3 })) };
+
+  return {
+    meta: { name: 'sorter4500', boxSize: [0.4, 0.13, 0.3], rollerDia, width, family: 'Intralox-4500' },
+    segments,
+    pocket,
+  };
+}
+
+export default { COMPONENTS, buildDemo, buildComb, buildSorter4500 };

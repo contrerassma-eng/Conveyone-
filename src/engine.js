@@ -47,10 +47,12 @@ export class ConveyorSim {
     this.time = 0;             // segundos simulados
     this.boxes = [];           // todas las cajas vivas
     this.stats = {
-      generated: 0, delivered: 0, extracted: 0,
+      generated: 0, delivered: 0, extracted: 0, rejected: 0, released: 0,
       inSystem: 0, throughput: 0,
     };
     this._deliveredWindow = [];   // marcas de tiempo de entregas (para throughput)
+    // Virtual Pocket: controlador de liberación por demanda (recetas).
+    this.pocket = model.pocket ? new VirtualPocket(model.pocket) : null;
     this._compile();
   }
 
@@ -70,10 +72,15 @@ export class ConveyorSim {
         source: s.source || null,
         process: s.process || null,
         sink: !!s.sink,
+        reject: !!s.reject,          // sink de rechazo/overflow (no cuenta como entrega)
         pull: s.pull || null,
+        sort: s.sort || null,        // enrutado por atributo (clasificador / divert)
+        pocketBuffer: !!s.pocketBuffer, // buffer de cero presión gobernado por el Virtual Pocket
+        color: s.color || null,      // color asociado al tramo (salida por color)
         // estado de fuente
         _nextGen: 0,
         _routeIx: 0,
+        _colorIx: 0,
         // estado de proceso (estaciones)
         _station: s.process ? makeStation(s.process) : null,
         // media móvil de ocupación (cuellos)
@@ -132,8 +139,22 @@ export class ConveyorSim {
 
   _spawn(seg) {
     const box = { id: ++_boxSeq, segId: seg.id, s: 0, held: 0, bornAt: this.time };
+    const colors = seg.source && seg.source.colors;
+    if (colors && colors.length) box.color = this._pickColor(seg, colors);
     this.boxes.push(box);
     this.stats.generated++;
+  }
+
+  _pickColor(seg, colors) {
+    const w = seg.source.weights;
+    if (w && w.length === colors.length) {
+      const total = w.reduce((a, b) => a + b, 0);
+      let r = this.rng() * total;
+      for (let i = 0; i < colors.length; i++) { r -= w[i]; if (r <= 0) return colors[i]; }
+      return colors[colors.length - 1];
+    }
+    // sin pesos: round-robin determinista (mezcla pareja)
+    return colors[seg._colorIx++ % colors.length];
   }
 
   // Avance con cero-presión, resuelto tramo por tramo de adelante hacia atrás.
@@ -204,9 +225,13 @@ export class ConveyorSim {
       if (seg.pull && this._shouldPull(seg, box)) {
         box._remove = true; box._extracted = true; continue;
       }
-      if (seg.sink) { box._remove = true; box._delivered = true; continue; }
+      if (seg.sink) { box._remove = true; box._delivered = true; box._reject = seg.reject; continue; }
 
-      const nextId = this._pickNext(seg);
+      // Virtual Pocket: una caja en un buffer solo se libera si el controlador la
+      // demanda ahora (receta). Si no, espera (acumulación de cero presión).
+      if (seg.pocketBuffer && this.pocket && !this.pocket.wants(box.color)) continue;
+
+      const nextId = this._pickNext(seg, box);
       if (!nextId) { box._remove = true; box._delivered = true; continue; }
       const nseg = this.segments.get(nextId);
       if (nseg && this._hasRoomAtStart(nseg)) {
@@ -214,6 +239,10 @@ export class ConveyorSim {
         box.s = 0;
         box._done = false;          // reinicia estado de proceso en el nuevo tramo
         box._stationIx = null;
+        if (seg.pocketBuffer && this.pocket) {
+          this.pocket.consume(box.color);
+          this.stats.released++;
+        }
       }
       // si no hay hueco, la caja espera en el final (acumulación / cero presión)
     }
@@ -222,7 +251,10 @@ export class ConveyorSim {
       const kept = [];
       for (const b of this.boxes) {
         if (b._remove) {
-          if (b._delivered) { this.stats.delivered++; this._deliveredWindow.push(this.time); }
+          if (b._delivered) {
+            if (b._reject) this.stats.rejected++;
+            else { this.stats.delivered++; this._deliveredWindow.push(this.time); }
+          }
           if (b._extracted) this.stats.extracted++;
         } else kept.push(b);
       }
@@ -230,7 +262,18 @@ export class ConveyorSim {
     }
   }
 
-  _pickNext(seg) {
+  _pickNext(seg, box) {
+    // Clasificación (sorter / divert): si la caja es del color de esta celda y el
+    // carril destino tiene hueco, deriva; si no, continúa por la línea principal.
+    if (seg.sort && box) {
+      const matches = box.color != null && box.color === seg.sort.divertColor;
+      if (matches) {
+        const lane = this.segments.get(seg.sort.lane);
+        if (lane && this._hasRoomAtStart(lane)) return seg.sort.lane;
+        // carril lleno: la caja sigue (recirculación / overflow)
+      }
+      return seg.sort.cont;
+    }
     if (!seg.next || seg.next.length === 0) return null;
     if (seg.next.length === 1) return seg.next[0];
     // enrutado round-robin balanceado por hueco disponible
@@ -287,6 +330,7 @@ export class ConveyorSim {
         x: p[0], y: seg.height, z: p[1],
         angle: Math.atan2(d[1], d[0]),
         held: b.held > 0,
+        color: b.color || (seg.color || null),
       });
     }
     return {
@@ -296,7 +340,20 @@ export class ConveyorSim {
       stats: { ...this.stats },
       bottlenecks: this.bottlenecks(),
       boxSize: this.boxSize,
+      pocket: this.pocket ? this.pocket.status() : null,
+      buffers: this._bufferLevels(),
     };
+  }
+
+  // Nivel de cada buffer del Virtual Pocket (para HUD: ocupación vs capacidad).
+  _bufferLevels() {
+    const out = [];
+    for (const seg of this.segments.values()) {
+      if (!seg.pocketBuffer) continue;
+      const cap = Math.max(1, Math.floor(seg.length / seg.pitch));
+      out.push({ id: seg.id, color: seg.color, count: seg.boxes.length, cap });
+    }
+    return out;
   }
 
   _segmentGeometry() {
@@ -365,10 +422,87 @@ function stationProcTime(st, ix, rng, process) {
 
 function kindOf(seg) {
   if (seg.source) return 'source';
+  if (seg.reject) return 'reject';
   if (seg.sink) return 'sink';
   if (seg.process) return 'process';
   if (seg.pull) return 'pull';
+  if (seg.pocketBuffer) return 'buffer';
+  if (seg.sort) return 'sort';
   return 'belt';
+}
+
+// ---------------- Virtual Pocket ----------------
+// Controlador de liberación por DEMANDA. Decide, en cada momento, qué color quiere
+// dejar salir de los buffers de cero presión. Una "receta" es una lista de pasos:
+//
+//   { loop: true, steps: [ { color: 'red', qty: 3 }, { color: ['blue','green'], qty: 6 } ] }
+//
+//   - color string  -> cadena: libera `qty` cajas de ese color, en orden.
+//   - color array   -> lote "todo junto": libera `qty` cajas de cualquiera de esos
+//                      colores (lo que haya disponible).
+//   - loop          -> al terminar la receta, vuelve a empezar (demanda continua).
+//
+// Si el color demandado no está disponible en su buffer, el pocket espera (la línea
+// de salida se "muere de hambre"): así se ve la interacción demanda vs. inventario.
+export class VirtualPocket {
+  constructor(spec = {}) {
+    this.steps = spec.steps || [];
+    this.loop = spec.loop !== false;
+    this.ix = 0;
+    this.remaining = this.steps.length ? this.steps[0].qty : 0;
+    this.released = 0;
+    this.byColor = {};
+    this.done = false;
+  }
+
+  _currentColors() {
+    if (!this.steps.length || this.done) return null; // sin receta -> FIFO (libera todo)
+    const c = this.steps[this.ix].color;
+    return Array.isArray(c) ? c : [c];
+  }
+
+  // ¿El pocket quiere dejar salir una caja de este color ahora mismo?
+  wants(color) {
+    const cs = this._currentColors();
+    if (!cs) return true;                 // sin receta: libera lo que llegue
+    return cs.includes(color) && this.remaining > 0;
+  }
+
+  // Registra una liberación efectiva y avanza la receta.
+  consume(color) {
+    this.released++;
+    this.byColor[color] = (this.byColor[color] || 0) + 1;
+    if (!this.steps.length || this.done) return;
+    this.remaining--;
+    if (this.remaining <= 0) {
+      this.ix++;
+      if (this.ix >= this.steps.length) {
+        if (this.loop) this.ix = 0;
+        else { this.done = true; return; }
+      }
+      this.remaining = this.steps[this.ix].qty;
+    }
+  }
+
+  status() {
+    return {
+      demand: this._currentColors(),
+      remaining: this.remaining,
+      step: this.ix,
+      released: this.released,
+      byColor: { ...this.byColor },
+      done: this.done,
+    };
+  }
+
+  // Cambia la receta en caliente (recetas dinámicas).
+  setRecipe(spec = {}) {
+    this.steps = spec.steps || [];
+    this.loop = spec.loop !== false;
+    this.ix = 0;
+    this.remaining = this.steps.length ? this.steps[0].qty : 0;
+    this.done = false;
+  }
 }
 
 export { makeRng, sampleLognormal };
