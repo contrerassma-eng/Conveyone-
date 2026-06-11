@@ -15,12 +15,15 @@
   #panel select{width:100%;background:#1a2740;color:#dfe7f3;border:1px solid #2a3a5a;border-radius:6px;padding:5px}
   #panel .v{float:right;color:#fff;font-weight:700}
   #panel .hint{margin-top:10px;color:#7f8ca3;font-size:11px;line-height:1.4}
+  #panel h1 #hideCtl{float:right;cursor:pointer;color:#9fc3ff}
+  #showCtl{position:absolute;top:10px;right:12px;z-index:6;display:none;background:rgba(16,21,32,.92);border:1px solid #243049;border-radius:10px;color:#dfe7f3;padding:9px 12px;font:600 13px system-ui;cursor:pointer}
 </style>
 </head>
 <body>
 <div id="app"></div>
+<button id="showCtl">☰ Controles</button>
 <div id="panel">
-  <h1>Sorter + Virtual Pocket</h1>
+  <h1>Sorter + Virtual Pocket <span id="hideCtl" title="Ocultar controles">✕</span></h1>
   <label>Salidas (colores) <span class="v" id="vOuts">6</span></label>
   <input type="range" id="outs" min="1" max="8" step="1" value="6">
   <label>Carga por salida (c/min) <span class="v" id="vRate">9</span></label>
@@ -125,6 +128,8 @@ class SorterSim {
         rt.source = s.source || null;
         rt.sink = !!s.sink; rt.reject = !!s.reject;
         rt.pocketBuffer = !!s.pocketBuffer;
+        rt.outfeedS = s.outfeedS != null ? s.outfeedS : null;   // posición de inyección en la banda de salida
+        rt.entryByColor = !!s.entryByColor;                     // la banda de salida usa outfeedS por salida
         rt.cap = s.cap || Math.max(1, Math.floor(rt.length / rt.pitch));
         rt.nextSpawn = 0; rt.count = 0;
         if (rt.source) this._srcColorCtr = 0;
@@ -173,7 +178,7 @@ class SorterSim {
         const src = seg.source;
         const overCap = src.cap && this.boxes.length >= src.cap;
         if (!overCap && this._entryFree(id)) {
-          const color = this.colors[(this._srcColorCtr++) % this.colors.length];
+          const color = this.colors[Math.floor(this.rng() * this.colors.length)]; // entrada DESORDENADA (al azar)
           this.boxes.push(new Box(id, T, color)); this.generated++;
           seg.nextSpawn = T + this._interArrival(src);
         } else { seg.nextSpawn = T + 0.2; }
@@ -397,13 +402,18 @@ function buildSorter(opts = {}) {
     }
     // 4) elevador de DESCENSO (BAJA)
     segs.push({ id: 'o' + k + '_down', kind: 'lift', color: c, geom: { type: 'lift', at: [x, 8.9], h0: 3.0, h1: 0.9 }, elevator: { cycle, cooldown }, next: ['o' + k + '_zp'] });
-    // 5) cero presión final, gobernado por el Virtual Pocket -> libera a la línea de salida común
-    segs.push({ id: 'o' + k + '_zp', kind: 'zp', color: c, geom: { type: 'straight', from: [x, 9.2], to: [x, 11.4] }, height: 0.9, speed: vlane, pitch: 0.5, pocketBuffer: true, next: ['outfeed'] });
+    // 5) cero presión final, gobernado por el Virtual Pocket -> inyecta a la banda de salida
+    //    en la X de su propia salida (sin hueco con el equipo) para que el tren SE VEA formarse.
+    segs.push({ id: 'o' + k + '_zp', kind: 'zp', color: c, geom: { type: 'straight', from: [x, 9.2], to: [x, 11.9] }, height: 0.9, speed: vlane, pitch: 0.5, pocketBuffer: true, next: ['outfeed'], outfeedS: (N - k) * CELL });
   }
 
-  // ----- Transportador de SALIDA común: aquí se ve la lógica del Virtual Pocket -----
-  // Todas las salidas liberan a esta línea; el ORDEN del tren lo dicta la receta.
-  segs.push({ id: 'outfeed', kind: 'outfeed', geom: { type: 'straight', from: [1.5, 12.8], to: [N * CELL + 6, 12.8] }, height: 0.9, speed: 0.95, pitch: 0.55, sink: true });
+  // ----- BANDA DE SALIDA común (take-away): aquí se forma el tren del Virtual Pocket -----
+  // Fluye de derecha a izquierda. Cada salida inyecta su caja en su propia X (a ras del
+  // equipo, sin hueco) y el ORDEN lo dicta la receta. Termina en la banda de entrega de 24".
+  const xR = (N + 1) * CELL, xL = CELL - 1;
+  segs.push({ id: 'outfeed', kind: 'outfeed', geom: { type: 'straight', from: [xR, 12.0], to: [xL, 12.0] }, height: 0.9, speed: 0.95, pitch: 0.55, entryByColor: true, next: ['deliv'] });
+  // último tramo de banda = 24" (0.61 m): entrega final, a ras (sin hueco -> la caja no cae)
+  segs.push({ id: 'deliv', kind: 'deliv', geom: { type: 'straight', from: [xL, 12.0], to: [xL - 0.61, 12.0] }, height: 0.9, speed: 0.95, pitch: 0.55, sink: true });
 
   // receta del Virtual Pocket: por defecto, tren consecutivo (1 caja por color, en ciclo)
   const pocket = opts.pocket || { loop: true, steps: colors.map((c) => ({ color: c, qty: 1 })) };
@@ -472,8 +482,9 @@ function mountSorter(sim, opts = {}) {
   }
   function buildSeg(s) {
     if (s.geom.type === 'lift') { buildLift(s); return; }
-    const W = s.kind === 'outfeed' ? 0.7 : 0.62, P = pts(s.geom), h = s.height != null ? s.height : 0.9;
-    const mat = s.kind === 'buffer' ? bufMat : (s.kind === 'overflow' ? rejMat : (s.kind === 'outfeed' ? outMat : steelMat));
+    const isOut = s.kind === 'outfeed' || s.kind === 'deliv';
+    const W = isOut ? 0.7 : 0.62, P = pts(s.geom), h = s.height != null ? s.height : 0.9;
+    const mat = s.kind === 'buffer' ? bufMat : (s.kind === 'overflow' ? rejMat : (isOut ? outMat : steelMat));
     let legAcc = 0;
     for (let i = 0; i < P.length - 1; i++) {
       const a = P[i], c = P[i + 1];
@@ -600,6 +611,11 @@ document.getElementById('outs').oninput = e => { document.getElementById('vOuts'
 document.getElementById('rate').oninput = e => { document.getElementById('vRate').textContent = e.target.value; build(); };
 document.getElementById('recipe').onchange = build;
 document.getElementById('speed').oninput = e => { speed = +e.target.value; document.getElementById('vSpeed').textContent = speed + '×'; if (ctl) ctl.setSpeed(speed); };
+
+// mostrar / ocultar controles
+const _panel = document.getElementById('panel'), _show = document.getElementById('showCtl');
+document.getElementById('hideCtl').onclick = () => { _panel.style.display = 'none'; _show.style.display = 'block'; };
+_show.onclick = () => { _panel.style.display = ''; _show.style.display = 'none'; };
 
 build();
 
