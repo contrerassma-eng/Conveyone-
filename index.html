@@ -228,11 +228,11 @@ class SorterSim {
         // board al elevador de SUBIDA (continuo): carrier libre en s=0 y nivel del SKU con hueco
         const lid = nseg.drains[b.lvl]; const lvlH = lid ? this.seg[lid].height : nseg.h1;
         if (lid && this._entryFree(nx) && this._entryFree(lid)) { b.seg = nx; b.s = 0; b.exitS = (lvlH - nseg.h0); b.targetDrain = lid; }
-      } else if (nseg.entryByColor && seg.outfeedS != null) {
-        // inyección a la EVACUACIÓN en la X de la columna (banda plana / directa -> evacuación)
-        const sIn = seg.outfeedS;
-        let ok = true; for (const o of this.boxes) if (o.seg === nx && Math.abs(o.s - sIn) < nseg.pitch) ok = false;
-        if (ok) { b.seg = nx; b.s = sIn; }
+      } else if (nseg.entryByColor) {
+        // TREN VIRTUAL: ensamblado en un PUNTO ÚNICO (cero presión -> tren tirante);
+        // el gap de ~1.5 cajas entre trenes lo inserta el Virtual Pocket (delay al cerrar ciclo)
+        let ok = true; for (const o of this.boxes) if (o.seg === nx && o.s < nseg.pitch) { ok = false; break; }
+        if (ok) { b.seg = nx; b.s = 0; }
       } else {
         b.seg = nx; b.s = Math.max(0, Math.min(b.s - seg.length, nseg.length));
       }
@@ -316,12 +316,20 @@ class SorterSim {
     // buscar un tramo pocketBuffer con una caja del color demandado al frente
     let target = null;
     for (const sid of this.pocketSegs) { const b = this._boxAtEnd(sid); if (b && wanted.includes(b.color)) { target = sid; break; } }
-    const advance = () => { this._pocket.inStep = 0; this._pocket.idx++; if (this._pocket.idx >= P.steps.length) { if (P.loop) this._pocket.idx = 0; else this._pocket.done = true; } };
+    // GAP entre trenes: al cerrar el ciclo de la receta se inserta ~1.5 cajas de separación
+    const ev = this.seg['outfeed']; const trainGap = ev ? 1.5 * (this.box[2] + 0.1) / ev.speed : 0.7;
+    const advance = (released) => {
+      this._pocket.inStep = 0; const wrap = (this._pocket.idx + 1 >= P.steps.length);
+      this._pocket.idx++;
+      if (this._pocket.idx >= P.steps.length) { if (P.loop) this._pocket.idx = 0; else this._pocket.done = true; }
+      // fin del TREN VIRTUAL -> gap mayor antes del siguiente (sólo si veníamos liberando)
+      if (wrap && P.loop && released) this._pocketNext = this.t + ((P && P.interval) || 0) + trainGap;
+    };
     if (target) {
-      if (releaseFrom(target)) { this._pocket.inStep++; if (this._pocket.inStep >= step.qty) advance(); }
+      if (releaseFrom(target)) { this._pocket.inStep++; if (this._pocket.inStep >= step.qty) advance(true); }
     } else {
       // SKU demandado no disponible -> SALTA al siguiente (no bloquea el tren); cuenta faltas
-      this._skips = (this._skips || 0) + 1; advance();
+      this._skips = (this._skips || 0) + 1; advance(false);
     }
   }
 
@@ -457,7 +465,7 @@ function buildSorter(opts = {}) {
   // 4 elevadores de descenso) + directo. El orden del tren lo dicta esta secuencia.
   // receta por defecto: 16 SKUs en orden (idx ya intercala columnas) + 17ª línea = Directo
   const steps = skus.map(s => ({ color: s.color, qty: 1 })); steps.push({ color: directColor, qty: 1 });
-  const pocket = opts.pocket || { loop: true, steps, interval: opts.outInterval ?? 0 };
+  const pocket = opts.pocket || { loop: true, steps, interval: 0.15 }; // libera tirante (cero presión arma el tren)
 
   return { meta: { name: 'Sorter 4500 · 16 SKUs + directa', boxSize: [0.4, 0.13, 0.3], skus, directW, directColor, directName: DIRECT_NAME, ncol: NCOL, nlvl: NLVL, ref: { perMin: 11 } }, segments: segs, pocket };
 }
@@ -639,33 +647,40 @@ let ctl = null, sim = null, speed = 3, seed = 12345;
 
 const $ = id => document.getElementById(id);
 
-const outIntervalNow = () => { const o = +$('orate').value; return o > 0 ? 60 / o : 0; };
+// velocidad de SALIDA (cajas/min) -> velocidad de la banda de evacuación (para estresar)
+const voutNow = () => Math.max(0.15, Math.min(1.4, (+$('orate').value) * 0.024));
 function skuOptions(meta) { const o = meta.skus.map(s => ({ label: s.name, color: s.color })); o.push({ label: meta.directName, color: meta.directColor }); return o; }
+// multiplicador por defecto según VOLUMEN de la distribución (entero ≥1)
+function volMults(meta) { const ws = meta.skus.map(s => s.w).concat([meta.directW]); const mn = Math.min(...ws); return ws.map(w => Math.max(1, Math.round(w / mn))); }
 function buildRecipeRows(meta) {
-  const opts = skuOptions(meta), cont = $('recipeRows'); cont.innerHTML = '';
+  const opts = skuOptions(meta), mults = volMults(meta), cont = $('recipeRows'); cont.innerHTML = '';
   for (let i = 0; i < opts.length; i++) {
-    const row = document.createElement('div'); row.style.cssText = 'display:flex;gap:5px;align-items:center';
-    const num = document.createElement('span'); num.textContent = (i + 1); num.style.cssText = 'width:16px;color:#7f8ca3;text-align:right;font-size:11px';
+    const row = document.createElement('div'); row.style.cssText = 'display:flex;gap:4px;align-items:center';
+    const num = document.createElement('span'); num.textContent = (i + 1); num.style.cssText = 'width:15px;color:#7f8ca3;text-align:right;font-size:11px';
     const dot = document.createElement('span'); dot.style.cssText = 'width:9px;height:9px;border-radius:2px;flex:0 0 auto';
-    const sel = document.createElement('select'); sel.style.cssText = 'flex:1;background:#121821;color:#dfe7f3;border:1px solid #2a3a5a;border-radius:6px;padding:3px;font-size:11px';
+    const sel = document.createElement('select'); sel.style.cssText = 'flex:1;min-width:0;background:#121821;color:#dfe7f3;border:1px solid #2a3a5a;border-radius:6px;padding:3px;font-size:11px';
     opts.forEach((op, j) => { const e = document.createElement('option'); e.value = j; e.textContent = op.label; sel.appendChild(e); });
-    sel.value = (i < opts.length) ? i : 0;             // por defecto: línea i = SKU i (frecuencia desc; Directo último)
+    sel.value = i;
+    const qty = document.createElement('input'); qty.type = 'number'; qty.min = '1'; qty.max = '20'; qty.value = mults[i];
+    qty.title = '× (múltiplo por volumen)'; qty.style.cssText = 'width:34px;background:#121821;color:#fff;border:1px solid #2a3a5a;border-radius:6px;padding:3px;font-size:11px;text-align:center';
     const paint = () => { dot.style.background = hex(opts[+sel.value].color); };
-    sel.onchange = () => { paint(); applyRecipe(); };
-    paint(); row.appendChild(num); row.appendChild(dot); row.appendChild(sel); cont.appendChild(row);
+    sel.onchange = () => { paint(); qty.value = mults[+sel.value]; applyRecipe(); };
+    qty.onchange = applyRecipe;
+    paint(); row.appendChild(num); row.appendChild(dot); row.appendChild(sel); row.appendChild(qty); cont.appendChild(row);
   }
 }
 function currentRecipe(meta) {
-  const opts = skuOptions(meta), sels = $('recipeRows').querySelectorAll('select');
-  const steps = []; sels.forEach(s => steps.push({ color: opts[+s.value].color, qty: 1 }));
-  return { loop: true, steps, interval: outIntervalNow() };
+  const opts = skuOptions(meta), rows = $('recipeRows').children;
+  const steps = [];
+  for (const r of rows) { const sel = r.querySelector('select'), q = r.querySelector('input'); steps.push({ color: opts[+sel.value].color, qty: Math.max(1, +q.value || 1) }); }
+  return { loop: true, steps, interval: 0.15 };
 }
 function applyRecipe() { if (!sim) return; sim.model.pocket = currentRecipe(sim.meta); sim._pocket = { idx: 0, inStep: 0, done: false }; sim._pocketNext = 0; }
 
 function build(rebuildRows = true) {
   const N = +$('outs').value;
   const rate = +$('rate').value * 60;
-  const model = buildSorter({ outputs: N, rate, outInterval: outIntervalNow() });
+  const model = buildSorter({ outputs: N, rate, outSpeed: voutNow() });
   if (rebuildRows || $('recipeRows').children.length !== model.meta.skus.length + 1) buildRecipeRows(model.meta);
   model.pocket = currentRecipe(model.meta);            // usa las 17 líneas de la UI
   if (ctl) ctl.stop();
@@ -677,7 +692,7 @@ function build(rebuildRows = true) {
 
 $('outs').oninput = e => { $('vOuts').textContent = e.target.value + ' (' + (e.target.value * 4) + ' SKUs)'; build(true); };
 $('rate').oninput = e => { $('vRate').textContent = e.target.value; build(false); };
-$('orate').oninput = e => { $('vOut').textContent = e.target.value; if (sim) applyRecipe(); };
+$('orate').oninput = e => { $('vOut').textContent = e.target.value; build(false); };
 $('speed').oninput = e => { speed = +e.target.value; $('vSpeed').textContent = speed + '×'; if (ctl) ctl.setSpeed(speed); };
 
 // mostrar / ocultar controles
