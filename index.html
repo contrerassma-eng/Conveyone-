@@ -47,22 +47,30 @@
   <div class="hint">16 SKUs (4 columnas × 4 niveles, cada nivel un color/SKU) = 85%, más una SALIDA DIRECTA sin elevador = 15%. Entrada desordenada por SKU (mix Danich); el Virtual Pocket entrega un tren ordenado a la banda de salida. Baja la velocidad de salida para estresar (se llenan los buffers).</div>
 </div>
 
-<!-- Diagnóstico (script clásico): captura errores aunque falle la carga del módulo/CDN -->
+<!-- Diagnóstico (script clásico): captura errores aunque falle la carga del módulo/scripts -->
 <script>
-  window.__ok = false;
+  window.__ok = false; window.__errs = [];
   window.showErr = function (msg) {
+    window.__errs.push(msg);
     var d = document.getElementById('err');
     if (!d) { d = document.createElement('div'); d.id = 'err'; d.style.cssText = 'position:fixed;left:8px;bottom:8px;max-width:92%;z-index:99;background:#7a1020;color:#fff;font:12px/1.4 ui-monospace,Menlo,Consolas,monospace;padding:9px 11px;border-radius:8px;white-space:pre-wrap;box-shadow:0 6px 24px #0008'; document.body.appendChild(d); }
-    d.textContent = '⚠ ' + msg;
+    d.textContent = '⚠ ' + window.__errs.join('\n— ');
   };
-  addEventListener('error', function (e) { window.showErr((e.error && e.error.stack) || e.message || ('No cargó: ' + (e.target && (e.target.src || e.target.href) || e))); });
+  // CAPTURE = true: así también caza fallos de carga de <script src> (no sólo errores JS)
+  addEventListener('error', function (e) { window.showErr((e.error && e.error.stack) || e.message || ('No cargó: ' + (e.target && (e.target.src || e.target.href) || e))); }, true);
   addEventListener('unhandledrejection', function (e) { window.showErr('Promesa rechazada: ' + ((e.reason && (e.reason.stack || e.reason.message)) || e.reason)); });
   window.hasWebGL = function () { try { var c = document.createElement('canvas'); return !!(window.WebGLRenderingContext && (c.getContext('webgl') || c.getContext('experimental-webgl'))); } catch (e) { return false; } };
-  setTimeout(function () { if (!window.__ok) window.showErr('El render no arrancó en 7 s.\nCausas típicas: three.js no cargó (CDN/red bloqueada) o WebGL no disponible en este navegador.\nAbre la URL de GitHub Pages en Chrome/Safari de escritorio o móvil (no el visor embebido).'); }, 7000);
+  setTimeout(function () { if (!window.__ok && !window.__errs.length) window.showErr('El render no arrancó en 7 s y no hubo error JS: el navegador puede no tener WebGL (visores embebidos) o bloqueó los scripts. Abre la URL de GitHub Pages en Chrome/Safari real.'); }, 7000);
 </script>
 <!-- three.js INCRUSTADO (sin CDN): funciona offline y en navegadores que bloquean jsdelivr -->
 <script src="vendor/three.min.js"></script>
 <script src="vendor/OrbitControls.js"></script>
+<!-- chequeo explícito: ¿cargaron los scripts locales? -->
+<script>
+  if (typeof THREE === 'undefined') window.showErr('No cargó vendor/three.min.js (revisa que el deploy de Pages ya terminó y que la ruta /vendor/ existe).');
+  else if (!THREE.OrbitControls) window.showErr('three.js cargó pero NO vendor/OrbitControls.js.');
+  else if (!window.hasWebGL()) window.showErr('three.js cargó OK, pero este navegador NO tiene WebGL (típico del visor embebido). Abre la URL en Chrome/Safari real.');
+</script>
 <script type="module">
 const OrbitControls = THREE.OrbitControls;   // THREE global (build UMD local)
 
