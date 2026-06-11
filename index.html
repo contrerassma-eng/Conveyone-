@@ -32,11 +32,11 @@
   <input type="range" id="orate" min="6" max="60" step="1" value="40">
   <label style="margin-top:6px;color:#9fc3ff">Paletizadores KUKA</label>
   <div style="display:flex;gap:6px;align-items:center">
-    <span style="color:#aebbd0;font-size:11px;flex:1">Robots</span><input type="number" id="probots" min="1" max="6" value="1" style="width:42px;background:#121821;color:#fff;border:1px solid #2a3a5a;border-radius:6px;padding:3px;font-size:11px;text-align:center">
-    <span style="color:#aebbd0;font-size:11px;flex:1">Pos/robot</span><input type="number" id="ppos" min="1" max="8" value="2" style="width:42px;background:#121821;color:#fff;border:1px solid #2a3a5a;border-radius:6px;padding:3px;font-size:11px;text-align:center">
+    <span style="color:#aebbd0;font-size:11px;flex:1">Robots</span><input type="number" id="probots" min="1" max="6" value="4" style="width:42px;background:#121821;color:#fff;border:1px solid #2a3a5a;border-radius:6px;padding:3px;font-size:11px;text-align:center">
+    <span style="color:#aebbd0;font-size:11px;flex:1">Pos/robot</span><input type="number" id="ppos" min="1" max="8" value="5" style="width:42px;background:#121821;color:#fff;border:1px solid #2a3a5a;border-radius:6px;padding:3px;font-size:11px;text-align:center">
   </div>
   <div style="display:flex;gap:6px;align-items:center;margin-top:3px">
-    <span style="color:#aebbd0;font-size:11px;flex:1">Cajas por pallet</span><input type="number" id="pcap" min="4" max="80" value="20" style="width:42px;background:#121821;color:#fff;border:1px solid #2a3a5a;border-radius:6px;padding:3px;font-size:11px;text-align:center">
+    <span style="color:#aebbd0;font-size:11px;flex:1">Cajas por pallet</span><input type="number" id="pcap" min="4" max="80" value="32" style="width:42px;background:#121821;color:#fff;border:1px solid #2a3a5a;border-radius:6px;padding:3px;font-size:11px;text-align:center">
   </div>
   <label style="display:flex;gap:6px;align-items:center;margin-top:4px;cursor:pointer"><input type="checkbox" id="ppull" checked> <span style="font-size:11px">Tren a medida (sincronizado → 0 faltas)</span></label>
   <label>Receta de salida · 17 líneas (elige el SKU por línea)</label>
@@ -326,7 +326,7 @@ class SorterSim {
   // posiciones limitadas (robots × posiciones); 1 pallet por SKU. Sin buffer: si el SKU
   // no tiene pallet abierto y no hay posición libre, NO se puede colocar (falta).
   _palletize(b) {
-    const cfg = this.meta.pal || { robots: 1, positions: 2, cap: 20 };
+    const cfg = this.meta.pal || { robots: 4, positions: 5, cap: 32 };
     const totalPos = Math.max(1, cfg.robots * cfg.positions);
     this._pallets = this._pallets || {};               // key SKU -> nº cajas en su pallet abierto
     const key = b.direct ? 'DIR' : ('S' + b.sku);
@@ -470,7 +470,7 @@ class SorterSim {
     return {
       time: this.t, boxes,
       stats: { generated: this.generated, released: this.released, rejected: this.rejected, inSystem: this.boxes.length, throughput: this.throughput(60) },
-      pal: { cfg: this.meta.pal || { robots: 1, positions: 2, cap: 20 }, open: this._pallets || {}, done: this.palDone || 0, miss: this.palMiss || 0 },
+      pal: { cfg: this.meta.pal || { robots: 4, positions: 5, cap: 32 }, open: this._pallets || {}, done: this.palDone || 0, miss: this.palMiss || 0 },
       buffers: this.bufferLevels(), pocket: this.pocketDemand(), bottleneck: this.bottleneck(),
     };
   }
@@ -557,7 +557,7 @@ function buildSorter(opts = {}) {
   const steps = skus.map(s => ({ color: s.color, qty: 1 })); steps.push({ color: directColor, qty: 1 });
   const pocket = opts.pocket || { loop: true, steps, interval: 0.15 }; // libera tirante (cero presión arma el tren)
 
-  return { meta: { name: 'Sorter 4500 · 16 SKUs + directa', boxSize: [0.4, 0.13, 0.3], skus, directW, directColor, directName: DIRECT_NAME, ncol: NCOL, nlvl: NLVL, pal: opts.pal || { robots: 1, positions: 2, cap: 20 }, ref: { perMin: 11 } }, segments: segs, pocket };
+  return { meta: { name: 'Sorter 4500 · 16 SKUs + directa', boxSize: [0.4, 0.13, 0.3], skus, directW, directColor, directName: DIRECT_NAME, ncol: NCOL, nlvl: NLVL, pal: opts.pal || { robots: 4, positions: 5, cap: 32 }, ref: { perMin: 11 } }, segments: segs, pocket };
 }
 
 
@@ -823,7 +823,7 @@ function currentRecipe(meta) {
 }
 function applyRecipe() { if (!sim) return; sim.model.pocket = currentRecipe(sim.meta); sim._pocket = { idx: 0, inStep: 0, done: false }; sim._pocketNext = 0; }
 
-const palCfg = () => ({ robots: Math.max(1, +$('probots').value || 1), positions: Math.max(1, +$('ppos').value || 2), cap: Math.max(2, +$('pcap').value || 20), pull: $('ppull').checked });
+const palCfg = () => ({ robots: Math.max(1, +$('probots').value || 4), positions: Math.max(1, +$('ppos').value || 5), cap: Math.max(2, +$('pcap').value || 32), pull: $('ppull').checked });
 function applyPal() { if (!sim) return; sim.meta.pal = palCfg(); sim._pallets = {}; sim.palDone = 0; sim.palMiss = 0; sim._palSent = {}; sim._prioPtr = 0; sim._palRR = 0; }
 
 function build(rebuildRows = true) {
