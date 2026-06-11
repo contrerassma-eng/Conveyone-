@@ -113,9 +113,12 @@ class SorterSim {
       const rt = { id: s.id, kind: s.kind || (isLift ? 'lift' : 'conveyor'), color: s.color || null, next: s.next || [], isLift };
       if (isLift) {
         rt.at = s.geom.at.slice(); rt.h0 = s.geom.h0; rt.h1 = s.geom.h1;
-        rt.elevator = s.elevator || { cycle: 3, cooldown: 2 };
         rt.dir = s.geom.h1 >= s.geom.h0 ? 'up' : 'down';
-        rt.cooldownUntil = 0; rt.feedCtr = 0; rt.levelCtr = 0;
+        // Qimarox mk5 CONTINUO: conveyor vertical con portadores; varias cajas a la vez
+        rt.length = Math.abs(rt.h1 - rt.h0);
+        rt.speed = s.carrierSpeed != null ? s.carrierSpeed : 0.6;   // velocidad de carrier
+        rt.pitch = s.carrierPitch != null ? s.carrierPitch : 0.5;   // paso entre productos en el elevador
+        rt.col = s.col; rt.pocketControlled = !!s.pocketControlled;
         allPts.push(rt.at);
       } else {
         rt.path = makePath(pointsFromSpec(s.geom)); rt.length = rt.path.length;
@@ -156,12 +159,12 @@ class SorterSim {
   }
 
   _liftBox(id) { for (const b of this.boxes) if (b.seg === id) return b; return null; }
-  _boxAtEnd(id) { const seg = this.seg[id]; let best = null; for (const b of this.boxes) if (b.seg === id && !b.onLift && b.s >= seg.length - 1e-2) { if (!best || b.s > best.s) best = b; } return best; }
+  _boxAtEnd(id) { const seg = this.seg[id]; let best = null; for (const b of this.boxes) if (b.seg === id && b.s >= seg.length - 1e-2) { if (!best || b.s > best.s) best = b; } return best; }
   _entryFree(id) {
-    const seg = this.seg[id];
-    if (seg.isLift) return !this._liftBox(id) && this.t >= (seg.cooldownUntil || 0);
-    const pitch = seg.pitch;
-    for (const b of this.boxes) if (b.seg === id && !b.onLift && b.s < pitch) return false;
+    // hay hueco si no hay caja dentro de un paso (pitch) del inicio — vale para
+    // transportadores y para el elevador continuo Qimarox (slot de carrier en s=0)
+    const seg = this.seg[id], pitch = seg.pitch;
+    for (const b of this.boxes) if (b.seg === id && b.s < pitch) return false;
     return true;
   }
   _occ(id) { let n = 0; for (const b of this.boxes) if (b.seg === id) n++; return n; }
@@ -185,59 +188,54 @@ class SorterSim {
       }
     }
 
-    // 2) MOVIMIENTO en transportadores (cero presión); saltar cajas en elevador
+    // 2) MOVIMIENTO (cero presión) — incluye elevadores Qimarox mk5 (CONTINUOS, varias cajas)
     const bySeg = {};
-    for (const b of this.boxes) if (!b.onLift) (bySeg[b.seg] || (bySeg[b.seg] = [])).push(b);
+    for (const b of this.boxes) (bySeg[b.seg] || (bySeg[b.seg] = [])).push(b);
     for (const id in bySeg) {
-      const seg = this.seg[id]; if (seg.isLift) continue;
+      const seg = this.seg[id];
       const list = bySeg[id].sort((a, b) => b.s - a.s);
       let cap = seg.length;
       for (const b of list) {
-        const old = b.s; let ns = Math.min(b.s + seg.speed * dt, cap); b.s = ns;
+        const old = b.s; const ns = Math.min(b.s + seg.speed * dt, cap); b.s = ns;
         const adv = ns - old; b.moved = adv > 1e-5; b.throttled = adv < seg.speed * dt * 0.9;
         cap = b.s - seg.pitch;
       }
     }
 
-    // 3) ELEVADORES (cíclicos, capacidad 1): cargar, subir/bajar, descargar
+    // 3) SALIDA del elevador continuo: SUBE -> empuja la caja a SU nivel; BAJA -> a la banda
     for (const id of this.lifts) {
-      const L = this.seg[id]; const box = this._liftBox(id);
-      if (box) {
-        box.progress += dt / L.elevator.cycle;
-        if (box.progress >= 1) {
-          box.progress = 1;
-          const drain = box.targetDrain; const dseg = drain ? this.seg[drain] : null;
-          // inyección en la banda de salida en la X de su columna (cajas liberadas por el pocket)
-          const sIn = (box._outS != null) ? box._outS : 0;
-          let ok = false;
-          if (dseg) { if (box._outS != null) { ok = true; for (const o of this.boxes) if (o.seg === drain && !o.onLift && Math.abs(o.s - sIn) < dseg.pitch) ok = false; } else ok = this._entryFree(drain); }
-          if (ok) {
-            box.seg = drain; box.s = sIn; box.onLift = false; box.progress = 0; box.targetDrain = null; box._outS = null;
-            L.cooldownUntil = T + L.elevator.cooldown;
-          } // si no hay hueco, espera (cuello)
-        }
-      } else if (T >= (L.cooldownUntil || 0) && !L.pocketControlled) {
-        // SUBE: lleva cada caja a SU nivel (por SKU); el descenso lo controla el Virtual Pocket
-        let fb = null;
+      const L = this.seg[id];
+      for (const b of this.boxes) {
+        if (b.seg !== id) continue;
         if (L.dir === 'up') {
-          fb = this._boxAtEnd(L.feeders[0]);
-          if (fb) { const lid = L.drains[fb.lvl]; if (lid && this._entryFree(lid)) { fb.h0 = L.h0; fb.h1 = this.seg[lid].height; fb.targetDrain = lid; } else fb = null; }
+          const ex = (b.exitS != null) ? b.exitS : L.length;
+          if (b.s >= ex - 1e-3 && b.targetDrain && this._entryFree(b.targetDrain)) { b.seg = b.targetDrain; b.s = 0; b.exitS = null; b.targetDrain = null; }
+        } else { // BAJA -> banda de salida en la X de su columna
+          if (b.s >= L.length - 1e-3) {
+            const out = b.targetDrain || 'outfeed'; const oseg = this.seg[out]; const sIn = (b._outS != null) ? b._outS : 0;
+            let ok = true; for (const o of this.boxes) if (o.seg === out && Math.abs(o.s - sIn) < oseg.pitch) ok = false;
+            if (ok) { b.seg = out; b.s = sIn; b._outS = null; b.targetDrain = null; }
+          }
         }
-        if (fb) { fb.seg = id; fb.s = 0; fb.onLift = true; fb.progress = 0; }
       }
     }
 
-    // 4) TRANSFERENCIAS en transportadores (divert por color, merge, overflow). No lifts, no pocketBuffer.
+    // 4) TRANSFERENCIAS en transportadores (divert; board al elevador de SUBIDA)
     for (const b of this.boxes) {
-      if (b.onLift) continue;
       const seg = this.seg[b.seg];
       if (seg.isLift) continue;
       if (b.s < seg.length - 1e-3) continue;
       if (seg.sink) { b._sink = true; continue; }
       if (seg.pocketBuffer) continue;                 // lo gobierna el Virtual Pocket (fase 5)
-      const nx = this._chooseNext(seg, b);
-      if (nx && !this.seg[nx].isLift) { b.seg = nx; b.s = Math.max(0, Math.min(b.s - seg.length, this.seg[nx].length)); }
-      else if (nx && this.seg[nx].isLift) { /* lo jala el elevador */ }
+      const nx = this._chooseNext(seg, b); if (!nx) continue;
+      const nseg = this.seg[nx];
+      if (nseg.isLift) {
+        // board al elevador de SUBIDA (continuo): carrier libre en s=0 y nivel del SKU con hueco
+        const lid = nseg.drains[b.lvl]; const lvlH = lid ? this.seg[lid].height : nseg.h1;
+        if (lid && this._entryFree(nx) && this._entryFree(lid)) { b.seg = nx; b.s = 0; b.exitS = (lvlH - nseg.h0); b.targetDrain = lid; }
+      } else {
+        b.seg = nx; b.s = Math.max(0, Math.min(b.s - seg.length, nseg.length));
+      }
     }
 
     // 5) VIRTUAL POCKET (libera por demanda desde los tramos pocketBuffer a la línea de salida común)
@@ -254,7 +252,7 @@ class SorterSim {
     // 7) métricas + EMA de congestión (cajas frenadas)
     for (const id in this.seg) this.seg[id].count = 0;
     for (const b of this.boxes) this.seg[b.seg].count++;
-    let ft = 0; for (const b of this.boxes) if (!b.onLift && b.throttled) ft++;
+    let ft = 0; for (const b of this.boxes) if (b.throttled) ft++;
     this._ftEMA = 0.96 * (this._ftEMA || 0) + 0.04 * ft;
   }
 
@@ -293,10 +291,11 @@ class SorterSim {
       const seg = this.seg[segId]; const out = seg.next[0]; if (!out) return false;
       const outSeg = this.seg[out];
       const b0 = this._boxAtEnd(segId); if (!b0) return false;
-      if (outSeg.isLift) {                              // baja por el elevador de descenso
-        if (!this._entryFree(out)) return false;
-        b0.seg = out; b0.onLift = true; b0.progress = 0; b0.h0 = seg.height; b0.h1 = outSeg.h1;
-        b0.targetDrain = outSeg.next[0]; b0._outS = seg.outfeedS;
+      if (outSeg.isLift) {                              // baja por el Qimarox mk5 (continuo)
+        // board en la posición de su nivel (s = h0_top - altura del nivel); cero presión por carrier
+        const boardS = outSeg.h0 - seg.height;
+        for (const o of this.boxes) if (o.seg === out && Math.abs(o.s - boardS) < outSeg.pitch) return false;
+        b0.seg = out; b0.s = boardS; b0.targetDrain = outSeg.next[0]; b0._outS = seg.outfeedS;
       } else {                                          // directa: a la banda (conveyor->conveyor)
         const entryS = (outSeg.entryByColor && seg.outfeedS != null) ? seg.outfeedS : 0;
         for (const o of this.boxes) if (o.seg === out && !o.onLift && Math.abs(o.s - entryS) < outSeg.pitch) return false;
@@ -368,7 +367,8 @@ class SorterSim {
 
   frame() {
     const boxes = this.boxes.map((b) => {
-      if (b.onLift) { const L = this.seg[b.seg]; return { id: b.id, x: L.at[0], z: L.at[1], y: b.h0 + (b.h1 - b.h0) * b.progress, dx: 0, dz: 1, color: b.color, held: false }; }
+      const sg = this.seg[b.seg];
+      if (sg.isLift) { const f = sg.length ? b.s / sg.length : 0; return { id: b.id, x: sg.at[0], z: sg.at[1], y: sg.h0 + (sg.h1 - sg.h0) * f, dx: 0, dz: 1, color: b.color, held: false }; }
       const seg = this.seg[b.seg]; const p = seg.path.pointAt(b.s); const d = seg.path.dirAt(b.s);
       return { id: b.id, x: p[0], z: p[1], y: seg.height, dx: d[0], dz: d[1], color: b.color, held: !!seg.pocketBuffer };
     });
@@ -425,12 +425,12 @@ function buildSorter(opts = {}) {
   for (let c = 0; c < NCOL; c++) {
     const x = (c + 1) * CELL;
     segs.push({ id: 'o' + c + '_in', kind: 'infeed', color: skus[c * NLVL].color, geom: { type: 'straight', from: [x, 0.4], to: [x, 2.4] }, height: 0.9, speed: vlane, pitch: 0.5, next: ['o' + c + '_up'] });
-    segs.push({ id: 'o' + c + '_up', kind: 'lift', geom: { type: 'lift', at: [x, 2.5], h0: 0.9, h1: 2.7 }, elevator: { cycle, cooldown }, next: ['o' + c + '_lvl0', 'o' + c + '_lvl1', 'o' + c + '_lvl2', 'o' + c + '_lvl3'] });
+    segs.push({ id: 'o' + c + '_up', kind: 'lift', col: c, carrierSpeed: 0.6, carrierPitch: 0.5, geom: { type: 'lift', at: [x, 2.5], h0: 0.9, h1: 2.7 }, elevator: { cycle, cooldown }, next: ['o' + c + '_lvl0', 'o' + c + '_lvl1', 'o' + c + '_lvl2', 'o' + c + '_lvl3'] });
     for (let l = 0; l < NLVL; l++) {
       const sk = skus[c * NLVL + l];
       segs.push({ id: 'o' + c + '_lvl' + l, kind: 'buffer', color: sk.color, sku: sk.idx, geom: { type: 'straight', from: [x, 2.6], to: [x, 8.4] }, height: heights[l], speed: vlane, pitch: 0.5, cap: 12, pocketBuffer: true, next: ['o' + c + '_down'], outfeedS: colOutS(c) });
     }
-    segs.push({ id: 'o' + c + '_down', kind: 'lift', geom: { type: 'lift', at: [x, 8.5], h0: 2.7, h1: 0.9 }, elevator: { cycle, cooldown }, pocketControlled: true, next: ['outfeed'] });
+    segs.push({ id: 'o' + c + '_down', kind: 'lift', col: c, carrierSpeed: 0.6, carrierPitch: 0.5, geom: { type: 'lift', at: [x, 8.5], h0: 2.7, h1: 0.9 }, elevator: { cycle, cooldown }, pocketControlled: true, next: ['outfeed'] });
   }
 
   // ----- Salida DIRECTA (sin elevador, 15%) -----
@@ -456,7 +456,10 @@ const COLMAP = {
   red: 0xd23b3b, blue: 0x3b6fd2, green: 0x2fa84f, yellow: 0xe0c020,
   orange: 0xe08020, purple: 0x8a4fd0, cyan: 0x20b0c0, pink: 0xd060a0,
 };
-const SCENE_COL = { bg: 0x0d1117, ground: 0x11151c, grid: 0x1c2430, steel: 0x8a929c, frame: 0x1a2740, lift: 0x2bb3c8, buffer: 0x2a5a9a, reject: 0x7a1d1d, outfeed: 0x2f7d4f, leg: 0x10151f };
+// Colores reales: estructura RAL 7035 (gris claro), rodillos GALVANIZADOS (plata),
+// elevador Qimarox gris 7035 con portadores naranja (marca Qimarox).
+const RAL7035 = 0xc7cac6, GALV = 0xc2c8ce, QIMAROX_ORANGE = 0xf39200;
+const SCENE_COL = { bg: 0x0d1117, ground: 0x11151c, grid: 0x232a33, steel: GALV, frame: RAL7035, lift: RAL7035, buffer: GALV, reject: 0x7a1d1d, outfeed: GALV, leg: RAL7035 };
 
 function mountSorter(sim, opts = {}) {
   const app = opts.container;
@@ -492,13 +495,14 @@ function mountSorter(sim, opts = {}) {
   const grid = new THREE.GridHelper(span * 4, Math.ceil(span * 4), SCENE_COL.grid, SCENE_COL.grid); grid.position.set(b.cx, 0, b.cz); scene.add(grid);
 
   // ---- materiales ----
-  const steelMat = new THREE.MeshStandardMaterial({ color: SCENE_COL.steel, metalness: 0.6, roughness: 0.45 });
-  const frameMat = new THREE.MeshStandardMaterial({ color: SCENE_COL.frame, metalness: 0.3, roughness: 0.6 });
-  const bufMat = new THREE.MeshStandardMaterial({ color: SCENE_COL.buffer, metalness: 0.3, roughness: 0.6 });
-  const liftMat = new THREE.MeshStandardMaterial({ color: SCENE_COL.lift, metalness: 0.5, roughness: 0.4, transparent: true, opacity: 0.55 });
+  const steelMat = new THREE.MeshStandardMaterial({ color: GALV, metalness: 0.85, roughness: 0.32 }); // rodillos galvanizados
+  const frameMat = new THREE.MeshStandardMaterial({ color: RAL7035, metalness: 0.25, roughness: 0.7 }); // estructura RAL 7035
+  const bufMat = new THREE.MeshStandardMaterial({ color: GALV, metalness: 0.85, roughness: 0.32 });     // buffers: rodillos galvanizados
+  const liftMat = new THREE.MeshStandardMaterial({ color: RAL7035, metalness: 0.3, roughness: 0.6 });   // Qimarox mk5: estructura 7035
+  const carrierMat = new THREE.MeshStandardMaterial({ color: QIMAROX_ORANGE, metalness: 0.4, roughness: 0.5 }); // portadores naranja
   const rejMat = new THREE.MeshStandardMaterial({ color: SCENE_COL.reject, metalness: 0.3, roughness: 0.7 });
-  const outMat = new THREE.MeshStandardMaterial({ color: SCENE_COL.outfeed, metalness: 0.4, roughness: 0.55 });
-  const legMat = new THREE.MeshStandardMaterial({ color: SCENE_COL.leg, roughness: 0.9 });
+  const outMat = new THREE.MeshStandardMaterial({ color: GALV, metalness: 0.8, roughness: 0.35 });      // banda de salida galvanizada
+  const legMat = new THREE.MeshStandardMaterial({ color: RAL7035, metalness: 0.25, roughness: 0.75 });  // patas RAL 7035
 
   // ---- construir tramos ----
   for (const s of sim.model.segments) buildSeg(s);
@@ -534,7 +538,7 @@ function mountSorter(sim, opts = {}) {
       post.position.set(x + sx * W / 2, h0 + H / 2, z + sz * W / 2); scene.add(post);
     }
     for (let yy = h0; yy <= h1; yy += 0.6) {
-      const ring = new THREE.Mesh(new THREE.BoxGeometry(W + 0.06, 0.04, W + 0.06), liftMat);
+      const ring = new THREE.Mesh(new THREE.BoxGeometry(W + 0.06, 0.05, W + 0.06), carrierMat);
       ring.position.set(x, yy, z); scene.add(ring);
     }
   }
