@@ -132,7 +132,7 @@ class SorterSim {
     this._build();
     this._pocket = { idx: 0, inStep: 0, done: false }; this._pocketNext = 0;
     this._pending = []; this._slotG = null; this._slotBase = 0;
-    this.robots = {}; this._palEvents = []; this._batch = null;
+    this.robots = {}; this._palEvents = []; this._batch = null; this._robotRelNext = {};
   }
 
   _build() {
@@ -185,7 +185,7 @@ class SorterSim {
     this.releasedLog.length = 0; this.relByColor = {};
     this._pocket = { idx: 0, inStep: 0, done: false }; this._pocketNext = 0;
     this._pending = []; this._slotG = null; this._slotBase = 0;
-    this.robots = {}; this._palEvents = []; this._batch = null;
+    this.robots = {}; this._palEvents = []; this._batch = null; this._robotRelNext = {};
     this._pallets = {}; this.palDone = 0; this.palMiss = 0; this._palSent = {}; this._prioPtr = 0; this._palRR = 0;
     for (const id in this.seg) { const r = this.seg[id]; if (r.isLift) { r.cooldownUntil = 0; r.feedCtr = 0; r.levelCtr = 0; } else { r.nextSpawn = 0; r.count = 0; } }
     this._ftEMA = 0;
@@ -279,18 +279,19 @@ class SorterSim {
     this._pocketStep();
     this._mergeStep();
 
-    // 5.5) PICK de los robots KUKA con TIEMPO DE CICLO real (sin buffer: el carril corto sólo
-    // acumula 1-2 cajas; si el robot está ocupado, la segregación frena por cero presión).
-    const pickTime = (this.meta.pal && this.meta.pal.pickTime) || 2.5;
+    // 5.5) PICK de los robots KUKA: 1 caja cada pickTime, SIN ACUMULACIÓN. El robot se reservó
+    // (engaged) al desviarse la caja; cuando ésta llega al punto de pick arranca el ciclo. Mientras
+    // pickea no entra ninguna otra (la siguiente espera en la línea de segregación).
+    const pickTime = (this.meta.pal && this.meta.pal.pickTime) || 15;
     for (const sid of this.pickSegs) {
       const sg = this.seg[sid], r = sg.robot;
-      const rs = this.robots[r] || (this.robots[r] = { busy: false, until: 0, color: null, box: null, phase: 0 });
+      const rs = this.robots[r] || (this.robots[r] = { busy: false, engaged: false, until: 0, color: null, box: null, phase: 0 });
       if (rs.busy) {
         rs.phase = Math.max(0, Math.min(1, 1 - (rs.until - this.t) / pickTime));
-        if (this.t >= rs.until) { this._palletize(rs.box); rs.busy = false; rs.box = null; rs.color = null; rs.phase = 0; }
+        if (this.t >= rs.until) { this._palletize(rs.box); rs.busy = false; rs.engaged = false; rs.box = null; rs.boxId = null; rs.color = null; rs.phase = 0; }
       } else {
-        const b = this._boxAtEnd(sid);                  // caja esperando en el punto de pick de ESTA salida
-        if (b) { const k = this.boxes.indexOf(b); if (k >= 0) this.boxes.splice(k, 1); rs.busy = true; rs.until = this.t + pickTime; rs.box = b; rs.color = b.color; rs.phase = 0; rs.px = sg.path.points[0][0]; rs.sku = b.direct ? 'DIR' : ('S' + b.sku); }
+        const b = this._boxAtEnd(sid);                  // la caja (temporizada por el pocket) llegó al punto de pick
+        if (b) { const k = this.boxes.indexOf(b); if (k >= 0) this.boxes.splice(k, 1); rs.busy = true; rs.until = this.t + pickTime; rs.box = b; rs.color = b.color; rs.phase = 0; rs.px = sg.path.points[sg.path.points.length - 1][0]; rs.sku = b.direct ? 'DIR' : ('S' + b.sku); }
       }
     }
 
@@ -433,35 +434,37 @@ class SorterSim {
     return b;
   }
 
-  // VIRTUAL POCKET: en ORDEN de receta, asigna a cada caja un SLOT global (paso fijo sobre
-  // la banda de evacuación) y arranca su cadena real. SKU no disponible -> slot vacío (hueco).
+  // VIRTUAL POCKET = ECUALIZADOR. Los buffers verticales absorben las TANDAS; el pocket libera
+  // para CADA robot como máximo 1 caja cada pickTime (15 s), eligiendo el SKU de ese robot con
+  // MÁS cola (para no saturar ningún buffer). Así la caja llega justo cuando el robot queda libre:
+  // sin acumulación en la entrada del KUKA y sin frenar la línea. Conserva el orden FIFO por SKU.
   _pocketStep() {
-    const P = this.model.pocket; const ev = this.seg['outfeed']; const slotInt = ev ? ev.pitch / ev.speed : 0.6;
+    const pickTime = (this.meta.pal && this.meta.pal.pickTime) || 15;
+    const R = (this.meta.pal && this.meta.pal.robots) || 9;
     if (this._slotG == null) { this._slotG = 0; this._slotBase = this.t; }
-    if (this.t < (this._pocketNext || 0)) return;
-    if (!P || !P.steps || !P.steps.length) {           // sin receta -> FIFO
-      for (const sid of this.pocketSegs) { const b = this._injectTrain(sid); if (b) { b.mergeSlot = this._slotG; this._pending.push({ id: b.id, slot: this._slotG++, sC: this._sCof(sid), flat: this._flatOf(sid) }); this._pocketNext = this.t + slotInt; return; } }
-      this._slotG++; this._pocketNext = this.t + slotInt; return;
-    }
-    if (this._pocket.done) return;
-    const step = P.steps[this._pocket.idx]; const wanted = Array.isArray(step.color) ? step.color : [step.color];
-    let target = null;
-    for (const sid of this.pocketSegs) { const b = this._boxAtEnd(sid); if (b && wanted.includes(b.color)) { target = sid; break; } }
-    if (target) {
-      const b = this._injectTrain(target);
-      if (!b) { this._pocketNext = this.t + slotInt * 0.3; return; }   // cadena ocupada -> reintenta (no avanza receta ni slot)
+    this._robotRelNext = this._robotRelNext || {};
+    for (let r = 0; r < R; r++) {
+      if (this.t < (this._robotRelNext[r] || 0)) continue;          // este robot aún no toca (espaciado 15 s)
+      const sid = this._pickBufferForRobot(r);
+      if (!sid) continue;                                           // sin producto para este robot -> queda libre
+      const b = this._injectTrain(sid);
+      if (!b) continue;                                             // cadena ocupada -> reintenta el próximo step
       b.mergeSlot = this._slotG;
-      this._pending.push({ id: b.id, slot: this._slotG++, sC: this._sCof(target), flat: this._flatOf(target) });
-    } else {
-      this._slotG++;                                   // SKU no disponible -> slot vacío (hueco, sin esperar)
+      this._pending.push({ id: b.id, slot: this._slotG++, sC: this._sCof(sid), flat: this._flatOf(sid) });
+      this._robotRelNext[r] = this.t + pickTime;                    // próxima caja a este robot en 15 s
     }
-    this._pocket.inStep++; let wrap = false;
-    if (this._pocket.inStep >= step.qty) {
-      this._pocket.inStep = 0; this._pocket.idx++;
-      if (this._pocket.idx >= P.steps.length) { if (P.loop) { this._pocket.idx = 0; wrap = true; } else this._pocket.done = true; }
+  }
+  // elige, entre los SKUs de ese robot CON producto listo, el buffer con más cola (equaliza/evita saturar)
+  _pickBufferForRobot(r) {
+    let best = null, bestN = -1;
+    for (const sid of this.pocketSegs) {
+      const b = this._boxAtEnd(sid); if (!b) continue;
+      const robot = b.direct ? this.meta.directRobot : (this.meta.skus[b.sku] ? this.meta.skus[b.sku].robot : 0);
+      if (robot !== r) continue;
+      const n = this.seg[sid].count;
+      if (n > bestN) { bestN = n; best = sid; }
     }
-    if (wrap) this._slotG += 1;                         // ~1.5 cajas de gap entre trenes (slot extra vacío)
-    this._pocketNext = this.t + slotInt;
+    return best;
   }
 
   // MERGE REALISTA (cero presión): la caja recorre su banda negra hasta el final (que EMPALMA
@@ -646,13 +649,14 @@ function buildSorter(opts = {}) {
   segs.push({ id: 'seg_feed', kind: 'segre', geom: { type: 'polyline', points: arcPts(0.4, 9.9 + Ru, Ru, -Math.PI / 2, -3 * Math.PI / 2, 16) }, height: 0.9, speed: vout, pitch: 0.55, next: ['segre0'] });
   for (let i = 0; i < NL; i++) {
     const L = lanes[i], x0 = i === 0 ? 0.4 : laneX(i - 1), x1 = laneX(i), cont = i < NL - 1 ? 'segre' + (i + 1) : 'seg_end';
+    // SIN acumulación: la caja sólo se desvía si el robot está LIBRE (lane sort consulta el robot);
+    // mientras el robot pickea (15 s) la siguiente espera en la línea de segregación.
     segs.push({ id: 'segre' + i, kind: 'segre', geom: { type: 'straight', from: [x0, zSeg], to: [x1, zSeg] }, height: 0.9, speed: vout, pitch: 0.55,
-      sort: { by: 'lane', sku: L.sku, direct: !!L.direct, lane: 'lane' + i, cont }, next: ['lane' + i, cont] });
-    // curva 90° real al carril del SKU + recta hasta el pick; el pallet va detrás
+      sort: { by: 'lane', sku: L.sku, direct: !!L.direct, robot: L.robot, lane: 'pick' + i, cont }, next: ['pick' + i, cont] });
+    // 'pick' = curva 90° real + recta hasta el punto de pick (NO hay carril de acumulación)
     const lx = laneX(i) + Rc;
-    const lanePts = [...arcPts(laneX(i), zSeg + Rc, Rc, -Math.PI / 2, 0, 6), [lx, zPick - 0.4]];
-    segs.push({ id: 'lane' + i, kind: 'roblane', color: L.color, geom: { type: 'polyline', points: lanePts }, height: 0.9, speed: vlane, pitch: 0.5, cap: 1, next: ['pick' + i] });
-    segs.push({ id: 'pick' + i, kind: 'pick', robot: L.robot, sku: L.sku, direct: !!L.direct, color: L.color, geom: { type: 'straight', from: [lx, zPick - 0.4], to: [lx, zPick] }, height: 0.9, speed: vlane, pitch: 0.5 });
+    const pickPts = [...arcPts(laneX(i), zSeg + Rc, Rc, -Math.PI / 2, 0, 6), [lx, zPick]];
+    segs.push({ id: 'pick' + i, kind: 'pick', robot: L.robot, sku: L.sku, direct: !!L.direct, color: L.color, geom: { type: 'polyline', points: pickPts }, height: 0.9, speed: vlane, pitch: 0.5 });
   }
   // remate de la línea (si alguna caja no se desvió -> overflow, debe ser ~0)
   segs.push({ id: 'seg_end', kind: 'segre', geom: { type: 'straight', from: [laneX(NL - 1), zSeg], to: [laneX(NL - 1) + 2.2, zSeg] }, height: 0.9, speed: vout, pitch: 0.55, sink: true, reject: true });
@@ -844,7 +848,7 @@ function mountSorter(sim, opts = {}) {
   }
 
   // ---- SALIDAS de pick: 1 por SKU (del layout, kind 'pick'). Cada robot agrupa sus 'positions'. ----
-  const picks = sim.model.segments.filter(s => s.kind === 'pick').map(s => ({ r: s.robot, x: s.geom.from[0], z: s.geom.to[1], key: s.direct ? 'DIR' : ('S' + s.sku), color: s.color }));
+  const picks = sim.model.segments.filter(s => s.kind === 'pick').map(s => { const p = s.geom.points ? s.geom.points[s.geom.points.length - 1] : s.geom.to; return { r: s.robot, x: p[0], z: p[1], key: s.direct ? 'DIR' : ('S' + s.sku), color: s.color }; });
   const zPickF = picks[0] ? picks[0].z : 14.3, palZ = zPickF + 1.7;     // fila de pallets detrás de las salidas
   const palKeyX = {}; for (const p of picks) palKeyX[p.r + ':' + p.key] = p.x;   // 'r:SKU' -> x de su pallet (= x de su carril)
   const colOfKey = k => { const sku = k.slice(k.indexOf(':') + 1); return sku === 'DIR' ? (sim.meta.directColor || 0x9aa3b0) : (sim.meta.skus[+sku.slice(1)] ? sim.meta.skus[+sku.slice(1)].color : 0x999999); };
