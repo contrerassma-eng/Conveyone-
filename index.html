@@ -783,6 +783,8 @@ function mountSorter(sim, opts = {}) {
     });
   }
   function segBox(a, c, w, th, h, mat) { const dx = c[0] - a[0], dz = c[1] - a[1]; const len = Math.max(0.02, Math.hypot(dx, dz)); const m = new THREE.Mesh(new THREE.BoxGeometry(w, th, len), mat); m.position.set((a[0] + c[0]) / 2, h, (a[1] + c[1]) / 2); m.rotation.y = Math.atan2(dx, dz); return m; }
+  // crea un Mesh y posiciona vía .position.set (Object3D.position es de SOLO LECTURA: Object.assign falla)
+  function posMesh(geo, mat, x, y, z) { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); return m; }
   function dirOf(a, c) { const dx = c[0] - a[0], dz = c[1] - a[1], m = Math.hypot(dx, dz) || 1; return [dx / m, dz / m]; }
   function off(p, d, k) { return [p[0] + d[0] * k, p[1] + d[1] * k]; }
 
@@ -816,13 +818,13 @@ function mountSorter(sim, opts = {}) {
     const g = new THREE.Group(); g.position.set(st.x, 0, st.z + 0.9); scene.add(g);
     const base = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.42, 0.3, 16), kukaBaseMat); base.position.y = 0.15; g.add(base);
     const col = new THREE.Group(); col.position.y = 0.3; g.add(col);
-    col.add(Object.assign(new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.26, 0.55, 14), kukaBaseMat), { position: new THREE.Vector3(0, 0.27, 0) }));
+    col.add(posMesh(new THREE.CylinderGeometry(0.22, 0.26, 0.55, 14), kukaBaseMat, 0, 0.27, 0));
     const sh = new THREE.Group(); sh.position.y = 0.5; col.add(sh);
-    sh.add(Object.assign(new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.95, 0.16), kukaArmMat), { position: new THREE.Vector3(0, 0.47, 0) }));
+    sh.add(posMesh(new THREE.BoxGeometry(0.16, 0.95, 0.16), kukaArmMat, 0, 0.47, 0));
     const el = new THREE.Group(); el.position.y = 0.92; sh.add(el);
-    el.add(Object.assign(new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.13, 1.05), kukaArmMat), { position: new THREE.Vector3(0, 0, -0.45) }));
+    el.add(posMesh(new THREE.BoxGeometry(0.13, 0.13, 1.05), kukaArmMat, 0, 0, -0.45));
     const wr = new THREE.Group(); wr.position.z = -0.95; el.add(wr);
-    wr.add(Object.assign(new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.12, 0.34), kukaBaseMat), { position: new THREE.Vector3(0, -0.12, 0) }));
+    wr.add(posMesh(new THREE.BoxGeometry(0.4, 0.12, 0.34), kukaBaseMat, 0, -0.12, 0));
     const held = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.13, 0.3), boxMat(0xffffff)); held.position.y = -0.22; held.visible = false; wr.add(held);
     robotRig[st.r] = { col, sh, el, wr, held };
   }
@@ -849,8 +851,8 @@ function mountSorter(sim, opts = {}) {
     const st = stations.find(s => s.r === ev.r); if (!st) return;
     const col = ev.sku === 'DIR' ? (sim.meta.directColor || 0x9aa3b0) : (sim.meta.skus[+ev.sku.slice(1)] ? sim.meta.skus[+ev.sku.slice(1)].color : 0x999999);
     const grp = new THREE.Group();
-    grp.add(Object.assign(new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.12, 0.75), woodMat), { position: new THREE.Vector3(0, 0.06, 0) }));   // pallet de madera
-    grp.add(Object.assign(new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.1, 0.7), new THREE.MeshStandardMaterial({ color: col, roughness: 0.6 })), { position: new THREE.Vector3(0, 0.67, 0) })); // carga completa
+    grp.add(posMesh(new THREE.BoxGeometry(0.95, 0.12, 0.75), woodMat, 0, 0.06, 0));   // pallet de madera
+    grp.add(posMesh(new THREE.BoxGeometry(0.9, 1.1, 0.7), new THREE.MeshStandardMaterial({ color: col, roughness: 0.6 }), 0, 0.67, 0)); // carga completa
     grp.position.set(st.x, 0, palZ + 0.2); grp.userData.t0 = sim.t; scene.add(grp); flyPallets.push(grp);
   }
   function updateFlyPallets() {
