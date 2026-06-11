@@ -210,11 +210,9 @@ class SorterSim {
         if (L.dir === 'up') {
           const ex = (b.exitS != null) ? b.exitS : L.length;
           if (b.s >= ex - 1e-3 && b.targetDrain && this._entryFree(b.targetDrain)) { b.seg = b.targetDrain; b.s = 0; b.exitS = null; b.targetDrain = null; }
-        } else { // BAJA -> banda de salida en la X de su columna
+        } else { // BAJA -> entrega a la BANDA PLANA (1 m) que va a la evacuación
           if (b.s >= L.length - 1e-3) {
-            const out = b.targetDrain || 'outfeed'; const oseg = this.seg[out]; const sIn = (b._outS != null) ? b._outS : 0;
-            let ok = true; for (const o of this.boxes) if (o.seg === out && Math.abs(o.s - sIn) < oseg.pitch) ok = false;
-            if (ok) { b.seg = out; b.s = sIn; b._outS = null; b.targetDrain = null; }
+            const out = b.targetDrain; if (out && this._entryFree(out)) { b.seg = out; b.s = 0; b.targetDrain = null; }
           }
         }
       }
@@ -233,6 +231,11 @@ class SorterSim {
         // board al elevador de SUBIDA (continuo): carrier libre en s=0 y nivel del SKU con hueco
         const lid = nseg.drains[b.lvl]; const lvlH = lid ? this.seg[lid].height : nseg.h1;
         if (lid && this._entryFree(nx) && this._entryFree(lid)) { b.seg = nx; b.s = 0; b.exitS = (lvlH - nseg.h0); b.targetDrain = lid; }
+      } else if (nseg.entryByColor && seg.outfeedS != null) {
+        // inyección a la EVACUACIÓN en la X de la columna (banda plana / directa -> evacuación)
+        const sIn = seg.outfeedS;
+        let ok = true; for (const o of this.boxes) if (o.seg === nx && Math.abs(o.s - sIn) < nseg.pitch) ok = false;
+        if (ok) { b.seg = nx; b.s = sIn; }
       } else {
         b.seg = nx; b.s = Math.max(0, Math.min(b.s - seg.length, nseg.length));
       }
@@ -402,44 +405,41 @@ function buildSorter(opts = {}) {
   const directW = 0.15, directColor = 0x9aa3b0;
 
   const segs = [];
-  // ----- Línea principal 4500: celdas con divert por COLUMNA (SKU.col) -----
+  const CELLd = 3;                                   // celda de la línea directa (PRIMERA)
+  const colX = c => CELLd + (c + 1) * CELL;          // x de cada columna
+  const xR = colX(NCOL - 1) + CELL, xL = 1;          // extremos de la banda de evacuación
+  const outS = x => (xR - x);                         // inyección a la evacuación en la X de cada salida
+
+  // ----- Línea principal: PRIMERO deriva la salida DIRECTA (sin elevador, 15%), luego columnas -----
+  segs.push({ id: 'main_d', kind: 'main', geom: { type: 'straight', from: [0, 0], to: [CELLd, 0] }, height: 0.9, speed: vmain, pitch: 0.5,
+    source: { rate, cv: 0.35, burst: 0.1, cap: NSKU * 9 },
+    sort: { by: 'direct', lane: 'direct_in', cont: 'main0' }, next: ['direct_in', 'main0'] });
   for (let c = 0; c < NCOL; c++) {
-    const x0 = c * CELL, x1 = (c + 1) * CELL;
-    const seg = {
-      id: 'main' + c, kind: 'main', geom: { type: 'straight', from: [x0, 0], to: [x1, 0] },
-      height: 0.9, speed: vmain, pitch: 0.5,
-      sort: { by: 'col', divertCol: c, lane: 'o' + c + '_in', cont: (c < NCOL - 1 ? 'main' + (c + 1) : 'tail') },
-      next: ['o' + c + '_in', (c < NCOL - 1 ? 'main' + (c + 1) : 'tail')],
-    };
-    if (c === 0) seg.source = { rate, cv: 0.35, burst: 0.1, cap: NSKU * 9 };
-    segs.push(seg);
+    const x0 = CELLd + c * CELL, x1 = CELLd + (c + 1) * CELL;
+    segs.push({ id: 'main' + c, kind: 'main', geom: { type: 'straight', from: [x0, 0], to: [x1, 0] }, height: 0.9, speed: vmain, pitch: 0.5,
+      sort: { by: 'col', divertCol: c, lane: 'o' + c + '_in', cont: (c < NCOL - 1 ? 'main' + (c + 1) : 'overflow') },
+      next: ['o' + c + '_in', (c < NCOL - 1 ? 'main' + (c + 1) : 'overflow')] });
   }
-  // cola: los SKU "directo" derivan a la salida directa; el resto (raro) -> rechazo
-  segs.push({ id: 'tail', kind: 'main', geom: { type: 'straight', from: [NCOL * CELL, 0], to: [NCOL * CELL + 2, 0] }, height: 0.9, speed: vmain, pitch: 0.5, sort: { by: 'direct', lane: 'direct_in', cont: 'overflow' }, next: ['direct_in', 'overflow'] });
-  segs.push({ id: 'overflow', kind: 'overflow', geom: { type: 'straight', from: [NCOL * CELL + 2, 0], to: [NCOL * CELL + 4.5, 0] }, height: 0.9, speed: vmain, pitch: 0.5, sink: true, reject: true });
+  segs.push({ id: 'overflow', kind: 'overflow', geom: { type: 'straight', from: [CELLd + NCOL * CELL, 0], to: [CELLd + NCOL * CELL + 2.5, 0] }, height: 0.9, speed: vmain, pitch: 0.5, sink: true, reject: true });
 
-  const xR = (NCOL + 2) * CELL, xL = CELL - 1;
-  const colOutS = c => (xR - (c + 1) * CELL);        // posición de inyección en la banda de salida
+  // ----- Salida DIRECTA (PRIMERA, sin elevador, 15%) -> evacuación -----
+  segs.push({ id: 'direct_in', kind: 'direct', color: directColor, geom: { type: 'straight', from: [CELLd, 0.6], to: [CELLd, 9.6] }, height: 0.9, speed: vlane, pitch: 0.5, pocketBuffer: true, direct: true, next: ['outfeed'], outfeedS: outS(CELLd) });
 
-  // ----- Cadena por columna: in -> up(SKU a su nivel) -> 4 niveles(=SKU) -> down(pocket) -> banda -----
+  // ----- Columnas: in -> SUBE(SKU a su nivel) -> 4 niveles(=SKU) -> BAJA(pocket) -> BANDA PLANA 1m -> evacuación -----
   for (let c = 0; c < NCOL; c++) {
-    const x = (c + 1) * CELL;
+    const x = colX(c);
     segs.push({ id: 'o' + c + '_in', kind: 'infeed', color: skus[c * NLVL].color, geom: { type: 'straight', from: [x, 0.4], to: [x, 2.4] }, height: 0.9, speed: vlane, pitch: 0.5, next: ['o' + c + '_up'] });
-    segs.push({ id: 'o' + c + '_up', kind: 'lift', col: c, carrierSpeed: 0.6, carrierPitch: 0.5, geom: { type: 'lift', at: [x, 2.5], h0: 0.9, h1: 2.7 }, elevator: { cycle, cooldown }, next: ['o' + c + '_lvl0', 'o' + c + '_lvl1', 'o' + c + '_lvl2', 'o' + c + '_lvl3'] });
-    for (let l = 0; l < NLVL; l++) {
-      const sk = skus[c * NLVL + l];
-      segs.push({ id: 'o' + c + '_lvl' + l, kind: 'buffer', color: sk.color, sku: sk.idx, geom: { type: 'straight', from: [x, 2.6], to: [x, 8.4] }, height: heights[l], speed: vlane, pitch: 0.5, cap: 12, pocketBuffer: true, next: ['o' + c + '_down'], outfeedS: colOutS(c) });
-    }
-    segs.push({ id: 'o' + c + '_down', kind: 'lift', col: c, carrierSpeed: 0.6, carrierPitch: 0.5, geom: { type: 'lift', at: [x, 8.5], h0: 2.7, h1: 0.9 }, elevator: { cycle, cooldown }, pocketControlled: true, next: ['outfeed'] });
+    segs.push({ id: 'o' + c + '_up', kind: 'lift', col: c, carrierSpeed: 0.6, carrierPitch: 0.5, geom: { type: 'lift', at: [x, 2.5], h0: 0.9, h1: 2.7 }, next: ['o' + c + '_lvl0', 'o' + c + '_lvl1', 'o' + c + '_lvl2', 'o' + c + '_lvl3'] });
+    for (let l = 0; l < NLVL; l++) { const sk = skus[c * NLVL + l];
+      segs.push({ id: 'o' + c + '_lvl' + l, kind: 'buffer', color: sk.color, sku: sk.idx, geom: { type: 'straight', from: [x, 2.6], to: [x, 8.4] }, height: heights[l], speed: vlane, pitch: 0.5, cap: 12, pocketBuffer: true, next: ['o' + c + '_down'] }); }
+    segs.push({ id: 'o' + c + '_down', kind: 'lift', col: c, carrierSpeed: 0.6, carrierPitch: 0.5, geom: { type: 'lift', at: [x, 8.5], h0: 2.7, h1: 0.9 }, pocketControlled: true, next: ['o' + c + '_flat'] });
+    // BANDA PLANA de entrega (1 m) entre el elevador de bajada y la evacuación
+    segs.push({ id: 'o' + c + '_flat', kind: 'flat', geom: { type: 'straight', from: [x, 8.6], to: [x, 9.6] }, height: 0.9, speed: vout, pitch: 0.5, next: ['outfeed'], outfeedS: outS(x) });
   }
 
-  // ----- Salida DIRECTA (sin elevador, 15%) -----
-  const xd = (NCOL) * CELL + 1;
-  segs.push({ id: 'direct_in', kind: 'direct', color: directColor, geom: { type: 'straight', from: [xd, 0.6], to: [xd, 8.4] }, height: 0.9, speed: vlane, pitch: 0.5, pocketBuffer: true, direct: true, next: ['outfeed'], outfeedS: (xR - xd) });
-
-  // ----- BANDA DE SALIDA común (take-away) + entrega 24" -----
-  segs.push({ id: 'outfeed', kind: 'outfeed', geom: { type: 'straight', from: [xR, 11.9], to: [xL, 11.9] }, height: 0.9, speed: vout, pitch: 0.55, entryByColor: true, next: ['deliv'] });
-  segs.push({ id: 'deliv', kind: 'deliv', geom: { type: 'straight', from: [xL, 11.9], to: [xL - 0.61, 11.9] }, height: 0.9, speed: vout, pitch: 0.55, sink: true });
+  // ----- EVACUACIÓN (take-away) CERCA (~1 m de los elevadores) + entrega 24" -----
+  segs.push({ id: 'outfeed', kind: 'outfeed', geom: { type: 'straight', from: [xR, 9.9], to: [xL, 9.9] }, height: 0.9, speed: vout, pitch: 0.55, entryByColor: true, next: ['deliv'] });
+  segs.push({ id: 'deliv', kind: 'deliv', geom: { type: 'straight', from: [xL, 9.9], to: [xL - 0.61, 9.9] }, height: 0.9, speed: vout, pitch: 0.55, sink: true });
 
   // receta: tren consecutivo (1 caja por SKU) INTERCALADO por columnas (paraleliza los
   // 4 elevadores de descenso) + directo. El orden del tren lo dicta esta secuencia.
@@ -502,6 +502,7 @@ function mountSorter(sim, opts = {}) {
   const carrierMat = new THREE.MeshStandardMaterial({ color: QIMAROX_ORANGE, metalness: 0.4, roughness: 0.5 }); // portadores naranja
   const rejMat = new THREE.MeshStandardMaterial({ color: SCENE_COL.reject, metalness: 0.3, roughness: 0.7 });
   const outMat = new THREE.MeshStandardMaterial({ color: GALV, metalness: 0.8, roughness: 0.35 });      // banda de salida galvanizada
+  const beltMat = new THREE.MeshStandardMaterial({ color: 0x2b2f36, metalness: 0.1, roughness: 0.85 }); // banda plana (negra)
   const legMat = new THREE.MeshStandardMaterial({ color: RAL7035, metalness: 0.25, roughness: 0.75 });  // patas RAL 7035
 
   // ---- construir tramos ----
@@ -515,9 +516,10 @@ function mountSorter(sim, opts = {}) {
   }
   function buildSeg(s) {
     if (s.geom.type === 'lift') { buildLift(s); return; }
-    const isOut = s.kind === 'outfeed' || s.kind === 'deliv';
+    const isBelt = s.kind === 'flat' || s.kind === 'deliv';
+    const isOut = s.kind === 'outfeed' || isBelt;
     const W = isOut ? 0.7 : 0.62, P = pts(s.geom), h = s.height != null ? s.height : 0.9;
-    const mat = s.kind === 'buffer' ? bufMat : (s.kind === 'overflow' ? rejMat : (isOut ? outMat : steelMat));
+    const mat = s.kind === 'buffer' ? bufMat : (s.kind === 'overflow' ? rejMat : (isBelt ? beltMat : (s.kind === 'outfeed' ? outMat : steelMat)));
     let legAcc = 0;
     for (let i = 0; i < P.length - 1; i++) {
       const a = P[i], c = P[i + 1];
