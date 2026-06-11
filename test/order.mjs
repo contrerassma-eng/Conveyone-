@@ -11,7 +11,8 @@ const html = readFileSync(join(root, 'index.html'), 'utf8');
 const mod = html.split('<script type="module">')[1].split('</script>')[0];
 const engine = mod.split('// ===== RENDER =====')[0]
   .replace(/^\s*import \* as THREE.*$/m, '')
-  .replace(/^\s*import \{ OrbitControls \}.*$/m, '');
+  .replace(/^\s*import \{ OrbitControls \}.*$/m, '')
+  .replace(/^\s*const OrbitControls = THREE\.OrbitControls;.*$/m, '');   // global THREE (no aplica en headless)
 const { SorterSim, buildSorter } = new Function(engine + '\nreturn { SorterSim, buildSorter };')();
 
 // receta con multiplicadores por volumen (como la UI)

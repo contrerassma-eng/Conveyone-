@@ -60,15 +60,11 @@
   window.hasWebGL = function () { try { var c = document.createElement('canvas'); return !!(window.WebGLRenderingContext && (c.getContext('webgl') || c.getContext('experimental-webgl'))); } catch (e) { return false; } };
   setTimeout(function () { if (!window.__ok) window.showErr('El render no arrancó en 7 s.\nCausas típicas: three.js no cargó (CDN/red bloqueada) o WebGL no disponible en este navegador.\nAbre la URL de GitHub Pages en Chrome/Safari de escritorio o móvil (no el visor embebido).'); }, 7000);
 </script>
-<script type="importmap">
-{ "imports": {
-  "three": "https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.module.js",
-  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.158.0/examples/jsm/"
-}}
-</script>
+<!-- three.js INCRUSTADO (sin CDN): funciona offline y en navegadores que bloquean jsdelivr -->
+<script src="vendor/three.min.js"></script>
+<script src="vendor/OrbitControls.js"></script>
 <script type="module">
-import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+const OrbitControls = THREE.OrbitControls;   // THREE global (build UMD local)
 
 // ===== MOTOR (headless) =====
 // engine.mjs — Motor headless del sistema Sorter 4500 + Kímarox + buffers + Virtual Pocket.
