@@ -604,6 +604,27 @@ function mountSorter(sim, opts = {}) {
     for (const [id, m] of pool) if (!seen.has(id)) { scene.remove(m); pool.delete(id); }
   }
 
+  // ---- pallets KUKA creciendo en 3D (cerca de la entrega) ----
+  const palGroup = new THREE.Group(); scene.add(palGroup);
+  const palMesh = []; const palBoxGeo = new THREE.BoxGeometry(0.42, 0.14, 0.32);
+  const palX0 = sim.bounds.minx - 1.4, palZ = 11.2;     // fila de pallets más allá de la evacuación
+  function updatePallets(pal) {
+    const entries = Object.entries(pal.open); let mi = 0;
+    entries.forEach(([key, n], pi) => {
+      const col = key === 'DIR' ? (sim.meta.directColor || 0x9aa3b0) : (sim.meta.skus[+key.slice(1)] ? sim.meta.skus[+key.slice(1)].color : 0x999999);
+      const px = palX0 + pi * 1.4;
+      for (let k = 0; k < n; k++) {
+        let m = palMesh[mi];
+        if (!m) { m = new THREE.Mesh(palBoxGeo, new THREE.MeshStandardMaterial({ roughness: 0.6 })); palGroup.add(m); palMesh.push(m); }
+        m.visible = true; m.material.color.setHex(col);
+        const layer = Math.floor(k / 4), inL = k % 4;
+        m.position.set(px + (inL % 2 ? 0.46 : 0), 0.95 + layer * 0.15, palZ + (inL < 2 ? 0 : 0.34));
+        mi++;
+      }
+    });
+    for (let j = mi; j < palMesh.length; j++) palMesh[j].visible = false;
+  }
+
   // ---- HUD ----
   const hud = elDiv({ position: 'absolute', top: '10px', left: '12px', font: '600 12px system-ui,Segoe UI,Arial', color: '#dfe7f3', textShadow: '0 1px 2px #000', pointerEvents: 'none', lineHeight: '1.5', maxWidth: '260px' });
   app.appendChild(hud);
@@ -628,6 +649,7 @@ function mountSorter(sim, opts = {}) {
     for (let k = 0; k < steps; k++) sim.step(0.016 * speed);
     const fr = sim.frame();
     updateBoxes(fr);
+    updatePallets(fr.pal);
     controls.update();
     renderer.render(scene, camera);
     drawHUD(fr);
