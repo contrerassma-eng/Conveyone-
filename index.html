@@ -23,23 +23,21 @@
 <div id="app"></div>
 <button id="showCtl">☰ Controles</button>
 <div id="panel">
-  <h1>Sorter + Virtual Pocket <span id="hideCtl" title="Ocultar controles">✕</span></h1>
-  <label>Salidas (colores) <span class="v" id="vOuts">6</span></label>
-  <input type="range" id="outs" min="1" max="8" step="1" value="6">
-  <label>Carga por salida (c/min) <span class="v" id="vRate">9</span></label>
-  <input type="range" id="rate" min="3" max="18" step="1" value="9">
+  <h1>Sorter · 16 SKUs + Pocket <span id="hideCtl" title="Ocultar controles">✕</span></h1>
+  <label>Columnas <span class="v" id="vOuts">4 (16 SKUs)</span></label>
+  <input type="range" id="outs" min="1" max="4" step="1" value="4">
+  <label>Entrada (cajas/min) <span class="v" id="vRate">33</span></label>
+  <input type="range" id="rate" min="6" max="80" step="1" value="33">
+  <label>Velocidad de SALIDA (cajas/min) <span class="v" id="vOut">40</span></label>
+  <input type="range" id="orate" min="6" max="60" step="1" value="40">
   <label>Receta del Virtual Pocket</label>
   <select id="recipe">
-    <option>Tren consecutivo (1 c/u)</option>
-    <option>Ciclo parejo (3 c/u)</option>
-    <option>Demanda rojo alto</option>
-    <option>Solo rojo y azul</option>
-    <option>Lote mezclado</option>
-    <option>FIFO (lo que llegue)</option>
+    <option value="train">Tren consecutivo (1 por SKU)</option>
+    <option value="FIFO">FIFO (lo que llegue)</option>
   </select>
   <label>Velocidad simulación <span class="v" id="vSpeed">3×</span></label>
   <input type="range" id="speed" min="1" max="8" step="1" value="3">
-  <div class="hint">Las cajas se clasifican por color en la línea principal, suben por el elevador Kímarox, esperan en el buffer de 4 niveles, bajan y el Virtual Pocket las libera, según la receta, a la LÍNEA DE SALIDA común (el tren ordenado se ve ahí). Sube la carga para ver los elevadores como cuello.</div>
+  <div class="hint">16 SKUs (4 columnas × 4 niveles, cada nivel un color/SKU) = 85%, más una SALIDA DIRECTA sin elevador = 15%. Entrada desordenada por SKU (mix Danich); el Virtual Pocket entrega un tren ordenado a la banda de salida. Baja la velocidad de salida para estresar (se llenan los buffers).</div>
 </div>
 
 <script type="importmap">
@@ -178,8 +176,10 @@ class SorterSim {
         const src = seg.source;
         const overCap = src.cap && this.boxes.length >= src.cap;
         if (!overCap && this._entryFree(id)) {
-          const color = this.colors[Math.floor(this.rng() * this.colors.length)]; // entrada DESORDENADA (al azar)
-          this.boxes.push(new Box(id, T, color)); this.generated++;
+          const sk = this._sampleSku(); // entrada DESORDENADA por SKU (pesos Danich + dispersión)
+          const box = new Box(id, T, sk.color); box.sku = sk.idx; box.col = sk.col; box.lvl = sk.lvl; box.direct = sk.direct;
+          this.boxes.push(box); this.generated++;
+          this._inBySku = this._inBySku || {}; this._inBySku[sk.key] = (this._inBySku[sk.key] || 0) + 1;
           seg.nextSpawn = T + this._interArrival(src);
         } else { seg.nextSpawn = T + 0.2; }
       }
@@ -206,18 +206,22 @@ class SorterSim {
         box.progress += dt / L.elevator.cycle;
         if (box.progress >= 1) {
           box.progress = 1;
-          const drain = box.targetDrain;
-          if (drain && this._entryFree(drain)) {
-            box.seg = drain; box.s = 0; box.onLift = false; box.progress = 0; box.targetDrain = null;
+          const drain = box.targetDrain; const dseg = drain ? this.seg[drain] : null;
+          // inyección en la banda de salida en la X de su columna (cajas liberadas por el pocket)
+          const sIn = (box._outS != null) ? box._outS : 0;
+          let ok = false;
+          if (dseg) { if (box._outS != null) { ok = true; for (const o of this.boxes) if (o.seg === drain && !o.onLift && Math.abs(o.s - sIn) < dseg.pitch) ok = false; } else ok = this._entryFree(drain); }
+          if (ok) {
+            box.seg = drain; box.s = sIn; box.onLift = false; box.progress = 0; box.targetDrain = null; box._outS = null;
             L.cooldownUntil = T + L.elevator.cooldown;
-          } // si no hay hueco, espera arriba (cuello)
+          } // si no hay hueco, espera (cuello)
         }
-      } else if (T >= (L.cooldownUntil || 0)) {
-        // cargar desde un feeder
+      } else if (T >= (L.cooldownUntil || 0) && !L.pocketControlled) {
+        // SUBE: lleva cada caja a SU nivel (por SKU); el descenso lo controla el Virtual Pocket
         let fb = null;
-        if (L.dir === 'up') { fb = this._boxAtEnd(L.feeders[0]); if (fb) { const lvl = this._pickLevel(L); if (!lvl) fb = null; else { fb.h0 = L.h0; fb.h1 = this.seg[lvl].height; fb.targetDrain = lvl; } } }
-        else { // down: round-robin entre niveles con caja al final
-          for (let k = 0; k < L.feeders.length; k++) { const lid = L.feeders[(L.feedCtr + k) % L.feeders.length]; const cand = this._boxAtEnd(lid); if (cand) { fb = cand; L.feedCtr = (L.feedCtr + k + 1) % L.feeders.length; fb.h0 = this.seg[lid].height; fb.h1 = L.h1; fb.targetDrain = L.drains[0]; break; } }
+        if (L.dir === 'up') {
+          fb = this._boxAtEnd(L.feeders[0]);
+          if (fb) { const lid = L.drains[fb.lvl]; if (lid && this._entryFree(lid)) { fb.h0 = L.h0; fb.h1 = this.seg[lid].height; fb.targetDrain = lid; } else fb = null; }
         }
         if (fb) { fb.seg = id; fb.s = 0; fb.onLift = true; fb.progress = 0; }
       }
@@ -262,16 +266,23 @@ class SorterSim {
   }
 
   _chooseNext(seg, b) {
-    if (seg.sort && seg.sort.by === 'color') {
-      const { divertColor, lane, cont } = seg.sort;
-      if (b.color === divertColor && this._entryFree(lane)) return lane;
-      return cont && this._entryFree(cont) ? cont : null;
+    if (seg.sort) {
+      const S = seg.sort;
+      if (S.by === 'col') { if (!b.direct && b.col === S.divertCol && this._entryFree(S.lane)) return S.lane; return S.cont && this._entryFree(S.cont) ? S.cont : null; }
+      if (S.by === 'direct') { if (b.direct && this._entryFree(S.lane)) return S.lane; return S.cont && this._entryFree(S.cont) ? S.cont : null; }
+      if (S.by === 'color') { if (b.color === S.divertColor && this._entryFree(S.lane)) return S.lane; return S.cont && this._entryFree(S.cont) ? S.cont : null; }
     }
     const nx = seg.next;
     if (!nx.length) return null;
     if (nx.length === 1) return this._entryFree(nx[0]) ? nx[0] : null;
-    // balance por defecto
     let best = null, bn = Infinity; for (const id of nx) { if (!this._entryFree(id)) continue; const n = this._occ(id); if (n < bn) { bn = n; best = id; } } return best;
+  }
+
+  _sampleSku() {
+    const skus = this.meta.skus || [];
+    let r = this.rng(), acc = 0;
+    for (const s of skus) { acc += s.w; if (r < acc) return { idx: s.idx, col: s.col, lvl: s.lvl, color: s.color, direct: false, key: 'S' + s.idx }; }
+    return { idx: -1, col: -1, lvl: -1, color: this.meta.directColor || 0x9aa3b0, direct: true, key: 'DIRECT' };
   }
 
   _pocketStep() {
@@ -281,12 +292,17 @@ class SorterSim {
     const releaseFrom = (segId) => {
       const seg = this.seg[segId]; const out = seg.next[0]; if (!out) return false;
       const outSeg = this.seg[out];
-      // la caja se inyecta en la X de su propia salida (a ras del equipo); aparece SOLO
-      // cuando la transferencia es efectiva y hay hueco real (no invade el transportador)
-      const entryS = (outSeg.entryByColor && seg.outfeedS != null) ? seg.outfeedS : 0;
-      for (const o of this.boxes) if (o.seg === out && !o.onLift && Math.abs(o.s - entryS) < outSeg.pitch) return false;
-      const b = this._boxAtEnd(segId); if (!b) return false;
-      b.seg = out; b.s = entryS; this.released++; this.releasedLog.push({ t: this.t, color: b.color }); this.relByColor[b.color] = (this.relByColor[b.color] || 0) + 1;
+      const b0 = this._boxAtEnd(segId); if (!b0) return false;
+      if (outSeg.isLift) {                              // baja por el elevador de descenso
+        if (!this._entryFree(out)) return false;
+        b0.seg = out; b0.onLift = true; b0.progress = 0; b0.h0 = seg.height; b0.h1 = outSeg.h1;
+        b0.targetDrain = outSeg.next[0]; b0._outS = seg.outfeedS;
+      } else {                                          // directa: a la banda (conveyor->conveyor)
+        const entryS = (outSeg.entryByColor && seg.outfeedS != null) ? seg.outfeedS : 0;
+        for (const o of this.boxes) if (o.seg === out && !o.onLift && Math.abs(o.s - entryS) < outSeg.pitch) return false;
+        b0.seg = out; b0.s = entryS;
+      }
+      this.released++; this.releasedLog.push({ t: this.t, color: b0.color }); this.relByColor[b0.color] = (this.relByColor[b0.color] || 0) + 1;
       this._pocketNext = this.t + ((P && P.interval) || 0);
       return true;
     };
@@ -301,15 +317,13 @@ class SorterSim {
     // buscar un tramo pocketBuffer con una caja del color demandado al frente
     let target = null;
     for (const sid of this.pocketSegs) { const b = this._boxAtEnd(sid); if (b && wanted.includes(b.color)) { target = sid; break; } }
+    const advance = () => { this._pocket.inStep = 0; this._pocket.idx++; if (this._pocket.idx >= P.steps.length) { if (P.loop) this._pocket.idx = 0; else this._pocket.done = true; } };
     if (target) {
-      if (releaseFrom(target)) {
-        this._pocket.inStep++;
-        if (this._pocket.inStep >= step.qty) {
-          this._pocket.inStep = 0; this._pocket.idx++;
-          if (this._pocket.idx >= P.steps.length) { if (P.loop) this._pocket.idx = 0; else this._pocket.done = true; }
-        }
-      }
-    } // si no hay del color demandado -> el pocket ESPERA (la salida se muere de hambre)
+      if (releaseFrom(target)) { this._pocket.inStep++; if (this._pocket.inStep >= step.qty) advance(); }
+    } else {
+      // SKU demandado no disponible -> SALTA al siguiente (no bloquea el tren); cuenta faltas
+      this._skips = (this._skips || 0) + 1; advance();
+    }
   }
 
   _interArrival(src) {
@@ -369,64 +383,71 @@ class SorterSim {
 function boundsOf(pts) { let mnx = Infinity, mnz = Infinity, mxx = -Infinity, mxz = -Infinity; for (const p of pts) { if (p[0] < mnx) mnx = p[0]; if (p[0] > mxx) mxx = p[0]; if (p[1] < mnz) mnz = p[1]; if (p[1] > mxz) mxz = p[1]; } return { minx: mnx, minz: mnz, maxx: mxx, maxz: mxz, cx: (mnx + mxx) / 2, cz: (mnz + mxz) / 2, w: mxx - mnx, h: mxz - mnz }; }
 
 
-// ===== LAYOUT (paramétrico) =====
-const COLORS = ['red', 'blue', 'green', 'yellow', 'orange', 'purple', 'cyan', 'pink'];
+// ===== LAYOUT (paramétrico) — 16 SKUs (4 columnas × 4 niveles = colores) + directa 15% =====
+function hslHex(h, s, l) { const a = s * Math.min(l, 1 - l); const f = n => { const k = (n + h * 12) % 12; const c = l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)); return Math.round(255 * c); }; return (f(0) << 16) | (f(8) << 8) | f(4); }
 
 function buildSorter(opts = {}) {
-  const N = opts.outputs ?? 6;
-  const colors = (opts.colors || COLORS).slice(0, N);
-  const CELL = 5;                                   // 5 m por celda => capacidad 10 (pitch 0.5)
+  const NCOL = opts.outputs ?? 4, NLVL = 4, NSKU = NCOL * NLVL;
+  const CELL = opts.cell ?? 4;                       // celda principal (capacidad 8 a pitch 0.5)
   const cycle = opts.cycle ?? 3, cooldown = opts.cooldown ?? 2;
-  const heights = [1.2, 1.8, 2.4, 3.0];
-  const vmain = opts.mainSpeed ?? 0.6, vlane = opts.laneSpeed ?? 0.6;
-  const rate = opts.rate ?? N * 9 * 60;             // ~9 cajas/min por salida (bajo el tope del elevador)
-  const segs = [];
+  const heights = [0.9, 1.5, 2.1, 2.7];              // nivel 0 = altura de banda
+  const vmain = opts.mainSpeed ?? 0.6, vlane = opts.laneSpeed ?? 0.6, vout = opts.outSpeed ?? 0.95;
+  const rate = opts.rate ?? 11 * 60 * (opts.rateMul ?? 3); // ref Danich ~11 c/min, escalado
 
-  // ----- Línea principal 4500: celdas con divert por color -----
-  for (let k = 0; k < N; k++) {
-    const x0 = k * CELL, x1 = (k + 1) * CELL;
+  // --- SKUs: 16 buffereados (85%) + directo (15%), pesos decrecientes (curva ABC) ---
+  const skus = [];
+  let raw = []; for (let i = 0; i < NSKU; i++) raw.push(Math.pow(0.90, i));
+  const sraw = raw.reduce((a, b) => a + b, 0);
+  for (let i = 0; i < NSKU; i++) skus.push({ idx: i, col: Math.floor(i / NLVL), lvl: i % NLVL, color: hslHex(i / NSKU, 0.62, 0.55), w: 0.85 * raw[i] / sraw });
+  const directW = 0.15, directColor = 0x9aa3b0;
+
+  const segs = [];
+  // ----- Línea principal 4500: celdas con divert por COLUMNA (SKU.col) -----
+  for (let c = 0; c < NCOL; c++) {
+    const x0 = c * CELL, x1 = (c + 1) * CELL;
     const seg = {
-      id: 'main' + k, kind: 'main', geom: { type: 'straight', from: [x0, 0], to: [x1, 0] },
+      id: 'main' + c, kind: 'main', geom: { type: 'straight', from: [x0, 0], to: [x1, 0] },
       height: 0.9, speed: vmain, pitch: 0.5,
-      sort: { by: 'color', divertColor: colors[k], lane: 'o' + k + '_in', cont: (k < N - 1 ? 'main' + (k + 1) : 'overflow') },
-      next: ['o' + k + '_in', (k < N - 1 ? 'main' + (k + 1) : 'overflow')],
+      sort: { by: 'col', divertCol: c, lane: 'o' + c + '_in', cont: (c < NCOL - 1 ? 'main' + (c + 1) : 'tail') },
+      next: ['o' + c + '_in', (c < NCOL - 1 ? 'main' + (c + 1) : 'tail')],
     };
-    if (k === 0) seg.source = { rate, cv: 0.3, burst: 0.1, cap: N * 26 };
+    if (c === 0) seg.source = { rate, cv: 0.35, burst: 0.1, cap: NSKU * 9 };
     segs.push(seg);
   }
-  // rechazo / overflow al final de la principal
-  segs.push({ id: 'overflow', kind: 'overflow', geom: { type: 'straight', from: [N * CELL, 0], to: [N * CELL + 3.5, 0] }, height: 0.9, speed: vmain, pitch: 0.5, sink: true, reject: true });
+  // cola: los SKU "directo" derivan a la salida directa; el resto (raro) -> rechazo
+  segs.push({ id: 'tail', kind: 'main', geom: { type: 'straight', from: [NCOL * CELL, 0], to: [NCOL * CELL + 2, 0] }, height: 0.9, speed: vmain, pitch: 0.5, sort: { by: 'direct', lane: 'direct_in', cont: 'overflow' }, next: ['direct_in', 'overflow'] });
+  segs.push({ id: 'overflow', kind: 'overflow', geom: { type: 'straight', from: [NCOL * CELL + 2, 0], to: [NCOL * CELL + 4.5, 0] }, height: 0.9, speed: vmain, pitch: 0.5, sink: true, reject: true });
 
-  // ----- Cadena por cada salida -----
-  for (let k = 0; k < N; k++) {
-    const x = (k + 1) * CELL, c = colors[k];
-    // 1) cero presión de entrada (perpendicular, +y)
-    segs.push({ id: 'o' + k + '_in', kind: 'infeed', color: c, geom: { type: 'straight', from: [x, 0.6], to: [x, 2.6] }, height: 0.9, speed: vlane, pitch: 0.5, next: ['o' + k + '_up'] });
-    // 2) elevador Kímarox (SUBE)
-    segs.push({ id: 'o' + k + '_up', kind: 'lift', color: c, geom: { type: 'lift', at: [x, 2.9], h0: 0.9, h1: 3.0 }, elevator: { cycle, cooldown }, next: ['o' + k + '_lvl0', 'o' + k + '_lvl1', 'o' + k + '_lvl2', 'o' + k + '_lvl3'] });
-    // 3) buffer vertical de 4 niveles (cada nivel cero presión)
-    for (let lv = 0; lv < 4; lv++) {
-      segs.push({ id: 'o' + k + '_lvl' + lv, kind: 'buffer', color: c, geom: { type: 'straight', from: [x, 3.1], to: [x, 8.6] }, height: heights[lv], speed: vlane, pitch: 0.5, cap: 15, next: ['o' + k + '_down'] });
+  const xR = (NCOL + 2) * CELL, xL = CELL - 1;
+  const colOutS = c => (xR - (c + 1) * CELL);        // posición de inyección en la banda de salida
+
+  // ----- Cadena por columna: in -> up(SKU a su nivel) -> 4 niveles(=SKU) -> down(pocket) -> banda -----
+  for (let c = 0; c < NCOL; c++) {
+    const x = (c + 1) * CELL;
+    segs.push({ id: 'o' + c + '_in', kind: 'infeed', color: skus[c * NLVL].color, geom: { type: 'straight', from: [x, 0.4], to: [x, 2.4] }, height: 0.9, speed: vlane, pitch: 0.5, next: ['o' + c + '_up'] });
+    segs.push({ id: 'o' + c + '_up', kind: 'lift', geom: { type: 'lift', at: [x, 2.5], h0: 0.9, h1: 2.7 }, elevator: { cycle, cooldown }, next: ['o' + c + '_lvl0', 'o' + c + '_lvl1', 'o' + c + '_lvl2', 'o' + c + '_lvl3'] });
+    for (let l = 0; l < NLVL; l++) {
+      const sk = skus[c * NLVL + l];
+      segs.push({ id: 'o' + c + '_lvl' + l, kind: 'buffer', color: sk.color, sku: sk.idx, geom: { type: 'straight', from: [x, 2.6], to: [x, 8.4] }, height: heights[l], speed: vlane, pitch: 0.5, cap: 12, pocketBuffer: true, next: ['o' + c + '_down'], outfeedS: colOutS(c) });
     }
-    // 4) elevador de DESCENSO (BAJA)
-    segs.push({ id: 'o' + k + '_down', kind: 'lift', color: c, geom: { type: 'lift', at: [x, 8.9], h0: 3.0, h1: 0.9 }, elevator: { cycle, cooldown }, next: ['o' + k + '_zp'] });
-    // 5) cero presión final, gobernado por el Virtual Pocket -> inyecta a la banda de salida
-    //    en la X de su propia salida (sin hueco con el equipo) para que el tren SE VEA formarse.
-    segs.push({ id: 'o' + k + '_zp', kind: 'zp', color: c, geom: { type: 'straight', from: [x, 9.2], to: [x, 11.9] }, height: 0.9, speed: vlane, pitch: 0.5, pocketBuffer: true, next: ['outfeed'], outfeedS: (N - k) * CELL });
+    segs.push({ id: 'o' + c + '_down', kind: 'lift', geom: { type: 'lift', at: [x, 8.5], h0: 2.7, h1: 0.9 }, elevator: { cycle, cooldown }, pocketControlled: true, next: ['outfeed'] });
   }
 
-  // ----- BANDA DE SALIDA común (take-away): aquí se forma el tren del Virtual Pocket -----
-  // Fluye de derecha a izquierda. Cada salida inyecta su caja en su propia X (a ras del
-  // equipo, sin hueco) y el ORDEN lo dicta la receta. Termina en la banda de entrega de 24".
-  const xR = (N + 1) * CELL, xL = CELL - 1;
-  segs.push({ id: 'outfeed', kind: 'outfeed', geom: { type: 'straight', from: [xR, 12.0], to: [xL, 12.0] }, height: 0.9, speed: 0.95, pitch: 0.55, entryByColor: true, next: ['deliv'] });
-  // último tramo de banda = 24" (0.61 m): entrega final, a ras (sin hueco -> la caja no cae)
-  segs.push({ id: 'deliv', kind: 'deliv', geom: { type: 'straight', from: [xL, 12.0], to: [xL - 0.61, 12.0] }, height: 0.9, speed: 0.95, pitch: 0.55, sink: true });
+  // ----- Salida DIRECTA (sin elevador, 15%) -----
+  const xd = (NCOL) * CELL + 1;
+  segs.push({ id: 'direct_in', kind: 'direct', color: directColor, geom: { type: 'straight', from: [xd, 0.6], to: [xd, 8.4] }, height: 0.9, speed: vlane, pitch: 0.5, pocketBuffer: true, direct: true, next: ['outfeed'], outfeedS: (xR - xd) });
 
-  // receta del Virtual Pocket: por defecto, tren consecutivo (1 caja por color, en ciclo)
-  const pocket = opts.pocket || { loop: true, steps: colors.map((c) => ({ color: c, qty: 1 })) };
+  // ----- BANDA DE SALIDA común (take-away) + entrega 24" -----
+  segs.push({ id: 'outfeed', kind: 'outfeed', geom: { type: 'straight', from: [xR, 11.9], to: [xL, 11.9] }, height: 0.9, speed: vout, pitch: 0.55, entryByColor: true, next: ['deliv'] });
+  segs.push({ id: 'deliv', kind: 'deliv', geom: { type: 'straight', from: [xL, 11.9], to: [xL - 0.61, 11.9] }, height: 0.9, speed: vout, pitch: 0.55, sink: true });
 
-  return { meta: { name: 'Sorter 4500 + Kímarox + Virtual Pocket', boxSize: [0.4, 0.13, 0.3], colors, outputs: N }, segments: segs, pocket };
+  // receta: tren consecutivo (1 caja por SKU) INTERCALADO por columnas (paraleliza los
+  // 4 elevadores de descenso) + directo. El orden del tren lo dicta esta secuencia.
+  const order = []; for (let l = 0; l < NLVL; l++) for (let c = 0; c < NCOL; c++) order.push(skus[c * NLVL + l]);
+  const steps = order.map(s => ({ color: s.color, qty: 1 })); steps.push({ color: directColor, qty: 2 });
+  const pocket = opts.pocket || { loop: true, steps, interval: opts.outInterval ?? 0 };
+
+  return { meta: { name: 'Sorter 4500 · 16 SKUs + directa', boxSize: [0.4, 0.13, 0.3], skus, directW, directColor, ncol: NCOL, nlvl: NLVL, ref: { perMin: 11 } }, segments: segs, pocket };
 }
 
 
@@ -524,13 +545,15 @@ function mountSorter(sim, opts = {}) {
   // ---- pool de cajas (color = destino) ----
   const boxGeo = new THREE.BoxGeometry(boxSize[0], boxSize[1], boxSize[2]);
   const mats = {}; for (const c in COLMAP) mats[c] = new THREE.MeshStandardMaterial({ color: COLMAP[c], roughness: 0.55 });
+  const matByHex = new Map();
+  function boxMat(col) { if (typeof col === 'number') { let m = matByHex.get(col); if (!m) { m = new THREE.MeshStandardMaterial({ color: col, roughness: 0.55 }); matByHex.set(col, m); } return m; } return mats[col] || steelMat; }
   const pool = new Map();
   function updateBoxes(frame) {
     const seen = new Set();
     for (const bx of frame.boxes) {
       seen.add(bx.id); let m = pool.get(bx.id);
-      if (!m) { m = new THREE.Mesh(boxGeo, mats[bx.color] || steelMat); scene.add(m); pool.set(bx.id, m); }
-      m.material = mats[bx.color] || steelMat;
+      if (!m) { m = new THREE.Mesh(boxGeo, boxMat(bx.color)); scene.add(m); pool.set(bx.id, m); }
+      m.material = boxMat(bx.color);
       m.position.set(bx.x, bx.y + boxSize[1] / 2 + 0.03, bx.z);
       m.rotation.y = Math.atan2(bx.dx, bx.dz);
     }
@@ -586,39 +609,36 @@ function mountSorter(sim, opts = {}) {
 function elDiv(style) { const e = document.createElement('div'); Object.assign(e.style, style); return e; }
 function mkBtn(label, onClick) { const b = document.createElement('button'); b.textContent = label; Object.assign(b.style, { background: '#1a2740', color: '#dfe7f3', border: '1px solid #2a3a5a', borderRadius: '8px', padding: '7px 12px', font: '600 12px system-ui', cursor: 'pointer' }); b.onclick = onClick; return b; }
 function fmt(s) { const m = Math.floor(s / 60), ss = Math.floor(s % 60); return `${String(m).padStart(2, '0')}:${String(ss).padStart(2, '0')}`; }
-function hex(c) { const map = { red: '#ff6b6b', blue: '#6f9bff', green: '#5fd07f', yellow: '#ffd84a', orange: '#ffab5a', purple: '#b78aff', cyan: '#5fd5e6', pink: '#ff8fc8', FIFO: '#cfe0ff', '—': '#888' }; return map[c] || '#cfe0ff'; }
+function hex(c) { if (typeof c === 'number') return '#' + c.toString(16).padStart(6, '0'); const map = { FIFO: '#cfe0ff', '—': '#888' }; return map[c] || '#cfe0ff'; }
 
 
 // ===== ARRANQUE + CONTROLES =====
 const app = document.getElementById('app');
 let ctl = null, sim = null, speed = 3, seed = 12345;
 
-const RECIPES = {
-  'Tren consecutivo (1 c/u)': (colors) => ({ loop: true, steps: colors.map(c => ({ color: c, qty: 1 })) }),
-  'Ciclo parejo (3 c/u)':     (colors) => ({ loop: true, steps: colors.map(c => ({ color: c, qty: 3 })) }),
-  'Demanda rojo alto':        (colors) => ({ loop: true, steps: [{ color: 'red', qty: 8 }].concat(colors.filter(c=>c!=='red').map(c => ({ color: c, qty: 2 }))) }),
-  'Solo rojo y azul':         ()       => ({ loop: true, steps: [{ color: 'red', qty: 5 }, { color: 'blue', qty: 5 }] }),
-  'Lote mezclado':            (colors) => ({ loop: true, steps: [{ color: colors.slice(0,3), qty: 6 }, { color: colors.slice(3), qty: 6 }] }),
-  'FIFO (lo que llegue)':      ()       => ({ loop: true, steps: [] }),
-};
+const $ = id => document.getElementById(id);
 
 function build() {
-  const N = +document.getElementById('outs').value;
-  const rate = +document.getElementById('rate').value * N * 60;   // cajas/min por salida -> cajas/h
-  const colors = ['red','blue','green','yellow','orange','purple','cyan','pink'].slice(0, N);
-  const recipeFn = RECIPES[document.getElementById('recipe').value] || RECIPES['Tren consecutivo (1 c/u)'];
-  const model = buildSorter({ outputs: N, rate, pocket: recipeFn(colors) });
+  const N = +$('outs').value;                          // columnas (×4 niveles = SKUs)
+  const rate = +$('rate').value * 60;                  // entrada cajas/min -> /h
+  const orate = +$('orate').value;                     // velocidad de SALIDA (cajas/min)
+  const outInterval = orate > 0 ? 60 / orate : 0;
+  const opts = { outputs: N, rate, outInterval };
+  if ($('recipe').value === 'FIFO') opts.pocket = { loop: true, steps: [], interval: outInterval };
+  const model = buildSorter(opts);
   if (ctl) ctl.stop();
   app.innerHTML = '';
   sim = new SorterSim(model, seed);
+  window._sim = sim;
   ctl = mountSorter(sim, { container: app, speed, warmup: 120 });
   ctl.start();
 }
 
-document.getElementById('outs').oninput = e => { document.getElementById('vOuts').textContent = e.target.value; build(); };
-document.getElementById('rate').oninput = e => { document.getElementById('vRate').textContent = e.target.value; build(); };
-document.getElementById('recipe').onchange = build;
-document.getElementById('speed').oninput = e => { speed = +e.target.value; document.getElementById('vSpeed').textContent = speed + '×'; if (ctl) ctl.setSpeed(speed); };
+$('outs').oninput = e => { $('vOuts').textContent = e.target.value + ' (' + (e.target.value * 4) + ' SKUs)'; build(); };
+$('rate').oninput = e => { $('vRate').textContent = e.target.value; build(); };
+$('orate').oninput = e => { $('vOut').textContent = e.target.value; build(); };
+$('recipe').onchange = build;
+$('speed').oninput = e => { speed = +e.target.value; $('vSpeed').textContent = speed + '×'; if (ctl) ctl.setSpeed(speed); };
 
 // mostrar / ocultar controles
 const _panel = document.getElementById('panel'), _show = document.getElementById('showCtl');
