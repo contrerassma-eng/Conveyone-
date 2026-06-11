@@ -46,6 +46,7 @@
   <div id="recipeRows" style="max-height:150px;overflow:auto;display:grid;gap:3px;margin-top:2px"></div>
   <label>Velocidad simulación <span class="v" id="vSpeed">3×</span></label>
   <input type="range" id="speed" min="1" max="8" step="1" value="3">
+  <label style="display:flex;gap:6px;align-items:center;margin-top:8px;cursor:pointer"><input type="checkbox" id="hideKuka"> <span style="font-size:11px">Ocultar KUKAs y segregador (cajas salen al final del principal)</span></label>
   <button id="pdfBtn" style="width:100%;margin-top:10px;background:#f39200;color:#1a1a1a;border:0;border-radius:8px;padding:9px;font:700 12px system-ui;cursor:pointer">📄 Generar reporte PDF</button>
   <div class="hint">16 SKUs (4 columnas × 4 niveles, cada nivel un color/SKU) = 85%, más una SALIDA DIRECTA sin elevador = 15%. Entrada desordenada por SKU (mix Danich); el Virtual Pocket entrega un tren ordenado a la banda de salida. Baja la velocidad de salida para estresar (se llenan los buffers).</div>
 </div>
@@ -528,10 +529,10 @@ class SorterSim {
 
   frame() {
     const boxes = this.boxes.map((b) => {
-      const sg = this.seg[b.seg];
-      if (sg.isLift) { const f = sg.length ? b.s / sg.length : 0; return { id: b.id, x: sg.at[0], z: sg.at[1], y: sg.h0 + (sg.h1 - sg.h0) * f, dx: 0, dz: 1, color: b.color, held: false }; }
+      const sg = this.seg[b.seg]; const kuka = sg.kind === 'segre' || sg.kind === 'pick' || sg.kind === 'roblane';
+      if (sg.isLift) { const f = sg.length ? b.s / sg.length : 0; return { id: b.id, x: sg.at[0], z: sg.at[1], y: sg.h0 + (sg.h1 - sg.h0) * f, dx: 0, dz: 1, color: b.color, held: false, kuka }; }
       const seg = this.seg[b.seg]; const p = seg.path.pointAt(b.s); const d = seg.path.dirAt(b.s);
-      return { id: b.id, x: p[0], z: p[1], y: seg.height, dx: d[0], dz: d[1], color: b.color, held: !!seg.pocketBuffer };
+      return { id: b.id, x: p[0], z: p[1], y: seg.height, dx: d[0], dz: d[1], color: b.color, held: !!seg.pocketBuffer, kuka };
     });
     // estado de cada robot KUKA (para animar el brazo y el pick)
     const robots = Object.keys(this.robots).map(r => ({ r: +r, busy: this.robots[r].busy, phase: this.robots[r].phase, color: this.robots[r].color, px: this.robots[r].px, sku: this.robots[r].sku }));
@@ -729,7 +730,9 @@ function mountSorter(sim, opts = {}) {
 
   // ---- construir tramos ----
   const liftAnimators = [];                            // portadores mk5 (cadena continua) animados
-  const rollerXf = [], beltRollerXf = [];              // rodillos: transportadores 1.9"OD@3" / bandas 80mm
+  const rollerXf = [], beltRollerXf = [], rollerXfK = []; // rodillos: planta / banda / lado KUKA (ocultable)
+  const kukaGroup = new THREE.Group(); scene.add(kukaGroup);  // todo el SEGREGADOR + KUKAs + pallets (ocultable)
+  let hideKuka = false;
   for (const s of sim.model.segments) buildSeg(s);
   buildRollers();                                      // instancia todos los rodillos (1 draw call)
 
@@ -748,6 +751,12 @@ function mountSorter(sim, opts = {}) {
       beltRollerXf.forEach((r, i) => { d.position.set(r.x, r.h + 0.01, r.z); d.rotation.set(0, r.a, 0); d.updateMatrix(); im.setMatrixAt(i, d.matrix); });
       im.instanceMatrix.needsUpdate = true; scene.add(im);
     }
+    if (rollerXfK.length) {                             // rodillos del lado KUKA -> al grupo ocultable
+      const g = new THREE.CylinderGeometry(0.0241, 0.0241, 0.6, 10); g.rotateX(Math.PI / 2);
+      const im = new THREE.InstancedMesh(g, steelMat, rollerXfK.length); const d = new THREE.Object3D();
+      rollerXfK.forEach((r, i) => { d.position.set(r.x, r.h + 0.024, r.z); d.rotation.set(0, r.a, 0); d.scale.set(1, 1, r.w / 0.6); d.updateMatrix(); im.setMatrixAt(i, d.matrix); });
+      im.instanceMatrix.needsUpdate = true; kukaGroup.add(im);
+    }
   }
 
   function pts(geom) {
@@ -759,8 +768,10 @@ function mountSorter(sim, opts = {}) {
   function buildSeg(s) {
     if (s.geom.type === 'lift') { buildLift(s); return; }
     const isBelt = s.kind === 'flat' || s.kind === 'deliv';
-    const isOut = s.kind === 'outfeed' || isBelt || s.kind === 'segre' || s.kind === 'roblane' || s.kind === 'pick';
+    const isKuka = s.kind === 'segre' || s.kind === 'roblane' || s.kind === 'pick';   // segregador (ocultable)
+    const isOut = s.kind === 'outfeed' || isBelt || isKuka;
     const W = isOut ? 0.66 : 0.6, P = pts(s.geom), h = s.height != null ? s.height : 0.9;  // equipos 0,6 m -> pasillo 0,6 m a paso 1,2 m
+    const tgt = isKuka ? kukaGroup : scene;            // el lado KUKA va al grupo ocultable
     let legAcc = 0;
     for (let i = 0; i < P.length - 1; i++) {
       const a = P[i], c = P[i + 1];
@@ -772,15 +783,15 @@ function mountSorter(sim, opts = {}) {
         beltRollerXf.push({ x: c[0] - d[0] * 0.05, z: c[1] - d[1] * 0.05, h, a: Math.atan2(-d[1], d[0]) });
       } else {
         // TRANSPORTADOR DE RODILLOS: rodillos Ø1.9" a paso 3" (76 mm)
-        const n = Math.max(1, Math.floor(len / 0.0762)), ang = Math.atan2(-d[1], d[0]);
-        for (let k = 0; k < n; k++) { const t = (k + 0.5) * 0.0762; rollerXf.push({ x: a[0] + d[0] * t, z: a[1] + d[1] * t, h, a: ang, w: W }); }
+        const n = Math.max(1, Math.floor(len / 0.0762)), ang = Math.atan2(-d[1], d[0]), arr = isKuka ? rollerXfK : rollerXf;
+        for (let k = 0; k < n; k++) { const t = (k + 0.5) * 0.0762; arr.push({ x: a[0] + d[0] * t, z: a[1] + d[1] * t, h, a: ang, w: W }); }
       }
       // rieles laterales + patas (estructura RAL 7035)
       const aL = off(a, perp, W / 2), cL = off(c, perp, W / 2), aR = off(a, perp, -W / 2), cR = off(c, perp, -W / 2);
-      scene.add(segBox(aL, cL, 0.04, 0.1, h + 0.02, frameMat));
-      scene.add(segBox(aR, cR, 0.04, 0.1, h + 0.02, frameMat));
+      tgt.add(segBox(aL, cL, 0.04, 0.1, h + 0.02, frameMat));
+      tgt.add(segBox(aR, cR, 0.04, 0.1, h + 0.02, frameMat));
       legAcc += len;
-      if (legAcc >= 1.8 && h > 0.3) { legAcc = 0; const leg = new THREE.Mesh(new THREE.BoxGeometry(0.06, h, 0.06), legMat); leg.position.set(a[0], h / 2, a[1]); scene.add(leg); }
+      if (legAcc >= 1.8 && h > 0.3) { legAcc = 0; const leg = new THREE.Mesh(new THREE.BoxGeometry(0.06, h, 0.06), legMat); leg.position.set(a[0], h / 2, a[1]); tgt.add(leg); }
     }
   }
   // Qimarox Prorunner mk5: torre RAL 7035 + portadores tipo PEINE en cadena continua que
@@ -840,6 +851,7 @@ function mountSorter(sim, opts = {}) {
   function updateBoxes(frame) {
     const seen = new Set();
     for (const bx of frame.boxes) {
+      if (hideKuka && bx.kuka) continue;               // KUKAs ocultos: la caja desaparece al final del principal
       seen.add(bx.id); let m = pool.get(bx.id);
       if (!m) { m = new THREE.Mesh(boxGeo, boxMat(bx.color)); scene.add(m); pool.set(bx.id, m); }
       m.material = boxMat(bx.color);
@@ -862,7 +874,7 @@ function mountSorter(sim, opts = {}) {
   for (const p of picks) (byRobotPicks[p.r] || (byRobotPicks[p.r] = [])).push(p);
   for (const r in byRobotPicks) {
     const ps = byRobotPicks[r], bx = ps.reduce((a, p) => a + p.x, 0) / ps.length, bz = zPickF + 0.95;
-    const g = new THREE.Group(); g.position.set(bx, 0, bz); scene.add(g);
+    const g = new THREE.Group(); g.position.set(bx, 0, bz); kukaGroup.add(g);
     g.add(posMesh(new THREE.CylinderGeometry(0.34, 0.42, 0.3, 16), kukaBaseMat, 0, 0.15, 0));
     const col = new THREE.Group(); col.position.y = 0.3; g.add(col);
     col.add(posMesh(new THREE.CylinderGeometry(0.22, 0.26, 0.55, 14), kukaBaseMat, 0, 0.27, 0));
@@ -872,7 +884,7 @@ function mountSorter(sim, opts = {}) {
     el.add(posMesh(new THREE.BoxGeometry(0.13, 0.13, 1.15), kukaArmMat, 0, 0, -0.5));
     const wr = new THREE.Group(); wr.position.z = -1.05; el.add(wr);
     wr.add(posMesh(new THREE.BoxGeometry(0.4, 0.12, 0.34), kukaBaseMat, 0, -0.12, 0));
-    const held = new THREE.Mesh(boxGeo, boxMat(0xffffff)); held.visible = false; scene.add(held);  // EN ESCENA: viaja del pick al pallet
+    const held = new THREE.Mesh(boxGeo, boxMat(0xffffff)); held.visible = false; kukaGroup.add(held);  // EN ESCENA: viaja del pick al pallet
     robotRig[r] = { col, sh, el, wr, held, bx, bz };
   }
   function poseRobot(rs) {
@@ -889,7 +901,7 @@ function mountSorter(sim, opts = {}) {
   }
 
   // ---- pallets creciendo en 3D, 1 por SKU bajo su carril + pallet COMPLETO que sale ----
-  const palGroup = new THREE.Group(); scene.add(palGroup);
+  const palGroup = new THREE.Group(); kukaGroup.add(palGroup);
   const palMesh = []; const palBoxGeo = new THREE.BoxGeometry(0.42, 0.14, 0.32);
   const woodMat = new THREE.MeshStandardMaterial({ color: 0x8a6a3a, roughness: 0.85 });
   const flyPallets = [];
@@ -898,7 +910,8 @@ function mountSorter(sim, opts = {}) {
     const col = colOfKey(ev.r + ':' + ev.sku), grp = new THREE.Group();
     grp.add(posMesh(new THREE.BoxGeometry(0.95, 0.12, 0.75), woodMat, 0, 0.06, 0));
     grp.add(posMesh(new THREE.BoxGeometry(0.9, 1.1, 0.7), new THREE.MeshStandardMaterial({ color: col, roughness: 0.6 }), 0, 0.67, 0));
-    grp.position.set(px, 0, palZ + 0.2); grp.userData.t0 = sim.t; scene.add(grp); flyPallets.push(grp);
+    grp.position.set(px, 0, palZ + 0.2); grp.userData.t0 = sim.t; kukaGroup.add(grp); flyPallets.push(grp);
+    if (hideKuka) grp.visible = false;
   }
   function updateFlyPallets() {
     for (let i = flyPallets.length - 1; i >= 0; i--) { const g = flyPallets[i], age = sim.t - g.userData.t0; g.position.z = palZ + 0.2 + age * 1.1; if (age > 3) { scene.remove(g); flyPallets.splice(i, 1); } }
@@ -1013,6 +1026,8 @@ function mountSorter(sim, opts = {}) {
     stop() { running = false; },
     setSpeed(x) { speed = x; },
     view(n) { if (views[n]) applyView(views[n]); },
+    setHideKuka(v) { hideKuka = !!v; kukaGroup.visible = !hideKuka; },   // oculta segregador + KUKAs + pallets
+
   };
 }
 
@@ -1072,6 +1087,7 @@ function build(rebuildRows = true) {
   sim = new SorterSim(model, seed); window._sim = sim;
   ctl = mountSorter(sim, { container: app, speed, warmup: 120 });
   ctl.start();
+  if ($('hideKuka').checked) ctl.setHideKuka(true);    // conserva el estado del toggle al reconstruir
 }
 
 $('outs').oninput = e => { $('vOuts').textContent = e.target.value + ' (' + (e.target.value * 4) + ' SKUs)'; build(true); };
@@ -1081,6 +1097,7 @@ $('probots').onchange = () => build(false);   // nº de robots cambia la geometr
 $('ppos').onchange = applyPal;                 // posiciones = capacidad de pallets (sólo umbral de faltas)
 $('pcap').onchange = applyPal; $('ppull').onchange = applyPal; $('ptime').onchange = applyPal;
 $('speed').oninput = e => { speed = +e.target.value; $('vSpeed').textContent = speed + '×'; if (ctl) ctl.setSpeed(speed); };
+$('hideKuka').onchange = e => { if (ctl) ctl.setHideKuka(e.target.checked); };
 
 // ---- Reporte PDF (jsPDF vía CDN) : entrada/salida por SKU, ocupación de buffers, paletizado, parámetros ----
 $('pdfBtn').onclick = generarPDF;
