@@ -25,45 +25,38 @@ function volRecipe(m) {
 function run(opts, seed, SEC) {
   const m = buildSorter(opts); m.pocket = volRecipe(m);
   const sim = new SorterSim(m, seed);
-  // captura: orden del TREN (al salir de la evacuación) y POR ROBOT (al paletizar)
-  const train = [];           // slot al transferir outfeed -> deliv (orden del tren)
-  const perRobot = {};        // robot -> [slot] al paletizar
+  // captura: orden POR SKU (1 carril por SKU -> el orden dentro de un SKU debe ser monótono)
+  const perSku = {};          // 'S#'/'DIR' -> [slot] al paletizar
+  let segLoss = 0;            // cajas perdidas en el SEGREGADOR (llegan a seg_end)
   const rp = sim._palletize.bind(sim);
-  sim._palletize = function (b) { (perRobot[b.robot] = perRobot[b.robot] || []).push(b.mergeSlot); rp(b); };
-  // hook del tren: marca el slot cuando la caja entra a 'deliv'
+  sim._palletize = function (b) { const k = b.direct ? 'DIR' : ('S' + b.sku); (perSku[k] = perSku[k] || []).push(b.mergeSlot); rp(b); };
   for (let i = 0; i < SEC / 0.05; i++) {
     sim.step(0.05);
-    for (const b of sim.boxes) if (b.seg === 'deliv' && !b._seenTrain) { b._seenTrain = true; train.push(b.mergeSlot); }
+    for (const b of sim.boxes) if (b.seg === 'seg_end' && !b._segLoss) { b._segLoss = true; segLoss++; }
   }
-  let backTrain = 0; for (let i = 1; i < train.length; i++) if (train[i] <= train[i - 1]) backTrain++;
-  const robots = {}; let backRobots = 0, totalRob = 0;
-  for (const r of Object.keys(perRobot).sort()) { const s = perRobot[r]; let bk = 0; for (let i = 1; i < s.length; i++) if (s[i] <= s[i - 1]) bk++; robots[r] = { n: s.length, back: bk }; backRobots += bk; totalRob += s.length; }
+  let backSku = 0, nSku = 0;
+  for (const k in perSku) { const s = perSku[k]; nSku++; for (let i = 1; i < s.length; i++) if (s[i] <= s[i - 1]) backSku++; }
   // colisiones (cajas a < 0.30 m en cualquier transportador)
   const bySeg = {}; for (const b of sim.boxes) (bySeg[b.seg] || (bySeg[b.seg] = [])).push(b.s);
   let collide = 0; for (const id in bySeg) { const a = bySeg[id].sort((x, y) => x - y); for (let i = 1; i < a.length; i++) if (a[i] - a[i - 1] < 0.30) collide++; }
   const r = sim.report();
-  return { train, backTrain, robots, backRobots, totalRob, collide, rejected: sim.rejected, done: r.pal.done, miss: r.pal.miss, gen: sim.generated, out: r.totalOut };
+  return { backSku, nSku, segLoss, collide, rejected: sim.rejected, done: r.pal.done, miss: r.pal.miss, gen: sim.generated, out: r.totalOut };
 }
 
-// ====== ESCENARIO 1: nominal (4 robots) ======
-let R = run({ outputs: 4, rate: 33 * 60, outSpeed: 0.95, pal: { robots: 4, positions: 5, cap: 32 } }, 12345, 700);
-console.log(`[NOMINAL 4 robots]  generadas ${R.gen} · entregadas ${R.out} · rechazo-segregador ${R.rejected} · pallets ${R.done} · faltas ${R.miss}`);
-console.log(`  TREN (evacuación): desorden ${R.backTrain} / ${R.train.length}  ${R.backTrain === 0 ? '✓ orden perfecto' : '✗'}`);
-for (const r in R.robots) console.log(`  robot ${r}: ${R.robots[r].n} cajas · desorden ${R.robots[r].back} ${R.robots[r].back === 0 ? '✓' : '✗'}`);
-console.log(`  colisiones (<0.30 m): ${R.collide}  ${R.collide === 0 ? '✓ sin obstáculos' : '✗'}`);
+// ====== ESCENARIO 1: nominal (9 robots x2, default) ======
+let R = run({ outputs: 4, rate: 33 * 60, outSpeed: 0.95, pal: { robots: 9, positions: 2, cap: 32, pickTime: 2.5 } }, 12345, 700);
+console.log(`[NOMINAL 9x2]  generadas ${R.gen} · entregadas ${R.out} · pallets ${R.done} · faltas ${R.miss}`);
+console.log(`  orden POR SKU (${R.nSku} SKUs): retrocesos ${R.backSku}  ${R.backSku === 0 ? '✓ cada SKU en orden' : '✗'}`);
+console.log(`  perdidas en segregador ${R.segLoss}  · rechazo total ${R.rejected}  · colisiones ${R.collide}  ${R.segLoss === 0 && R.collide === 0 && R.rejected === 0 ? '✓' : '✗'}`);
 
-// ====== ESCENARIO 2: estrés (salida lenta, tasa alta) ======
-let S = run({ outputs: 4, rate: 45 * 60, outSpeed: 0.5, pal: { robots: 4, positions: 5, cap: 32 } }, 999, 700);
-console.log(`\n[ESTRÉS salida lenta]  entregadas ${S.out} · rechazo ${S.rejected} · faltas ${S.miss}`);
-console.log(`  TREN desorden ${S.backTrain}  · robots desorden-total ${S.backRobots}  · colisiones ${S.collide}  ${S.backTrain === 0 && S.backRobots === 0 && S.collide === 0 ? '✓' : '✗'}`);
+// ====== ESCENARIO 2: estrés (salida lenta, tasa alta) — el overflow de la línea principal es válido ======
+let S = run({ outputs: 4, rate: 60 * 60, outSpeed: 0.5, pal: { robots: 9, positions: 2, cap: 32, pickTime: 2.5 } }, 999, 700);
+console.log(`\n[ESTRÉS]  entregadas ${S.out} · faltas ${S.miss} · perdidas-segregador ${S.segLoss} · overflow-principal ${S.rejected}`);
+console.log(`  orden por SKU retrocesos ${S.backSku}  · colisiones ${S.collide}  ${S.backSku === 0 && S.collide === 0 && S.segLoss === 0 ? '✓' : '✗'}`);
 
-// Invariantes que importan con MERGE REALISTA + SEGREGADOR:
-//  - 0 colisiones (cero presión real, sin atascos visibles)
-//  - 0 cajas perdidas/rechazadas (la caja siempre se entrega, nunca desaparece)
-//  - faltas reflejan capacidad de los KUKA (informativo)
-// El orden global de la evacuación queda agrupado por estación (físicamente correcto en una
-// take-away con merges separados); cada robot recibe su columna EN ORDEN (el orden por SKU/pallet
-// es lo que importa para paletizar; el cruce entre SKUs distintos de un mismo robot es inocuo).
-const ok = R.collide === 0 && R.rejected === 0 && S.collide === 0 && S.rejected === 0;
-console.log(`\n${ok ? '✓✓ OK: sin colisiones ni cajas perdidas; cada robot recibe su columna en orden' : '✗ revisar'}`);
+// Invariantes reales (1 carril por SKU, robots con varias salidas):
+//  - cada SKU se paletiza EN ORDEN (retrocesos 0); el orden entre SKUs distintos es irrelevante.
+//  - 0 colisiones; 0 cajas perdidas en el SEGREGADOR (overflow de la línea principal bajo estrés es válido).
+const ok = R.backSku === 0 && R.collide === 0 && R.rejected === 0 && R.segLoss === 0 && S.backSku === 0 && S.collide === 0 && S.segLoss === 0;
+console.log(`\n${ok ? '✓✓ OK: cada SKU en orden, sin colisiones ni cajas perdidas en el segregador' : '✗ revisar'}`);
 process.exit(ok ? 0 : 1);

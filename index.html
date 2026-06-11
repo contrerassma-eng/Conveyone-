@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>Sorter 4500 + Kímarox + Virtual Pocket — Simulador 3D</title>
+<title>Sorter 4500 + Qimarox + Virtual Pocket — Simulador 3D</title>
 <link rel="icon" href="data:,">
 <style>
   html,body{margin:0;height:100%;background:#0d1117;overflow:hidden;font-family:system-ui,Segoe UI,Arial}
@@ -75,7 +75,7 @@
 const OrbitControls = THREE.OrbitControls;   // THREE global (build UMD local)
 
 // ===== MOTOR (headless) =====
-// engine.mjs — Motor headless del sistema Sorter 4500 + Kímarox + buffers + Virtual Pocket.
+// engine.mjs — Motor headless del sistema Sorter 4500 + Qimarox + buffers + Virtual Pocket.
 
 // ---------- RNG con semilla (mulberry32) — determinismo ----------
 function makeRng(seed) {
@@ -585,18 +585,21 @@ function buildSorter(opts = {}) {
   // ----- Salida DIRECTA (PRIMERA, sin elevador, 15%) -> evacuación -----
   segs.push({ id: 'direct_in', kind: 'direct', color: directColor, geom: { type: 'straight', from: [CELLd, 0.6], to: [CELLd, 8.4] }, height: 0.9, speed: vlane, pitch: 0.5, pocketBuffer: true, direct: true, next: ['direct_flat'], outfeedS: outS(CELLd) });
   // BANDA NEGRA de la salida DIRECTA (sin elevador) -> EMPALMA con la evacuación (z=9.9)
-  segs.push({ id: 'direct_flat', kind: 'flat', geom: { type: 'straight', from: [CELLd, 8.7], to: [CELLd, 9.9] }, height: 0.9, speed: vout, pitch: 0.5, next: ['outfeed'], outfeedS: outS(CELLd) });
+  segs.push({ id: 'direct_flat', kind: 'flat', geom: { type: 'straight', from: [CELLd, 8.7], to: [CELLd, 9.55] }, height: 0.9, speed: vout, pitch: 0.5, next: ['outfeed'], outfeedS: outS(CELLd) });
 
   // ----- Columnas: in -> SUBE(SKU a su nivel) -> 4 niveles(=SKU) -> BAJA(pocket) -> BANDA PLANA 1m -> evacuación -----
   for (let c = 0; c < NCOL; c++) {
     const x = colX(c);
-    segs.push({ id: 'o' + c + '_in', kind: 'infeed', color: skuAt(c, 0).color, geom: { type: 'straight', from: [x, 0.4], to: [x, 2.4] }, height: 0.9, speed: vlane, pitch: 0.5, next: ['o' + c + '_up'] });
+    // INGRESO al elevador: termina ANTES de las garras de ascenso (separación atrás); la caja
+    // espera ahí y al transferir avanza a la zona de traslape donde la garra la toma y sube.
+    segs.push({ id: 'o' + c + '_in', kind: 'infeed', color: skuAt(c, 0).color, geom: { type: 'straight', from: [x, 0.4], to: [x, 1.95] }, height: 0.9, speed: vlane, pitch: 0.5, next: ['o' + c + '_up'] });
     segs.push({ id: 'o' + c + '_up', kind: 'lift', col: c, carrierSpeed: 0.6, carrierPitch: 0.5, geom: { type: 'lift', at: [x, 2.5], h0: 0.9, h1: 2.7 }, next: ['o' + c + '_lvl0', 'o' + c + '_lvl1', 'o' + c + '_lvl2', 'o' + c + '_lvl3'] });
     for (let l = 0; l < NLVL; l++) { const sk = skuAt(c, l);
-      segs.push({ id: 'o' + c + '_lvl' + l, kind: 'buffer', color: sk.color, sku: sk.idx, geom: { type: 'straight', from: [x, 2.6], to: [x, 8.4] }, height: heights[l], speed: vlane, pitch: 0.5, cap: 12, pocketBuffer: true, next: ['o' + c + '_down'] }); }
+      segs.push({ id: 'o' + c + '_lvl' + l, kind: 'buffer', color: sk.color, sku: sk.idx, geom: { type: 'straight', from: [x, 3.05], to: [x, 7.95] }, height: heights[l], speed: vlane, pitch: 0.5, cap: 10, pocketBuffer: true, next: ['o' + c + '_down'] }); }
     segs.push({ id: 'o' + c + '_down', kind: 'lift', col: c, carrierSpeed: 0.6, carrierPitch: 0.5, geom: { type: 'lift', at: [x, 8.5], h0: 2.7, h1: 0.9 }, pocketControlled: true, next: ['o' + c + '_flat'] });
-    // BANDA NEGRA de entrega (rodillo motriz/retorno 80 mm) que EMPALMA con la evacuación (z=9.9)
-    segs.push({ id: 'o' + c + '_flat', kind: 'flat', geom: { type: 'straight', from: [x, 8.7], to: [x, 9.9] }, height: 0.9, speed: vout, pitch: 0.5, next: ['outfeed'], outfeedS: outS(x) });
+    // BANDA NEGRA (rodillo motriz/retorno 80 mm): empieza tras las garras del elevador y termina
+    // en la ESTRUCTURA LATERAL de la evacuación (no invade su eje). La caja salta a la evacuación.
+    segs.push({ id: 'o' + c + '_flat', kind: 'flat', geom: { type: 'straight', from: [x, 9.05], to: [x, 9.55] }, height: 0.9, speed: vout, pitch: 0.5, next: ['outfeed'], outfeedS: outS(x) });
   }
 
   // ----- EVACUACIÓN (take-away) CERCA (~1 m de los elevadores) + entrega 24" -----
