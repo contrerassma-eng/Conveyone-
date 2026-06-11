@@ -43,6 +43,7 @@
   <div id="recipeRows" style="max-height:150px;overflow:auto;display:grid;gap:3px;margin-top:2px"></div>
   <label>Velocidad simulación <span class="v" id="vSpeed">3×</span></label>
   <input type="range" id="speed" min="1" max="8" step="1" value="3">
+  <button id="pdfBtn" style="width:100%;margin-top:10px;background:#1f6feb;color:#fff;border:0;border-radius:8px;padding:9px;font:700 12px system-ui;cursor:pointer">📄 Generar reporte PDF</button>
   <div class="hint">16 SKUs (4 columnas × 4 niveles, cada nivel un color/SKU) = 85%, más una SALIDA DIRECTA sin elevador = 15%. Entrada desordenada por SKU (mix Danich); el Virtual Pocket entrega un tren ordenado a la banda de salida. Baja la velocidad de salida para estresar (se llenan los buffers).</div>
 </div>
 
@@ -268,6 +269,30 @@ class SorterSim {
     for (const b of this.boxes) this.seg[b.seg].count++;
     let ft = 0; for (const b of this.boxes) if (b.throttled) ft++;
     this._ftEMA = 0.96 * (this._ftEMA || 0) + 0.04 * ft;
+
+    // muestreo de ocupación de buffers (para el reporte: promedio y pico)
+    if (((this._stepCtr = (this._stepCtr || 0) + 1) % 10) === 0) {
+      let bt = 0, cap = 0; for (const id in this.seg) { const s = this.seg[id]; if (s.kind === 'buffer') { bt += s.count; cap += s.cap; } }
+      this._bufCap = cap; this._bufSum = (this._bufSum || 0) + bt; this._bufSamples = (this._bufSamples || 0) + 1;
+      if (bt > (this._bufPeak || 0)) this._bufPeak = bt;
+    }
+  }
+
+  // datos para el REPORTE PDF: entrada/salida por SKU, ocupación de buffers, paletizado, parámetros
+  report() {
+    const skus = this.meta.skus || [], inB = this._inBySku || {}, outB = this._outBySku || {};
+    const tIn = Object.values(inB).reduce((a, b) => a + b, 0) || 1;
+    const tOut = Object.values(outB).reduce((a, b) => a + b, 0) || 1;
+    const rows = skus.map(s => { const k = 'S' + s.idx; return { name: s.name, color: s.color, ref: s.w, in: inB[k] || 0, inPct: (inB[k] || 0) / tIn, out: outB[k] || 0, outPct: (outB[k] || 0) / tOut }; });
+    rows.push({ name: this.meta.directName || 'Directo', color: this.meta.directColor, ref: this.meta.directW || 0.15, in: inB['DIRECT'] || 0, inPct: (inB['DIRECT'] || 0) / tIn, out: outB['DIR'] || 0, outPct: (outB['DIR'] || 0) / tOut });
+    const ev = this.seg['outfeed'], src = (this.seg['main_d'] || {}).source || {};
+    return {
+      t: this.t, rows, totalIn: tIn, totalOut: tOut,
+      buffers: { avg: (this._bufSum || 0) / Math.max(1, this._bufSamples || 0), peak: this._bufPeak || 0, cap: this._bufCap || 0 },
+      pal: { cfg: this.meta.pal, done: this.palDone || 0, miss: this.palMiss || 0 },
+      params: { box: this.box, refPerMin: (this.meta.ref || {}).perMin || 11, srcRate: src.rate || 0, vout: ev ? ev.speed : 0, outPitch: ev ? ev.pitch : 0, ncol: this.meta.ncol, nlvl: this.meta.nlvl, bufCap: this._bufCap || 0 },
+      generated: this.generated, released: this.released, rejected: this.rejected,
+    };
   }
 
   _pickLevel(L) {
@@ -305,6 +330,7 @@ class SorterSim {
     const totalPos = Math.max(1, cfg.robots * cfg.positions);
     this._pallets = this._pallets || {};               // key SKU -> nº cajas en su pallet abierto
     const key = b.direct ? 'DIR' : ('S' + b.sku);
+    this._outBySku = this._outBySku || {}; this._outBySku[key] = (this._outBySku[key] || 0) + 1; // SALIDA por SKU (reporte)
     if (this._pallets[key] != null) {
       this._pallets[key]++;
       if (this._pallets[key] >= cfg.cap) { delete this._pallets[key]; if (this._palSent) delete this._palSent[key]; this.palDone = (this.palDone || 0) + 1; }
@@ -590,6 +616,7 @@ function mountSorter(sim, opts = {}) {
   const legMat = new THREE.MeshStandardMaterial({ color: RAL7035, metalness: 0.25, roughness: 0.75 });  // patas RAL 7035
 
   // ---- construir tramos ----
+  const liftAnimators = [];                            // portadores mk5 (cadena continua) animados
   for (const s of sim.model.segments) buildSeg(s);
 
   function pts(geom) {
@@ -616,17 +643,46 @@ function mountSorter(sim, opts = {}) {
       if (legAcc >= 1.8 && h > 0.3) { legAcc = 0; const leg = new THREE.Mesh(new THREE.BoxGeometry(0.06, h, 0.06), legMat); leg.position.set(a[0], h / 2, a[1]); scene.add(leg); }
     }
   }
+  // Qimarox Prorunner mk5: torre RAL 7035 + portadores tipo PEINE en cadena continua que
+  // suben por la cara de carga y retornan por la trasera (varias cajas a la vez).
   function buildLift(s) {
-    const x = s.geom.at[0], z = s.geom.at[1], h0 = Math.min(s.geom.h0, s.geom.h1) - 0.1, h1 = Math.max(s.geom.h0, s.geom.h1) + 0.25;
-    const W = 0.5, H = h1 - h0;
+    const x = s.geom.at[0], z = s.geom.at[1];
+    const dir = s.geom.h1 >= s.geom.h0 ? 1 : -1;        // sube (+1) o baja (-1)
+    const h0 = Math.min(s.geom.h0, s.geom.h1) - 0.12, h1 = Math.max(s.geom.h0, s.geom.h1) + 0.30;
+    const W = 0.52, D = 0.52, H = h1 - h0;
+    // 4 columnas + travesaños arriba/abajo (estructura 7035)
     for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
-      const post = new THREE.Mesh(new THREE.BoxGeometry(0.05, H, 0.05), liftMat);
-      post.position.set(x + sx * W / 2, h0 + H / 2, z + sz * W / 2); scene.add(post);
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.06, H, 0.06), liftMat);
+      post.position.set(x + sx * W / 2, h0 + H / 2, z + sz * D / 2); scene.add(post);
     }
-    for (let yy = h0; yy <= h1; yy += 0.6) {
-      const ring = new THREE.Mesh(new THREE.BoxGeometry(W + 0.06, 0.05, W + 0.06), carrierMat);
-      ring.position.set(x, yy, z); scene.add(ring);
+    for (const yy of [h0, h1]) for (const sz of [-1, 1]) {
+      const cb = new THREE.Mesh(new THREE.BoxGeometry(W + 0.08, 0.07, 0.06), liftMat);
+      cb.position.set(x, yy, z + sz * D / 2); scene.add(cb);
     }
+    // paneles de guarda laterales (semitransparentes, look de jaula)
+    const guardMat = new THREE.MeshStandardMaterial({ color: RAL7035, metalness: 0.2, roughness: 0.8, transparent: true, opacity: 0.12 });
+    for (const sx of [-1, 1]) { const g = new THREE.Mesh(new THREE.BoxGeometry(0.02, H, D), guardMat); g.position.set(x + sx * (W / 2 + 0.01), h0 + H / 2, z); scene.add(g); }
+    // portadores tipo peine, repartidos en el lazo (cara delantera + retorno trasero)
+    const front = z - (D / 2 + 0.07), back = z + (D / 2 + 0.07);
+    const pitch = s.carrierPitch || 0.5, n = Math.max(2, Math.ceil((2 * H) / pitch));
+    const tineGeo = new THREE.BoxGeometry(0.045, 0.03, 0.36), spineGeo = new THREE.BoxGeometry(W + 0.04, 0.05, 0.05);
+    const carriers = [];
+    for (let i = 0; i < n; i++) {
+      const g = new THREE.Group();
+      const spine = new THREE.Mesh(spineGeo, carrierMat); spine.position.set(0, 0, -0.17); g.add(spine);
+      for (const fx of [-0.18, -0.06, 0.06, 0.18]) { const t = new THREE.Mesh(tineGeo, carrierMat); t.position.set(fx, 0, 0); g.add(t); }
+      scene.add(g); carriers.push(g);
+    }
+    liftAnimators.push((tt) => {
+      const trav = (tt * (s.carrierSpeed || 0.6)) % (2 * H);
+      for (let i = 0; i < n; i++) {
+        const ph = (trav + i * pitch) % (2 * H);
+        let yy, zz;
+        if (ph < H) { zz = front; yy = dir > 0 ? h0 + ph : h1 - ph; }       // cara de carga
+        else { const p2 = ph - H; zz = back; yy = dir > 0 ? h1 - p2 : h0 + p2; } // retorno
+        const g = carriers[i]; g.position.set(x, yy, zz); g.rotation.y = zz === back ? Math.PI : 0;
+      }
+    });
   }
   function segBox(a, c, w, th, h, mat) { const dx = c[0] - a[0], dz = c[1] - a[1]; const len = Math.max(0.02, Math.hypot(dx, dz)); const m = new THREE.Mesh(new THREE.BoxGeometry(w, th, len), mat); m.position.set((a[0] + c[0]) / 2, h, (a[1] + c[1]) / 2); m.rotation.y = Math.atan2(dx, dz); return m; }
   function dirOf(a, c) { const dx = c[0] - a[0], dz = c[1] - a[1], m = Math.hypot(dx, dz) || 1; return [dx / m, dz / m]; }
@@ -696,6 +752,7 @@ function mountSorter(sim, opts = {}) {
     const fr = sim.frame();
     updateBoxes(fr);
     updatePallets(fr.pal);
+    for (const a of liftAnimators) a(sim.t);             // portadores mk5 en movimiento
     controls.update();
     renderer.render(scene, camera);
     drawHUD(fr);
@@ -787,6 +844,104 @@ $('rate').oninput = e => { $('vRate').textContent = e.target.value; build(false)
 $('orate').oninput = e => { $('vOut').textContent = e.target.value; build(false); };
 $('probots').onchange = applyPal; $('ppos').onchange = applyPal; $('pcap').onchange = applyPal; $('ppull').onchange = applyPal;
 $('speed').oninput = e => { speed = +e.target.value; $('vSpeed').textContent = speed + '×'; if (ctl) ctl.setSpeed(speed); };
+
+// ---- Reporte PDF (jsPDF vía CDN) : entrada/salida por SKU, ocupación de buffers, paletizado, parámetros ----
+$('pdfBtn').onclick = generarPDF;
+async function generarPDF() {
+  if (!sim) return;
+  const btn = $('pdfBtn'), label = btn.textContent; btn.textContent = '⏳ generando…'; btn.disabled = true;
+  try {
+    const { jsPDF } = await import('https://cdn.jsdelivr.net/npm/jspdf@2.5.1/+esm');
+    const R = sim.report(), doc = new jsPDF({ unit: 'mm', format: 'a4' });
+    const PW = 210, M = 14; let y = 0;
+    const hx = c => '#' + (typeof c === 'number' ? c.toString(16).padStart(6, '0') : '999999');
+    const rgb = c => [(c >> 16) & 255, (c >> 8) & 255, c & 255];
+    const pct = v => (v * 100).toFixed(1) + '%';
+    const head = (t, sub) => { doc.setFillColor(16, 24, 40); doc.rect(0, y, PW, 9, 'F'); doc.setTextColor(159, 195, 255); doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.text(t, M, y + 6); if (sub) { doc.setTextColor(150, 160, 180); doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.text(sub, PW - M, y + 6, { align: 'right' }); } y += 13; doc.setTextColor(30, 30, 30); };
+    const page = () => { doc.addPage(); y = M; };
+
+    // ---- Portada / encabezado ----
+    doc.setFillColor(13, 17, 23); doc.rect(0, 0, PW, 30, 'F');
+    doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold'); doc.setFontSize(15);
+    doc.text('Reporte de simulación — Sorter 4500 + Kímarox mk5', M, 13);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(170, 185, 210);
+    const dur = fmt(R.t), now = new Date().toLocaleString('es-CL');
+    doc.text(`Generado ${now}  ·  duración simulada ${dur}  ·  16 SKUs (4×4) + directa`, M, 20);
+    doc.text(`Entrada ${R.generated} cajas · liberadas ${R.released} · entregadas ${R.totalOut} · rechazo ${R.rejected}`, M, 26);
+    y = 36;
+
+    // ---- 1) Distribución de ENTRADA por SKU ----
+    head('1 · Distribución de ENTRADA por SKU', `total ${R.totalIn} cajas`);
+    doc.setFontSize(7.5);
+    const barW = 46, x0 = M, xRef = 92, xIn = 116, xBar = 140;
+    doc.setFont('helvetica', 'bold'); doc.setTextColor(110, 120, 140);
+    doc.text('SKU', x0, y); doc.text('ref %', xRef, y, { align: 'right' }); doc.text('entrada', xIn, y, { align: 'right' }); doc.text('% entrada', xBar - 1, y, { align: 'right' }); y += 1.5;
+    doc.setDrawColor(220, 224, 230); doc.line(M, y, PW - M, y); y += 3.5;
+    doc.setFont('helvetica', 'normal');
+    for (const r of R.rows) {
+      const [cr, cg, cb] = rgb(r.color); doc.setFillColor(cr, cg, cb); doc.rect(x0, y - 2.6, 2.6, 2.6, 'F');
+      doc.setTextColor(40, 40, 40); doc.text(r.name.slice(0, 26), x0 + 4, y);
+      doc.text(pct(r.ref), xRef, y, { align: 'right' }); doc.text(String(r.in), xIn, y, { align: 'right' });
+      doc.setFillColor(232, 236, 242); doc.rect(xBar, y - 2.6, barW, 2.6, 'F');
+      doc.setFillColor(cr, cg, cb); doc.rect(xBar, y - 2.6, barW * Math.min(1, r.inPct / 0.2), 2.6, 'F');
+      doc.setTextColor(90, 100, 120); doc.text(pct(r.inPct), xBar + barW + 2, y);
+      y += 4.4; if (y > 280) page();
+    }
+    y += 4;
+
+    // ---- 2) Distribución de SALIDA por SKU (verifica que respeta la mezcla) ----
+    if (y > 215) page(); head('2 · Distribución de SALIDA por SKU (tren ordenado)', `total ${R.totalOut} cajas`);
+    doc.setFontSize(7.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(110, 120, 140);
+    doc.text('SKU', x0, y); doc.text('salida', xIn, y, { align: 'right' }); doc.text('% salida', xBar - 1, y, { align: 'right' }); y += 1.5;
+    doc.line(M, y, PW - M, y); y += 3.5; doc.setFont('helvetica', 'normal');
+    for (const r of R.rows) {
+      const [cr, cg, cb] = rgb(r.color); doc.setFillColor(cr, cg, cb); doc.rect(x0, y - 2.6, 2.6, 2.6, 'F');
+      doc.setTextColor(40, 40, 40); doc.text(r.name.slice(0, 26), x0 + 4, y); doc.text(String(r.out), xIn, y, { align: 'right' });
+      doc.setFillColor(232, 236, 242); doc.rect(xBar, y - 2.6, barW, 2.6, 'F');
+      doc.setFillColor(cr, cg, cb); doc.rect(xBar, y - 2.6, barW * Math.min(1, r.outPct / 0.2), 2.6, 'F');
+      doc.setTextColor(90, 100, 120); doc.text(pct(r.outPct), xBar + barW + 2, y);
+      y += 4.4; if (y > 280) page();
+    }
+    y += 4; if (y > 230) page();
+
+    // ---- 3) Ocupación de buffers ----
+    head('3 · Ocupación de buffers (cero presión)');
+    doc.setFontSize(9); doc.setTextColor(40, 40, 40);
+    const occPct = R.buffers.cap ? R.buffers.avg / R.buffers.cap : 0, peakPct = R.buffers.cap ? R.buffers.peak / R.buffers.cap : 0;
+    doc.text(`Capacidad total: ${R.buffers.cap} cajas  (4 columnas × 4 niveles × 12)`, M, y); y += 5.5;
+    doc.text(`Ocupación promedio: ${R.buffers.avg.toFixed(1)} cajas  (${pct(occPct)})`, M, y); y += 5.5;
+    doc.text(`Ocupación pico: ${R.buffers.peak} cajas  (${pct(peakPct)})`, M, y); y += 7;
+    doc.setFillColor(232, 236, 242); doc.rect(M, y, 120, 5, 'F'); doc.setFillColor(47, 168, 79); doc.rect(M, y, 120 * Math.min(1, occPct), 5, 'F');
+    doc.setFillColor(224, 192, 32); doc.rect(M + 120 * Math.min(1, occPct) - 0.6, y, 1.2, 5, 'F');
+    doc.setFontSize(7); doc.setTextColor(120, 120, 120); doc.text('prom (verde) · pico (marca)', M, y + 9); y += 16;
+
+    // ---- 4) Paletizado KUKA ----
+    if (y > 250) page(); head('4 · Paletizado (robots KUKA)');
+    doc.setFontSize(9); doc.setTextColor(40, 40, 40);
+    doc.text(`Configuración: ${R.pal.cfg.robots} robot(s) × ${R.pal.cfg.positions} posición(es) · ${R.pal.cfg.cap} cajas/pallet`, M, y); y += 5.5;
+    doc.text(`Pallets completados: ${R.pal.done}`, M, y); y += 5.5;
+    doc.setTextColor(R.pal.miss ? 180 : 40, R.pal.miss ? 40 : 40, 40);
+    doc.text(`Faltas (sin posición disponible): ${R.pal.miss}  ${R.pal.miss ? '→ faltan paletizadores' : '→ capacidad suficiente'}`, M, y); y += 9;
+
+    // ---- 5) Parámetros de transporte ----
+    if (y > 250) page(); head('5 · Parámetros de transporte');
+    doc.setFontSize(9); doc.setTextColor(40, 40, 40);
+    const P = R.params, lines = [
+      `Caja: ${(P.box[0] * 1000) | 0}×${(P.box[2] * 1000) | 0}×${(P.box[1] * 1000) | 0} mm · 22 kg (dominante Danich)`,
+      `Tasa de referencia: ${P.refPerMin} cajas/min (P90 14, máx 15) · fuente simulada ${(P.srcRate / 60).toFixed(0)} c/min`,
+      `Velocidad de salida (evacuación): ${P.vout.toFixed(2)} m/s · paso ${P.outPitch.toFixed(2)} m`,
+      `Estructura: ${P.ncol} columnas × ${P.nlvl} niveles · niveles 0.9 / 1.5 / 2.1 / 2.7 m`,
+      `Elevadores: Qimarox Prorunner mk5 (continuo, portadores) subida + bajada por columna`,
+      `Capacidad de buffer: ${P.bufCap} cajas (12 por nivel) · 85% buffereado + 15% directo`,
+      `Colores: estructura RAL 7035 · rodillos galvanizados · portadores Qimarox naranja`,
+    ];
+    for (const l of lines) { doc.text('• ' + l, M, y); y += 5.5; }
+
+    doc.save(`reporte-simulacion-${Date.now()}.pdf`);
+  } catch (e) {
+    alert('No se pudo generar el PDF: ' + e.message);
+  } finally { btn.textContent = label; btn.disabled = false; }
+}
 
 // mostrar / ocultar controles
 const _panel = document.getElementById('panel'), _show = document.getElementById('showCtl');
