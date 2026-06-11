@@ -315,12 +315,20 @@ class SorterSim {
   _colorKey(color) { const s = (this.meta.skus || []).find(s => s.color === color); return s ? ('S' + s.idx) : 'DIR'; }
   _bufWith(key) { for (const sid of this.pocketSegs) { const b = this._boxAtEnd(sid); if (b) { const k = b.direct ? 'DIR' : ('S' + b.sku); if (k === key) return sid; } } return null; }
 
-  // inyecta una caja del tramo `segId` al inicio de la evacuación (punto único, cero presión)
+  // libera una caja por su CADENA REAL de salida: buffer -> (elevador mk5 BAJA) -> banda
+  // negra -> evacuación. Para la salida directa (sin elevador): buffer -> banda negra -> evac.
   _injectTrain(segId) {
-    const out = 'outfeed', outSeg = this.seg[out]; if (!outSeg) return false;
-    for (const o of this.boxes) if (o.seg === out && o.s < outSeg.pitch) return false; // hueco de 1 caja
+    const seg = this.seg[segId]; const out = seg.next[0]; if (!out) return false;
+    const outSeg = this.seg[out];
     const b = this._boxAtEnd(segId); if (!b) return false;
-    b.seg = out; b.s = 0; b.targetDrain = null; b._outS = null;
+    if (outSeg.isLift) {                                // entra al elevador de bajada (Qimarox mk5)
+      const boardS = outSeg.h0 - seg.height;
+      for (const o of this.boxes) if (o.seg === out && Math.abs(o.s - boardS) < outSeg.pitch) return false;
+      b.seg = out; b.s = boardS; b.targetDrain = outSeg.next[0];
+    } else {                                            // entra a la banda negra (directa, sin elevador)
+      for (const o of this.boxes) if (o.seg === out && o.s < outSeg.pitch) return false;
+      b.seg = out; b.s = 0; b.targetDrain = null;
+    }
     this.released++; this.releasedLog.push({ t: this.t, color: b.color }); this.relByColor[b.color] = (this.relByColor[b.color] || 0) + 1;
     return true;
   }
@@ -485,7 +493,9 @@ function buildSorter(opts = {}) {
   segs.push({ id: 'overflow', kind: 'overflow', geom: { type: 'straight', from: [CELLd + NCOL * CELL, 0], to: [CELLd + NCOL * CELL + 2.5, 0] }, height: 0.9, speed: vmain, pitch: 0.5, sink: true, reject: true });
 
   // ----- Salida DIRECTA (PRIMERA, sin elevador, 15%) -> evacuación -----
-  segs.push({ id: 'direct_in', kind: 'direct', color: directColor, geom: { type: 'straight', from: [CELLd, 0.6], to: [CELLd, 9.6] }, height: 0.9, speed: vlane, pitch: 0.5, pocketBuffer: true, direct: true, next: ['outfeed'], outfeedS: outS(CELLd) });
+  segs.push({ id: 'direct_in', kind: 'direct', color: directColor, geom: { type: 'straight', from: [CELLd, 0.6], to: [CELLd, 8.4] }, height: 0.9, speed: vlane, pitch: 0.5, pocketBuffer: true, direct: true, next: ['direct_flat'], outfeedS: outS(CELLd) });
+  // BANDA NEGRA de la salida DIRECTA (sin elevador) -> evacuación
+  segs.push({ id: 'direct_flat', kind: 'flat', geom: { type: 'straight', from: [CELLd, 8.6], to: [CELLd, 9.6] }, height: 0.9, speed: vout, pitch: 0.5, next: ['outfeed'], outfeedS: outS(CELLd) });
 
   // ----- Columnas: in -> SUBE(SKU a su nivel) -> 4 niveles(=SKU) -> BAJA(pocket) -> BANDA PLANA 1m -> evacuación -----
   for (let c = 0; c < NCOL; c++) {
