@@ -570,7 +570,7 @@ const DIRECT_NAME = 'Directo · cola 15%';
 
 function buildSorter(opts = {}) {
   const NCOL = opts.outputs ?? 4, NLVL = 4, NSKU = NCOL * NLVL;
-  const CELL = opts.cell ?? 4;                       // celda principal (capacidad 8 a pitch 0.5)
+  const CELL = opts.cell ?? 1.2;                     // PASO entre salidas del S4500 = 1,2 m (uniforme, compacto)
   const cycle = opts.cycle ?? 3, cooldown = opts.cooldown ?? 2;
   const heights = [0.9, 1.5, 2.1, 2.7];              // nivel 0 = altura de banda
   const vmain = opts.mainSpeed ?? 0.6, vlane = opts.laneSpeed ?? 0.6, vout = opts.outSpeed ?? 0.95;
@@ -595,9 +595,9 @@ function buildSorter(opts = {}) {
   const directRobot = Math.min(Math.floor(NSKU / skusPerRobot), nrob - 1);
 
   const segs = [];
-  const CELLd = 3;                                   // celda de la línea directa (PRIMERA)
-  const colX = c => CELLd + (c + 1) * CELL;          // x de cada columna
-  const xR = colX(NCOL - 1) + CELL, xL = 1;          // extremos de la banda de evacuación
+  const CELLd = CELL;                                // misma celda para la salida DIRECTA (todo uniforme, paso 1,2 m)
+  const colX = c => CELLd + (c + 1) * CELL;          // x de cada columna (salidas a paso 1,2 m)
+  const xR = colX(NCOL - 1) + CELL, xL = 0.4;        // extremos de la banda de evacuación
   const outS = x => (xR - x);                         // inyección a la evacuación en la X de cada salida
 
   // ----- Línea principal: PRIMERO deriva la salida DIRECTA (sin elevador, 15%), luego columnas -----
