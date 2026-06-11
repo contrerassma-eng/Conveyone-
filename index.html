@@ -283,54 +283,43 @@ class SorterSim {
     return { idx: -1, col: -1, lvl: -1, color: this.meta.directColor || 0x9aa3b0, direct: true, key: 'DIRECT' };
   }
 
+  // inyecta una caja del tramo `segId` al inicio de la evacuación (punto único, cero presión)
+  _injectTrain(segId) {
+    const out = 'outfeed', outSeg = this.seg[out]; if (!outSeg) return false;
+    for (const o of this.boxes) if (o.seg === out && o.s < outSeg.pitch) return false; // hueco de 1 caja
+    const b = this._boxAtEnd(segId); if (!b) return false;
+    b.seg = out; b.s = 0; b.targetDrain = null; b._outS = null;
+    this.released++; this.releasedLog.push({ t: this.t, color: b.color }); this.relByColor[b.color] = (this.relByColor[b.color] || 0) + 1;
+    return true;
+  }
+
   _pocketStep() {
     const P = this.model.pocket;
-    // throttle: velocidad de SALIDA regulable (para estresar el sistema)
+    const ev = this.seg['outfeed']; const slotInt = ev ? ev.pitch / ev.speed : 0.6; const trainGap = ev ? 1.5 * (this.box[2] + 0.1) / ev.speed : 0.7;
     if (this.t < (this._pocketNext || 0)) return;
-    const releaseFrom = (segId) => {
-      const seg = this.seg[segId]; const out = seg.next[0]; if (!out) return false;
-      const outSeg = this.seg[out];
-      const b0 = this._boxAtEnd(segId); if (!b0) return false;
-      if (outSeg.isLift) {                              // baja por el Qimarox mk5 (continuo)
-        // board en la posición de su nivel (s = h0_top - altura del nivel); cero presión por carrier
-        const boardS = outSeg.h0 - seg.height;
-        for (const o of this.boxes) if (o.seg === out && Math.abs(o.s - boardS) < outSeg.pitch) return false;
-        b0.seg = out; b0.s = boardS; b0.targetDrain = outSeg.next[0]; b0._outS = seg.outfeedS;
-      } else {                                          // directa: a la banda (conveyor->conveyor)
-        const entryS = (outSeg.entryByColor && seg.outfeedS != null) ? seg.outfeedS : 0;
-        for (const o of this.boxes) if (o.seg === out && !o.onLift && Math.abs(o.s - entryS) < outSeg.pitch) return false;
-        b0.seg = out; b0.s = entryS;
-      }
-      this.released++; this.releasedLog.push({ t: this.t, color: b0.color }); this.relByColor[b0.color] = (this.relByColor[b0.color] || 0) + 1;
-      this._pocketNext = this.t + ((P && P.interval) || 0);
-      return true;
-    };
 
     if (!P || !P.steps || !P.steps.length) {            // FIFO: libera cualquiera disponible
-      for (const sid of this.pocketSegs) if (releaseFrom(sid)) break;
+      for (const sid of this.pocketSegs) if (this._injectTrain(sid)) { this._pocketNext = this.t + slotInt; break; }
       return;
     }
     if (this._pocket.done) return;
+    // si la banda aún no liberó el slot anterior -> espera (contrapresión), no avanza el slot
+    if (this.boxes.some(o => o.seg === 'outfeed' && o.s < ev.pitch)) { this._pocketNext = this.t + slotInt * 0.25; return; }
+
+    // TREN VIRTUAL por SLOTS: un slot por paso. Orden ESTRICTO de receta; si el SKU
+    // demandado no está disponible se DEJA UN HUECO (slot vacío) y se avanza igual.
     const step = P.steps[this._pocket.idx];
     const wanted = Array.isArray(step.color) ? step.color : [step.color];
-    // buscar un tramo pocketBuffer con una caja del color demandado al frente
     let target = null;
     for (const sid of this.pocketSegs) { const b = this._boxAtEnd(sid); if (b && wanted.includes(b.color)) { target = sid; break; } }
-    // GAP entre trenes: al cerrar el ciclo de la receta se inserta ~1.5 cajas de separación
-    const ev = this.seg['outfeed']; const trainGap = ev ? 1.5 * (this.box[2] + 0.1) / ev.speed : 0.7;
-    const advance = (released) => {
-      this._pocket.inStep = 0; const wrap = (this._pocket.idx + 1 >= P.steps.length);
-      this._pocket.idx++;
-      if (this._pocket.idx >= P.steps.length) { if (P.loop) this._pocket.idx = 0; else this._pocket.done = true; }
-      // fin del TREN VIRTUAL -> gap mayor antes del siguiente (sólo si veníamos liberando)
-      if (wrap && P.loop && released) this._pocketNext = this.t + ((P && P.interval) || 0) + trainGap;
-    };
-    if (target) {
-      if (releaseFrom(target)) { this._pocket.inStep++; if (this._pocket.inStep >= step.qty) advance(true); }
-    } else {
-      // SKU demandado no disponible -> SALTA al siguiente (no bloquea el tren); cuenta faltas
-      this._skips = (this._skips || 0) + 1; advance(false);
+    if (target) this._injectTrain(target);             // disponible -> caja en su slot; si no -> hueco
+
+    this._pocket.inStep++; let wrap = false;
+    if (this._pocket.inStep >= step.qty) {
+      this._pocket.inStep = 0; this._pocket.idx++;
+      if (this._pocket.idx >= P.steps.length) { if (P.loop) { this._pocket.idx = 0; wrap = true; } else this._pocket.done = true; }
     }
+    this._pocketNext = this.t + slotInt + (wrap ? trainGap : 0); // gap mayor entre trenes
   }
 
   _interArrival(src) {
