@@ -38,6 +38,7 @@
   <div style="display:flex;gap:6px;align-items:center;margin-top:3px">
     <span style="color:#aebbd0;font-size:11px;flex:1">Cajas por pallet</span><input type="number" id="pcap" min="4" max="80" value="20" style="width:42px;background:#121821;color:#fff;border:1px solid #2a3a5a;border-radius:6px;padding:3px;font-size:11px;text-align:center">
   </div>
+  <label style="display:flex;gap:6px;align-items:center;margin-top:4px;cursor:pointer"><input type="checkbox" id="ppull" checked> <span style="font-size:11px">Tren a medida (sincronizado → 0 faltas)</span></label>
   <label>Receta de salida · 17 líneas (elige el SKU por línea)</label>
   <div id="recipeRows" style="max-height:150px;overflow:auto;display:grid;gap:3px;margin-top:2px"></div>
   <label>Velocidad simulación <span class="v" id="vSpeed">3×</span></label>
@@ -159,7 +160,7 @@ class SorterSim {
     this.t = 0; this.boxes.length = 0; this.generated = this.released = this.rejected = 0;
     this.releasedLog.length = 0; this.relByColor = {};
     this._pocket = { idx: 0, inStep: 0, done: false }; this._pocketNext = 0;
-    this._pallets = {}; this.palDone = 0; this.palMiss = 0;
+    this._pallets = {}; this.palDone = 0; this.palMiss = 0; this._palSent = {}; this._prioPtr = 0; this._palRR = 0;
     for (const id in this.seg) { const r = this.seg[id]; if (r.isLift) { r.cooldownUntil = 0; r.feedCtr = 0; r.levelCtr = 0; } else { r.nextSpawn = 0; r.count = 0; } }
     this._ftEMA = 0;
   }
@@ -303,13 +304,16 @@ class SorterSim {
     const key = b.direct ? 'DIR' : ('S' + b.sku);
     if (this._pallets[key] != null) {
       this._pallets[key]++;
-      if (this._pallets[key] >= cfg.cap) { delete this._pallets[key]; this.palDone = (this.palDone || 0) + 1; }
+      if (this._pallets[key] >= cfg.cap) { delete this._pallets[key]; if (this._palSent) delete this._palSent[key]; this.palDone = (this.palDone || 0) + 1; }
     } else if (Object.keys(this._pallets).length < totalPos) {
       this._pallets[key] = 1;                            // abre un pallet nuevo para ese SKU
     } else {
       this.palMiss = (this.palMiss || 0) + 1;            // sin posición ni pallet de ese SKU -> falta (sin buffer)
     }
   }
+
+  _colorKey(color) { const s = (this.meta.skus || []).find(s => s.color === color); return s ? ('S' + s.idx) : 'DIR'; }
+  _bufWith(key) { for (const sid of this.pocketSegs) { const b = this._boxAtEnd(sid); if (b) { const k = b.direct ? 'DIR' : ('S' + b.sku); if (k === key) return sid; } } return null; }
 
   // inyecta una caja del tramo `segId` al inicio de la evacuación (punto único, cero presión)
   _injectTrain(segId) {
@@ -325,6 +329,26 @@ class SorterSim {
     const P = this.model.pocket;
     const ev = this.seg['outfeed']; const slotInt = ev ? ev.pitch / ev.speed : 0.6; const trainGap = ev ? 1.5 * (this.box[2] + 0.1) / ev.speed : 0.7;
     if (this.t < (this._pocketNext || 0)) return;
+
+    // ===== TREN A MEDIDA (pull): sincronizado al paletizador -> el pocket solo envía SKUs
+    // que tienen pallet abierto o posición libre, por lo que NO hay faltas. La receta define
+    // la PRIORIDAD con que se asignan los pallets. =====
+    if (P && P.steps && P.steps.length && this.meta.pal && this.meta.pal.pull) {
+      if (this.boxes.some(o => o.seg === 'outfeed' && o.s < ev.pitch)) { this._pocketNext = this.t + slotInt * 0.25; return; }
+      const cfg = this.meta.pal, cap = cfg.cap, totalPos = Math.max(1, cfg.robots * cfg.positions);
+      this._palSent = this._palSent || {}; this._prioPtr = this._prioPtr || 0;
+      const prio = P.steps.map(s => this._colorKey(Array.isArray(s.color) ? s.color[0] : s.color));
+      // abrir posición libre con el siguiente SKU por prioridad (cíclico)
+      if (Object.keys(this._palSent).length < totalPos) {
+        for (let i = 0; i < prio.length; i++) { const k = prio[(this._prioPtr + i) % prio.length]; if (this._palSent[k] == null) { this._palSent[k] = 0; this._prioPtr = (this._prioPtr + i + 1) % prio.length; break; } }
+      }
+      const cand = Object.keys(this._palSent).filter(k => this._palSent[k] < cap);
+      this._palRR = this._palRR || 0;
+      let done = false;
+      for (let i = 0; i < cand.length; i++) { const k = cand[(this._palRR + i) % cand.length]; const sid = this._bufWith(k); if (sid && this._injectTrain(sid)) { this._palSent[k]++; this._palRR = (this._palRR + i + 1) % Math.max(1, cand.length); done = true; break; } }
+      this._pocketNext = this.t + slotInt;
+      return;
+    }
 
     if (!P || !P.steps || !P.steps.length) {            // FIFO: libera cualquiera disponible
       for (const sid of this.pocketSegs) if (this._injectTrain(sid)) { this._pocketNext = this.t + slotInt; break; }
@@ -720,8 +744,8 @@ function currentRecipe(meta) {
 }
 function applyRecipe() { if (!sim) return; sim.model.pocket = currentRecipe(sim.meta); sim._pocket = { idx: 0, inStep: 0, done: false }; sim._pocketNext = 0; }
 
-const palCfg = () => ({ robots: Math.max(1, +$('probots').value || 1), positions: Math.max(1, +$('ppos').value || 2), cap: Math.max(2, +$('pcap').value || 20) });
-function applyPal() { if (!sim) return; sim.meta.pal = palCfg(); sim._pallets = {}; sim.palDone = 0; sim.palMiss = 0; }
+const palCfg = () => ({ robots: Math.max(1, +$('probots').value || 1), positions: Math.max(1, +$('ppos').value || 2), cap: Math.max(2, +$('pcap').value || 20), pull: $('ppull').checked });
+function applyPal() { if (!sim) return; sim.meta.pal = palCfg(); sim._pallets = {}; sim.palDone = 0; sim.palMiss = 0; sim._palSent = {}; sim._prioPtr = 0; sim._palRR = 0; }
 
 function build(rebuildRows = true) {
   const N = +$('outs').value;
@@ -739,7 +763,7 @@ function build(rebuildRows = true) {
 $('outs').oninput = e => { $('vOuts').textContent = e.target.value + ' (' + (e.target.value * 4) + ' SKUs)'; build(true); };
 $('rate').oninput = e => { $('vRate').textContent = e.target.value; build(false); };
 $('orate').oninput = e => { $('vOut').textContent = e.target.value; build(false); };
-$('probots').onchange = applyPal; $('ppos').onchange = applyPal; $('pcap').onchange = applyPal;
+$('probots').onchange = applyPal; $('ppos').onchange = applyPal; $('pcap').onchange = applyPal; $('ppull').onchange = applyPal;
 $('speed').oninput = e => { speed = +e.target.value; $('vSpeed').textContent = speed + '×'; if (ctl) ctl.setSpeed(speed); };
 
 // mostrar / ocultar controles
