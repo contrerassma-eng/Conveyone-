@@ -43,7 +43,7 @@
   <div id="recipeRows" style="max-height:150px;overflow:auto;display:grid;gap:3px;margin-top:2px"></div>
   <label>Velocidad simulación <span class="v" id="vSpeed">3×</span></label>
   <input type="range" id="speed" min="1" max="8" step="1" value="3">
-  <button id="pdfBtn" style="width:100%;margin-top:10px;background:#1f6feb;color:#fff;border:0;border-radius:8px;padding:9px;font:700 12px system-ui;cursor:pointer">📄 Generar reporte PDF</button>
+  <button id="pdfBtn" style="width:100%;margin-top:10px;background:#f39200;color:#1a1a1a;border:0;border-radius:8px;padding:9px;font:700 12px system-ui;cursor:pointer">📄 Generar reporte PDF</button>
   <div class="hint">16 SKUs (4 columnas × 4 niveles, cada nivel un color/SKU) = 85%, más una SALIDA DIRECTA sin elevador = 15%. Entrada desordenada por SKU (mix Danich); el Virtual Pocket entrega un tren ordenado a la banda de salida. Baja la velocidad de salida para estresar (se llenan los buffers).</div>
 </div>
 
@@ -780,7 +780,8 @@ function mountSorter(sim, opts = {}) {
       scene.add(g); carriers.push(g);
     }
     liftAnimators.push((tt) => {
-      const trav = (tt * (s.carrierSpeed || 0.6)) % (2 * H);
+      // sentido del lazo INVERTIDO (los portadores suben por la cara de carga como el mk5 real)
+      const trav = ((2 * H) - ((tt * (s.carrierSpeed || 0.6)) % (2 * H))) % (2 * H);
       for (let i = 0; i < n; i++) {
         const ph = (trav + i * pitch) % (2 * H);
         let yy, zz;
@@ -894,6 +895,41 @@ function mountSorter(sim, opts = {}) {
   app.appendChild(bar);
   for (const k of Object.keys(views)) bar.appendChild(mkBtn(k.toUpperCase(), () => applyView(views[k])));
 
+  // ---- Gráfico OCULTABLE: tasa de SALIDA por SKU (cajas/min, en vivo) ----
+  const chart = elDiv({ position: 'absolute', left: '12px', bottom: '56px', width: '238px', maxHeight: '44vh', overflow: 'auto', background: 'rgba(16,21,32,.93)', border: '1px solid #243049', borderRadius: '10px', padding: '8px 10px', color: '#dfe7f3', font: '11px system-ui' });
+  app.appendChild(chart);
+  const chartShow = mkBtn('📊 Tasas SKU', () => { chart.style.display = ''; chartShow.style.display = 'none'; });
+  Object.assign(chartShow.style, { position: 'absolute', left: '12px', bottom: '12px', display: 'none' }); app.appendChild(chartShow);
+  const chHead = elDiv({ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' });
+  chHead.innerHTML = '<b style="color:#9fc3ff">Tasa de salida por SKU (c/min)</b>';
+  const chHide = document.createElement('span'); chHide.textContent = '✕'; chHide.style.cssText = 'cursor:pointer;color:#9fc3ff;padding:0 2px'; chHide.onclick = () => { chart.style.display = 'none'; chartShow.style.display = ''; };
+  chHead.appendChild(chHide); chart.appendChild(chHead);
+  const chRows = elDiv({ display: 'grid', gap: '4px' }); chart.appendChild(chRows);
+  const chartKeys = (sim.meta.skus || []).map(s => ({ key: 'S' + s.idx, name: s.name, color: s.color }));
+  chartKeys.push({ key: 'DIR', name: sim.meta.directName || 'Directo', color: sim.meta.directColor });
+  const chItems = chartKeys.map(ck => {
+    const wrap = elDiv({});
+    const row = elDiv({ display: 'grid', gridTemplateColumns: '10px 1fr 40px', gap: '5px', alignItems: 'center' });
+    const sw = elDiv({ width: '9px', height: '9px', borderRadius: '2px', background: hex(ck.color) });
+    const name = elDiv({ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#cfd8e6', fontSize: '10.5px' }); name.textContent = ck.name;
+    const val = elDiv({ textAlign: 'right', color: '#fff', fontWeight: '700' }); val.textContent = '0';
+    row.appendChild(sw); row.appendChild(name); row.appendChild(val);
+    const barbg = elDiv({ height: '5px', background: '#1b2436', borderRadius: '3px', overflow: 'hidden', marginTop: '2px' });
+    const fill = elDiv({ height: '100%', width: '0%', background: hex(ck.color), borderRadius: '3px', transition: 'width .3s' });
+    barbg.appendChild(fill); wrap.appendChild(row); wrap.appendChild(barbg); chRows.appendChild(wrap);
+    return { val, fill };
+  });
+  const chTot = elDiv({ marginTop: '6px', paddingTop: '5px', borderTop: '1px solid #243049', color: '#aebbd0' }); chart.appendChild(chTot);
+  let _chPrev = {}, _chPrevT = 0;
+  function updateChart() {
+    const cur = sim._outBySku || {}; const dt = sim.t - _chPrevT; if (dt < 1.0) return;
+    const rates = chartKeys.map(ck => Math.max(0, ((cur[ck.key] || 0) - (_chPrev[ck.key] || 0)) / dt * 60));
+    const mx = Math.max(1, ...rates), tot = rates.reduce((a, b) => a + b, 0);
+    chartKeys.forEach((ck, i) => { chItems[i].val.textContent = rates[i].toFixed(1); chItems[i].fill.style.width = (100 * rates[i] / mx).toFixed(0) + '%'; });
+    chTot.innerHTML = 'Salida total <b style="color:#fff">' + tot.toFixed(1) + '</b> c/min';
+    _chPrev = Object.assign({}, cur); _chPrevT = sim.t;
+  }
+
   function applyView(v, instant) { camera.position.set(...v.pos); controls.target.set(...v.tar); if (instant) camera.lookAt(...v.tar); }
   function onResize() { const w = app.clientWidth || innerWidth, h = app.clientHeight || innerHeight; renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix(); }
   addEventListener('resize', onResize); onResize();
@@ -918,6 +954,7 @@ function mountSorter(sim, opts = {}) {
     controls.update();
     renderer.render(scene, camera);
     drawHUD(fr);
+    updateChart();                                       // tasas de salida por SKU (en vivo)
   }
   const colorName = {}; for (const s of (sim.meta.skus || [])) colorName[s.color] = s.name; if (sim.meta.directColor != null) colorName[sim.meta.directColor] = sim.meta.directName || 'Directo';
   function nameOfColor(c) { if (c === 'FIFO' || c === '—' || c == null) return c || 'FIFO'; if (Array.isArray(c)) return c.map(x => colorName[x] || '').join('+'); return colorName[c] || hex(c); }
@@ -1022,14 +1059,15 @@ async function generarPDF() {
     const hx = c => '#' + (typeof c === 'number' ? c.toString(16).padStart(6, '0') : '999999');
     const rgb = c => [(c >> 16) & 255, (c >> 8) & 255, c & 255];
     const pct = v => (v * 100).toFixed(1) + '%';
-    const head = (t, sub) => { doc.setFillColor(16, 24, 40); doc.rect(0, y, PW, 9, 'F'); doc.setTextColor(159, 195, 255); doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.text(t, M, y + 6); if (sub) { doc.setTextColor(150, 160, 180); doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.text(sub, PW - M, y + 6, { align: 'right' }); } y += 13; doc.setTextColor(30, 30, 30); };
+    const head = (t, sub) => { doc.setFillColor(243, 146, 0); doc.rect(0, y, PW, 9, 'F'); doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.text(t, M, y + 6); if (sub) { doc.setTextColor(255, 236, 214); doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.text(sub, PW - M, y + 6, { align: 'right' }); } y += 13; doc.setTextColor(30, 30, 30); }; // Qimarox naranja
     const page = () => { doc.addPage(); y = M; };
 
-    // ---- Portada / encabezado ----
-    doc.setFillColor(13, 17, 23); doc.rect(0, 0, PW, 30, 'F');
+    // ---- Portada / encabezado (antracita Qimarox + franja naranja) ----
+    doc.setFillColor(38, 40, 46); doc.rect(0, 0, PW, 30, 'F');
+    doc.setFillColor(243, 146, 0); doc.rect(0, 30, PW, 1.8, 'F');     // franja Qimarox
     doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold'); doc.setFontSize(15);
-    doc.text('Reporte de simulación — Sorter 4500 + Kímarox mk5', M, 13);
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(170, 185, 210);
+    doc.text('Reporte de simulación — Sorter 4500 + Qimarox mk5', M, 13);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(210, 214, 220);
     const dur = fmt(R.t), now = new Date().toLocaleString('es-CL');
     doc.text(`Generado ${now}  ·  duración simulada ${dur}  ·  16 SKUs (4×4) + directa`, M, 20);
     doc.text(`Entrada ${R.generated} cajas · liberadas ${R.released} · entregadas ${R.totalOut} · rechazo ${R.rejected}`, M, 26);
@@ -1076,9 +1114,9 @@ async function generarPDF() {
     doc.text(`Capacidad total: ${R.buffers.cap} cajas  (4 columnas × 4 niveles × 12)`, M, y); y += 5.5;
     doc.text(`Ocupación promedio: ${R.buffers.avg.toFixed(1)} cajas  (${pct(occPct)})`, M, y); y += 5.5;
     doc.text(`Ocupación pico: ${R.buffers.peak} cajas  (${pct(peakPct)})`, M, y); y += 7;
-    doc.setFillColor(232, 236, 242); doc.rect(M, y, 120, 5, 'F'); doc.setFillColor(47, 168, 79); doc.rect(M, y, 120 * Math.min(1, occPct), 5, 'F');
-    doc.setFillColor(224, 192, 32); doc.rect(M + 120 * Math.min(1, occPct) - 0.6, y, 1.2, 5, 'F');
-    doc.setFontSize(7); doc.setTextColor(120, 120, 120); doc.text('prom (verde) · pico (marca)', M, y + 9); y += 16;
+    doc.setFillColor(232, 236, 242); doc.rect(M, y, 120, 5, 'F'); doc.setFillColor(243, 146, 0); doc.rect(M, y, 120 * Math.min(1, occPct), 5, 'F');
+    doc.setFillColor(38, 40, 46); doc.rect(M + 120 * Math.min(1, peakPct) - 0.6, y, 1.2, 5, 'F');
+    doc.setFontSize(7); doc.setTextColor(120, 120, 120); doc.text('prom (naranja) · pico (marca)', M, y + 9); y += 16;
 
     // ---- 4) Paletizado KUKA ----
     if (y > 250) page(); head('4 · Paletizado (robots KUKA)');
