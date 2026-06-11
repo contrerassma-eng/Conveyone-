@@ -191,6 +191,7 @@ class SorterSim {
         if (!overCap && this._entryFree(id)) {
           const sk = this._sampleSku(); // entrada DESORDENADA por SKU (pesos Danich + dispersión)
           const box = new Box(id, T, sk.color); box.sku = sk.idx; box.col = sk.col; box.lvl = sk.lvl; box.direct = sk.direct;
+          box.robot = sk.direct ? 0 : (sk.col % (this.meta.pal ? this.meta.pal.robots : 4)); // KUKA destino (segregador)
           this.boxes.push(box); this.generated++;
           this._inBySku = this._inBySku || {}; this._inBySku[sk.key] = (this._inBySku[sk.key] || 0) + 1;
           seg.nextSpawn = T + this._interArrival(src);
@@ -308,6 +309,7 @@ class SorterSim {
       if (S.by === 'col') { if (!b.direct && b.col === S.divertCol && this._entryFree(S.lane)) return S.lane; return S.cont && this._entryFree(S.cont) ? S.cont : null; }
       if (S.by === 'direct') { if (b.direct && this._entryFree(S.lane)) return S.lane; return S.cont && this._entryFree(S.cont) ? S.cont : null; }
       if (S.by === 'color') { if (b.color === S.divertColor && this._entryFree(S.lane)) return S.lane; return S.cont && this._entryFree(S.cont) ? S.cont : null; }
+      if (S.by === 'robot') { if (b.robot === S.robot) return this._entryFree(S.lane) ? S.lane : null; return S.cont && this._entryFree(S.cont) ? S.cont : null; }
     }
     const nx = seg.next;
     if (!nx.length) return null;
@@ -322,22 +324,23 @@ class SorterSim {
     return { idx: -1, col: -1, lvl: -1, color: this.meta.directColor || 0x9aa3b0, direct: true, key: 'DIRECT' };
   }
 
-  // PALETIZADO (robots KUKA): cada caja va al pallet de su SKU. El robot tiene
-  // posiciones limitadas (robots × posiciones); 1 pallet por SKU. Sin buffer: si el SKU
-  // no tiene pallet abierto y no hay posición libre, NO se puede colocar (falta).
+  // PALETIZADO (robots KUKA, tras el SEGREGADOR): cada caja llega al carril de SU robot y
+  // va al pallet de su SKU. Cada robot tiene `positions` posiciones propias; 1 pallet por SKU.
+  // Sin buffer: si el SKU no tiene pallet abierto y el robot no tiene posición libre -> falta.
   _palletize(b) {
     const cfg = this.meta.pal || { robots: 4, positions: 5, cap: 32 };
-    const totalPos = Math.max(1, cfg.robots * cfg.positions);
-    this._pallets = this._pallets || {};               // key SKU -> nº cajas en su pallet abierto
-    const key = b.direct ? 'DIR' : ('S' + b.sku);
-    this._outBySku = this._outBySku || {}; this._outBySku[key] = (this._outBySku[key] || 0) + 1; // SALIDA por SKU (reporte)
+    const r = b.robot != null ? b.robot : 0;
+    this._pallets = this._pallets || {};               // key 'r:SKU' -> nº cajas en su pallet abierto
+    const key = r + ':' + (b.direct ? 'DIR' : ('S' + b.sku));
+    const outKey = b.direct ? 'DIR' : ('S' + b.sku);
+    this._outBySku = this._outBySku || {}; this._outBySku[outKey] = (this._outBySku[outKey] || 0) + 1; // SALIDA por SKU (reporte)
     if (this._pallets[key] != null) {
       this._pallets[key]++;
-      if (this._pallets[key] >= cfg.cap) { delete this._pallets[key]; if (this._palSent) delete this._palSent[key]; this.palDone = (this.palDone || 0) + 1; }
-    } else if (Object.keys(this._pallets).length < totalPos) {
-      this._pallets[key] = 1;                            // abre un pallet nuevo para ese SKU
+      if (this._pallets[key] >= cfg.cap) { delete this._pallets[key]; this.palDone = (this.palDone || 0) + 1; }
     } else {
-      this.palMiss = (this.palMiss || 0) + 1;            // sin posición ni pallet de ese SKU -> falta (sin buffer)
+      let openR = 0; const pre = r + ':'; for (const k in this._pallets) if (k.startsWith(pre)) openR++;
+      if (openR < cfg.positions) this._pallets[key] = 1;   // abre un pallet nuevo para ese SKU en este robot
+      else this.palMiss = (this.palMiss || 0) + 1;          // robot sin posición libre -> falta (sin buffer)
     }
   }
 
@@ -549,7 +552,27 @@ function buildSorter(opts = {}) {
 
   // ----- EVACUACIÓN (take-away) CERCA (~1 m de los elevadores) + entrega 24" -----
   segs.push({ id: 'outfeed', kind: 'outfeed', geom: { type: 'straight', from: [xR, 9.9], to: [xL, 9.9] }, height: 0.9, speed: vout, pitch: 0.55, entryByColor: true, next: ['deliv'] });
-  segs.push({ id: 'deliv', kind: 'deliv', geom: { type: 'straight', from: [xL, 9.9], to: [xL - 0.61, 9.9] }, height: 0.9, speed: vout, pitch: 0.55, sink: true });
+  segs.push({ id: 'deliv', kind: 'deliv', geom: { type: 'straight', from: [xL, 9.9], to: [xL - 0.61, 9.9] }, height: 0.9, speed: vout, pitch: 0.55, next: ['seg_feed'] });
+
+  // ----- SEGREGADOR -> KUKA: el tren ordenado sube a la línea de segregación y cada caja
+  // se desvía al carril de SU robot (1 robot por subconjunto de SKUs). Orden conservado:
+  // cada robot recibe la subsecuencia en orden; si su carril está lleno, la línea espera
+  // (cero presión) y nunca se cruzan cajas. -----
+  const nrob = Math.max(1, (opts.pal || {}).robots || 4);
+  const robotX = r => nrob <= 1 ? (xR + xL) / 2 : 7 + r * ((19 - 7) / (nrob - 1));
+  const zSeg = 12.2, zPick = 14.8;
+  segs.push({ id: 'seg_feed', kind: 'segre', geom: { type: 'polyline', points: [[xL - 0.61, 9.9], [0.4, 9.9], [0.4, zSeg]] }, height: 0.9, speed: vout, pitch: 0.55, next: ['segre0'] });
+  for (let r = 0; r < nrob; r++) {
+    const x0 = r === 0 ? 0.4 : robotX(r - 1), x1 = robotX(r);
+    const cont = r < nrob - 1 ? 'segre' + (r + 1) : 'seg_end';
+    segs.push({ id: 'segre' + r, kind: 'segre', geom: { type: 'straight', from: [x0, zSeg], to: [x1, zSeg] }, height: 0.9, speed: vout, pitch: 0.55,
+      sort: { by: 'robot', robot: r, lane: 'rob' + r + '_lane', cont }, next: ['rob' + r + '_lane', cont] });
+    // carril del robot: acumulación corta (cero presión) hasta el punto de pick del KUKA
+    segs.push({ id: 'rob' + r + '_lane', kind: 'roblane', geom: { type: 'straight', from: [robotX(r), zSeg + 0.2], to: [robotX(r), zPick] }, height: 0.9, speed: vlane, pitch: 0.5, cap: 5, next: ['rob' + r + '_pick'] });
+    segs.push({ id: 'rob' + r + '_pick', kind: 'pick', robot: r, geom: { type: 'straight', from: [robotX(r), zPick], to: [robotX(r), zPick + 0.3] }, height: 0.9, speed: vlane, pitch: 0.5, sink: true });
+  }
+  // remate de la línea (si alguna caja no se desvió -> overflow, debe ser ~0)
+  segs.push({ id: 'seg_end', kind: 'segre', geom: { type: 'straight', from: [robotX(nrob - 1), zSeg], to: [robotX(nrob - 1) + 2.2, zSeg] }, height: 0.9, speed: vout, pitch: 0.55, sink: true, reject: true });
 
   // receta: tren consecutivo (1 caja por SKU) INTERCALADO por columnas (paraleliza los
   // 4 elevadores de descenso) + directo. El orden del tren lo dicta esta secuencia.
@@ -706,24 +729,61 @@ function mountSorter(sim, opts = {}) {
     for (const [id, m] of pool) if (!seen.has(id)) { scene.remove(m); pool.delete(id); }
   }
 
-  // ---- pallets KUKA creciendo en 3D (cerca de la entrega) ----
+  // ---- estaciones de robot (del layout: tramos kind 'pick') ----
+  const stations = sim.model.segments.filter(s => s.kind === 'pick').map(s => ({ r: s.robot, x: s.geom.from[0], z: s.geom.from[1] }));
+  const palZ = (stations[0] ? stations[0].z : 14.8) + 1.7;   // fila de pallets detrás de los robots
+
+  // ---- robots KUKA (paletizadores) con brazo articulado animado ----
+  const kukaBaseMat = new THREE.MeshStandardMaterial({ color: 0x2a2f36, metalness: 0.5, roughness: 0.5 });
+  const kukaArmMat = new THREE.MeshStandardMaterial({ color: QIMAROX_ORANGE, metalness: 0.35, roughness: 0.45 });
+  function buildKuka(st) {
+    const g = new THREE.Group(); g.position.set(st.x, 0, st.z + 0.85); scene.add(g);
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.42, 0.3, 16), kukaBaseMat); base.position.y = 0.15; g.add(base);
+    const col = new THREE.Group(); col.position.y = 0.3; g.add(col);
+    const column = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.26, 0.55, 14), kukaBaseMat); column.position.y = 0.27; col.add(column);
+    const sh = new THREE.Group(); sh.position.y = 0.5; col.add(sh);
+    const lower = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.95, 0.16), kukaArmMat); lower.position.y = 0.47; sh.add(lower);
+    const el = new THREE.Group(); el.position.y = 0.92; sh.add(el);
+    const upper = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.13, 1.05), kukaArmMat); upper.position.z = -0.45; el.add(upper);
+    const wr = new THREE.Group(); wr.position.z = -0.95; el.add(wr);
+    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.12, 0.34), kukaBaseMat); grip.position.y = -0.12; wr.add(grip);
+    // animación: el robot oscila/cabecea hacia el carril (pick) y hacia el pallet, cont. al ritmo
+    liftAnimators.push((tt) => {
+      const ph = (tt * 0.9 + st.r * 0.6) % (Math.PI * 2);
+      col.rotation.y = Math.sin(ph) * 0.5;              // gira entre carril y pallet
+      sh.rotation.x = -0.5 + Math.sin(ph * 2) * 0.32;   // hombro
+      el.rotation.x = 0.7 + Math.cos(ph * 2) * 0.3;     // codo
+      wr.rotation.x = -el.rotation.x - sh.rotation.x;   // muñeca mantiene gripper horizontal
+    });
+  }
+  for (const st of stations) buildKuka(st);
+
+  // ---- pallets creciendo en 3D, agrupados POR ROBOT detrás de cada KUKA ----
   const palGroup = new THREE.Group(); scene.add(palGroup);
   const palMesh = []; const palBoxGeo = new THREE.BoxGeometry(0.42, 0.14, 0.32);
-  const palX0 = sim.bounds.minx - 1.4, palZ = 11.2;     // fila de pallets más allá de la evacuación
   function updatePallets(pal) {
-    const entries = Object.entries(pal.open); let mi = 0;
-    entries.forEach(([key, n], pi) => {
-      const col = key === 'DIR' ? (sim.meta.directColor || 0x9aa3b0) : (sim.meta.skus[+key.slice(1)] ? sim.meta.skus[+key.slice(1)].color : 0x999999);
-      const px = palX0 + pi * 1.4;
-      for (let k = 0; k < n; k++) {
-        let m = palMesh[mi];
-        if (!m) { m = new THREE.Mesh(palBoxGeo, new THREE.MeshStandardMaterial({ roughness: 0.6 })); palGroup.add(m); palMesh.push(m); }
-        m.visible = true; m.material.color.setHex(col);
-        const layer = Math.floor(k / 4), inL = k % 4;
-        m.position.set(px + (inL % 2 ? 0.46 : 0), 0.95 + layer * 0.15, palZ + (inL < 2 ? 0 : 0.34));
-        mi++;
-      }
-    });
+    // agrupa las claves 'r:SKU' por robot
+    const byRobot = {};
+    for (const [key, n] of Object.entries(pal.open)) {
+      const ci = key.indexOf(':'); const r = ci >= 0 ? +key.slice(0, ci) : 0; const sku = ci >= 0 ? key.slice(ci + 1) : key;
+      (byRobot[r] || (byRobot[r] = [])).push([sku, n]);
+    }
+    let mi = 0;
+    for (const st of stations) {
+      const list = byRobot[st.r] || [];
+      list.forEach(([sku, n], pi) => {
+        const col = sku === 'DIR' ? (sim.meta.directColor || 0x9aa3b0) : (sim.meta.skus[+sku.slice(1)] ? sim.meta.skus[+sku.slice(1)].color : 0x999999);
+        const px = st.x + (pi - (list.length - 1) / 2) * 1.0;   // fila de pallets centrada tras el robot
+        for (let k = 0; k < n; k++) {
+          let m = palMesh[mi];
+          if (!m) { m = new THREE.Mesh(palBoxGeo, new THREE.MeshStandardMaterial({ roughness: 0.6 })); palGroup.add(m); palMesh.push(m); }
+          m.visible = true; m.material.color.setHex(col);
+          const layer = Math.floor(k / 4), inL = k % 4;
+          m.position.set(px + (inL % 2 ? 0.46 : 0), 0.25 + layer * 0.15, palZ + (inL < 2 ? 0 : 0.34));
+          mi++;
+        }
+      });
+    }
     for (let j = mi; j < palMesh.length; j++) palMesh[j].visible = false;
   }
 
@@ -765,10 +825,12 @@ function mountSorter(sim, opts = {}) {
     const pkName = nameOfColor(pk.color);
     html += `<b>Pocket pide:</b> <span style="color:${hex(pk.color)}">${pkName}</span>${pk.remaining ? ' ×' + pk.remaining : ''}<br>`;
     // ---- Paletizadores KUKA ----
-    const pal = fr.pal; const palName = k => k === 'DIR' ? (sim.meta.directName || 'Directo') : (sim.meta.skus[+k.slice(1)] ? sim.meta.skus[+k.slice(1)].name : k);
+    const pal = fr.pal;
+    const skuName = s => s === 'DIR' ? (sim.meta.directName || 'Directo') : (sim.meta.skus[+s.slice(1)] ? sim.meta.skus[+s.slice(1)].name : s);
     html += `<b>KUKA</b> ${pal.cfg.robots}×${pal.cfg.positions} pos · pallet ${pal.cfg.cap} cajas · <b>${pal.done}</b> completos · faltas <span style="color:${pal.miss ? '#ff8080' : '#7f8ca3'}">${pal.miss}</span><br>`;
-    const op = Object.entries(pal.open);
-    if (op.length) html += op.map(([k, n]) => `▦ ${palName(k)} ${n}/${pal.cfg.cap}`).join('<br>') + '<br>';
+    // agrupa pallets abiertos por robot (clave 'r:SKU')
+    const byR = {}; for (const [k, n] of Object.entries(pal.open)) { const ci = k.indexOf(':'); const r = ci >= 0 ? k.slice(0, ci) : '0'; (byR[r] || (byR[r] = [])).push([ci >= 0 ? k.slice(ci + 1) : k, n]); }
+    for (const r of Object.keys(byR).sort()) html += `<span style="color:#9fc3ff">R${r}:</span> ` + byR[r].map(([s, n]) => `${skuName(s).slice(0, 10)} ${n}`).join(' · ') + '<br>';
     hud.innerHTML = html;
     if (fr.bottleneck) { banner.textContent = '⚠ ' + fr.bottleneck.msg; banner.style.display = 'block'; } else banner.style.display = 'none';
   }
@@ -842,7 +904,8 @@ function build(rebuildRows = true) {
 $('outs').oninput = e => { $('vOuts').textContent = e.target.value + ' (' + (e.target.value * 4) + ' SKUs)'; build(true); };
 $('rate').oninput = e => { $('vRate').textContent = e.target.value; build(false); };
 $('orate').oninput = e => { $('vOut').textContent = e.target.value; build(false); };
-$('probots').onchange = applyPal; $('ppos').onchange = applyPal; $('pcap').onchange = applyPal; $('ppull').onchange = applyPal;
+$('probots').onchange = () => build(false);   // nº de robots cambia la geometría del segregador
+$('ppos').onchange = applyPal; $('pcap').onchange = applyPal; $('ppull').onchange = applyPal;
 $('speed').oninput = e => { speed = +e.target.value; $('vSpeed').textContent = speed + '×'; if (ctl) ctl.setSpeed(speed); };
 
 // ---- Reporte PDF (jsPDF vía CDN) : entrada/salida por SKU, ocupación de buffers, paletizado, parámetros ----

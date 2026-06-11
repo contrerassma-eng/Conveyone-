@@ -1,68 +1,61 @@
-// test/order.mjs — valida el MOTOR embebido en index.html (sin THREE): orden del tren,
-// huecos, congestión. Extrae SorterSim + buildSorter del <script type="module">.
+// test/order.mjs — valida el MOTOR embebido en index.html (sin THREE):
+//  (1) orden del TREN en la evacuación (slot estrictamente creciente),
+//  (2) SEGREGACIÓN: cada robot KUKA recibe su subsecuencia en orden y 0 cajas perdidas,
+//  (3) sin colisiones. Extrae SorterSim + buildSorter del <script type="module">.
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const html = readFileSync(join(root, 'index.html'), 'utf8');
-
-// toma el cuerpo del módulo y corta antes del RENDER (que usa THREE)
 const mod = html.split('<script type="module">')[1].split('</script>')[0];
-const engine = mod
-  .split('// ===== RENDER =====')[0]            // engine + layout, sin render ni arranque
+const engine = mod.split('// ===== RENDER =====')[0]
   .replace(/^\s*import \* as THREE.*$/m, '')
   .replace(/^\s*import \{ OrbitControls \}.*$/m, '');
+const { SorterSim, buildSorter } = new Function(engine + '\nreturn { SorterSim, buildSorter };')();
 
-const factory = new Function(engine + '\nreturn { SorterSim, buildSorter, DANICH_SKUS };');
-const { SorterSim, buildSorter } = factory();
+// receta con multiplicadores por volumen (como la UI)
+function volRecipe(m) {
+  const ws = m.meta.skus.map(s => s.w).concat([m.meta.directW]); const mn = Math.min(...ws);
+  const mult = ws.map(w => Math.max(1, Math.round(w / mn)));
+  return { loop: true, steps: m.meta.skus.map((s, i) => ({ color: s.color, qty: mult[i] })).concat([{ color: m.meta.directColor, qty: mult[16] }]) };
+}
 
-// --- construye el modelo por defecto (4 columnas, receta = 16 SKUs + directo, 1 c/u) ---
-const model = buildSorter({ outputs: 4, rate: 33 * 60, outSpeed: 0.95 });
-const sim = new SorterSim(model, 12345);
+function run(opts, seed, SEC) {
+  const m = buildSorter(opts); m.pocket = volRecipe(m);
+  const sim = new SorterSim(m, seed);
+  // captura: orden del TREN (al salir de la evacuación) y POR ROBOT (al paletizar)
+  const train = [];           // slot al transferir outfeed -> deliv (orden del tren)
+  const perRobot = {};        // robot -> [slot] al paletizar
+  const rp = sim._palletize.bind(sim);
+  sim._palletize = function (b) { (perRobot[b.robot] = perRobot[b.robot] || []).push(b.mergeSlot); rp(b); };
+  // hook del tren: marca el slot cuando la caja entra a 'deliv'
+  for (let i = 0; i < SEC / 0.05; i++) {
+    sim.step(0.05);
+    for (const b of sim.boxes) if (b.seg === 'deliv' && !b._seenTrain) { b._seenTrain = true; train.push(b.mergeSlot); }
+  }
+  let backTrain = 0; for (let i = 1; i < train.length; i++) if (train[i] <= train[i - 1]) backTrain++;
+  const robots = {}; let backRobots = 0, totalRob = 0;
+  for (const r of Object.keys(perRobot).sort()) { const s = perRobot[r]; let bk = 0; for (let i = 1; i < s.length; i++) if (s[i] <= s[i - 1]) bk++; robots[r] = { n: s.length, back: bk }; backRobots += bk; totalRob += s.length; }
+  // colisiones (cajas a < 0.30 m en cualquier transportador)
+  const bySeg = {}; for (const b of sim.boxes) (bySeg[b.seg] || (bySeg[b.seg] = [])).push(b.s);
+  let collide = 0; for (const id in bySeg) { const a = bySeg[id].sort((x, y) => x - y); for (let i = 1; i < a.length; i++) if (a[i] - a[i - 1] < 0.30) collide++; }
+  const r = sim.report();
+  return { train, backTrain, robots, backRobots, totalRob, collide, rejected: sim.rejected, done: r.pal.done, miss: r.pal.miss, gen: sim.generated, out: r.totalOut };
+}
 
-// orden esperado del tren = el índice de cada SKU en la receta (0..15 = SKUs, 16 = directo)
-const colorRank = new Map();
-model.meta.skus.forEach((s, i) => colorRank.set(s.color, i));
-colorRank.set(model.meta.directColor, model.meta.skus.length);
+// ====== ESCENARIO 1: nominal (4 robots) ======
+let R = run({ outputs: 4, rate: 33 * 60, outSpeed: 0.95, pal: { robots: 4, positions: 5, cap: 32 } }, 12345, 700);
+console.log(`[NOMINAL 4 robots]  generadas ${R.gen} · entregadas ${R.out} · rechazo-segregador ${R.rejected} · pallets ${R.done} · faltas ${R.miss}`);
+console.log(`  TREN (evacuación): desorden ${R.backTrain} / ${R.train.length}  ${R.backTrain === 0 ? '✓ orden perfecto' : '✗'}`);
+for (const r in R.robots) console.log(`  robot ${r}: ${R.robots[r].n} cajas · desorden ${R.robots[r].back} ${R.robots[r].back === 0 ? '✓' : '✗'}`);
+console.log(`  colisiones (<0.30 m): ${R.collide}  ${R.collide === 0 ? '✓ sin obstáculos' : '✗'}`);
 
-// engancha la entrega: cada caja que llega a 'deliv' la registramos en orden
-const delivered = [];
-const seg = sim.seg;
-// instrumentamos _palletize para capturar el orden de llegada al sink de entrega
-const realPal = sim._palletize.bind(sim);
-sim._palletize = function (b) { delivered.push({ id: b.id, color: b.color, rank: colorRank.get(b.color), slot: b.mergeSlot }); realPal(b); };
+// ====== ESCENARIO 2: estrés (salida lenta, tasa alta) ======
+let S = run({ outputs: 4, rate: 45 * 60, outSpeed: 0.5, pal: { robots: 4, positions: 5, cap: 32 } }, 999, 700);
+console.log(`\n[ESTRÉS salida lenta]  entregadas ${S.out} · rechazo ${S.rejected} · faltas ${S.miss}`);
+console.log(`  TREN desorden ${S.backTrain}  · robots desorden-total ${S.backRobots}  · colisiones ${S.collide}  ${S.backTrain === 0 && S.backRobots === 0 && S.collide === 0 ? '✓' : '✗'}`);
 
-const DT = 0.05, SEC = 600;
-for (let i = 0; i < SEC / DT; i++) sim.step(DT);
-
-// --- INVARIANTE REAL: las cajas se entregan en orden ESTRICTO de slot (slot = orden de receta) ---
-const slots = delivered.map(d => d.slot);
-let back = 0; for (let i = 1; i < slots.length; i++) if (slots[i] <= slots[i - 1]) back++;
-const seq = delivered.map(d => d.rank);
-const inChain = sim.boxes.filter(o => { const s = sim.seg[o.seg]; return s.isLift || s.kind === 'flat'; }).length;
-const onOut = sim.boxes.filter(o => o.seg === 'outfeed').length;
-const pend = sim._pending.length;
-
-console.log(`liberadas ${sim.released}  entregadas ${delivered.length}  rechazo ${sim.rejected}`);
-console.log(`DESORDEN (slot no creciente): ${back} / ${delivered.length}  ${back === 0 ? '✓ ORDEN PERFECTO' : '-> revisar'}`);
-console.log(`muestra slots: ${slots.slice(0, 40).join(',')}`);
-console.log(`en cadena (elev+banda negra): ${inChain}  ·  en evacuación: ${onOut}  ·  pendientes-merge: ${pend}`);
-console.log(`muestra entrega (rank): ${seq.slice(0, 40).join(',')}`);
-// chequeo de colisiones en la evacuación: dos cajas a < 0.3 m
-const out = sim.boxes.filter(o => o.seg === 'outfeed').map(o => o.s).sort((a, b) => a - b);
-let collide = 0; for (let i = 1; i < out.length; i++) if (out[i] - out[i - 1] < 0.3) collide++;
-console.log(`colisiones en evacuación (gap<0.30): ${collide}`);
-console.log(`generadas ${sim.generated}  en sistema ${sim.boxes.length}  buffers(ocup) ${sim.bufferLevels().reduce((a, g) => a + g.count, 0)}`);
-
-// ====== ESCENARIO 2: salida lenta (estrés) + receta con multiplicadores por volumen ======
-const m2 = buildSorter({ outputs: 4, rate: 45 * 60, outSpeed: 0.5 });
-const ws = m2.meta.skus.map(s => s.w).concat([m2.meta.directW]); const mn = Math.min(...ws);
-const mult = ws.map(w => Math.max(1, Math.round(w / mn)));
-m2.pocket = { loop: true, interval: 0.15, steps: m2.meta.skus.map((s, i) => ({ color: s.color, qty: mult[i] })).concat([{ color: m2.meta.directColor, qty: mult[16] }]) };
-const s2 = new SorterSim(m2, 999);
-const d2 = []; const rank2 = new Map(); m2.meta.skus.forEach((s, i) => rank2.set(s.color, i)); rank2.set(m2.meta.directColor, 16);
-const rp2 = s2._palletize.bind(s2); s2._palletize = function (b) { d2.push(b.mergeSlot); rp2(b); };
-for (let i = 0; i < 600 / DT; i++) s2.step(DT);
-let b2 = 0; for (let i = 1; i < d2.length; i++) if (d2[i] <= d2[i - 1]) b2++;
-console.log(`\n[estrés salida lenta + multiplicadores] entregadas ${d2.length}  DESORDEN ${b2}  ${b2 === 0 ? '✓' : '✗'}  buffers ${s2.bufferLevels().reduce((a, g) => a + g.count, 0)}  rechazo ${s2.rejected}`);
+const ok = R.backTrain === 0 && R.backRobots === 0 && R.collide === 0 && R.rejected === 0 && R.miss === 0 && S.backTrain === 0 && S.backRobots === 0 && S.collide === 0;
+console.log(`\n${ok ? '✓✓ TODO OK: tren ordenado, segregación por robot en orden, sin colisiones ni pérdidas' : '✗ revisar'}`);
+process.exit(ok ? 0 : 1);
