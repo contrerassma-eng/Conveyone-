@@ -105,7 +105,7 @@ class SorterSim {
     this.releasedLog = []; this.relByColor = {};
     this.seg = {}; this.lifts = []; this.pocketSegs = [];
     this._build();
-    this._pocket = { idx: 0, inStep: 0, done: false };
+    this._pocket = { idx: 0, inStep: 0, done: false }; this._pocketNext = 0;
   }
 
   _build() {
@@ -152,7 +152,7 @@ class SorterSim {
   reset() {
     this.t = 0; this.boxes.length = 0; this.generated = this.released = this.rejected = 0;
     this.releasedLog.length = 0; this.relByColor = {};
-    this._pocket = { idx: 0, inStep: 0, done: false };
+    this._pocket = { idx: 0, inStep: 0, done: false }; this._pocketNext = 0;
     for (const id in this.seg) { const r = this.seg[id]; if (r.isLift) { r.cooldownUntil = 0; r.feedCtr = 0; r.levelCtr = 0; } else { r.nextSpawn = 0; r.count = 0; } }
     this._ftEMA = 0;
   }
@@ -256,7 +256,8 @@ class SorterSim {
 
   _pickLevel(L) {
     // round-robin entre drains (niveles) con hueco
-    for (let k = 0; k < L.drains.length; k++) { const lid = L.drains[(L.levelCtr + k) % L.drains.length]; if (this._entryFree(lid)) { L.levelCtr = (L.levelCtr + k + 1) % L.drains.length; return lid; } }
+    // FILL-FIRST: llena el nivel más bajo con hueco (nivel 1, luego 2, ...)
+    for (let i = 0; i < L.drains.length; i++) { if (this._entryFree(L.drains[i])) return L.drains[i]; }
     return null;
   }
 
@@ -275,16 +276,23 @@ class SorterSim {
 
   _pocketStep() {
     const P = this.model.pocket;
+    // throttle: velocidad de SALIDA regulable (para estresar el sistema)
+    if (this.t < (this._pocketNext || 0)) return;
     const releaseFrom = (segId) => {
-      const seg = this.seg[segId]; const out = seg.next[0]; if (!out || !this._entryFree(out)) return false;
+      const seg = this.seg[segId]; const out = seg.next[0]; if (!out) return false;
+      const outSeg = this.seg[out];
+      // la caja se inyecta en la X de su propia salida (a ras del equipo); aparece SOLO
+      // cuando la transferencia es efectiva y hay hueco real (no invade el transportador)
+      const entryS = (outSeg.entryByColor && seg.outfeedS != null) ? seg.outfeedS : 0;
+      for (const o of this.boxes) if (o.seg === out && !o.onLift && Math.abs(o.s - entryS) < outSeg.pitch) return false;
       const b = this._boxAtEnd(segId); if (!b) return false;
-      // entra a la línea de salida común al inicio; el orden del tren lo dicta la receta
-      b.seg = out; b.s = 0; this.released++; this.releasedLog.push({ t: this.t, color: b.color }); this.relByColor[b.color] = (this.relByColor[b.color] || 0) + 1;
+      b.seg = out; b.s = entryS; this.released++; this.releasedLog.push({ t: this.t, color: b.color }); this.relByColor[b.color] = (this.relByColor[b.color] || 0) + 1;
+      this._pocketNext = this.t + ((P && P.interval) || 0);
       return true;
     };
 
     if (!P || !P.steps || !P.steps.length) {            // FIFO: libera cualquiera disponible
-      for (const sid of this.pocketSegs) releaseFrom(sid);
+      for (const sid of this.pocketSegs) if (releaseFrom(sid)) break;
       return;
     }
     if (this._pocket.done) return;
