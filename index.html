@@ -760,7 +760,7 @@ function mountSorter(sim, opts = {}) {
     if (s.geom.type === 'lift') { buildLift(s); return; }
     const isBelt = s.kind === 'flat' || s.kind === 'deliv';
     const isOut = s.kind === 'outfeed' || isBelt || s.kind === 'segre' || s.kind === 'roblane' || s.kind === 'pick';
-    const W = isOut ? 0.7 : 0.62, P = pts(s.geom), h = s.height != null ? s.height : 0.9;
+    const W = isOut ? 0.66 : 0.6, P = pts(s.geom), h = s.height != null ? s.height : 0.9;  // equipos 0,6 m -> pasillo 0,6 m a paso 1,2 m
     let legAcc = 0;
     for (let i = 0; i < P.length - 1; i++) {
       const a = P[i], c = P[i + 1];
@@ -789,7 +789,7 @@ function mountSorter(sim, opts = {}) {
     const x = s.geom.at[0], z = s.geom.at[1];
     const dir = s.geom.h1 >= s.geom.h0 ? 1 : -1;        // sube (+1) o baja (-1)
     const h0 = Math.min(s.geom.h0, s.geom.h1) - 0.12, h1 = Math.max(s.geom.h0, s.geom.h1) + 0.30;
-    const W = 0.52, D = 0.52, H = h1 - h0;
+    const W = 0.6, D = 0.52, H = h1 - h0;             // torre del elevador 0,6 m de ancho (pasillo 0,6 m a paso 1,2 m)
     // 4 columnas + travesaños arriba/abajo (estructura 7035)
     for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
       const post = new THREE.Mesh(new THREE.BoxGeometry(0.06, H, 0.06), liftMat);
