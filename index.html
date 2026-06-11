@@ -505,6 +505,8 @@ function boundsOf(pts) { let mnx = Infinity, mnz = Infinity, mxx = -Infinity, mx
 
 // ===== LAYOUT (paramétrico) — 16 SKUs (4 columnas × 4 niveles = colores) + directa 15% =====
 function hslHex(h, s, l) { const a = s * Math.min(l, 1 - l); const f = n => { const k = (n + h * 12) % 12; const c = l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)); return Math.round(255 * c); }; return (f(0) << 16) | (f(8) << 8) | f(4); }
+// arco de transportador (curva real): puntos sobre el radio R, ángulos a0->a1 (tangentes continuas)
+function arcPts(cx, cz, R, a0, a1, n = 12) { const p = []; for (let i = 0; i <= n; i++) { const a = a0 + (a1 - a0) * i / n; p.push([cx + R * Math.cos(a), cz + R * Math.sin(a)]); } return p; }
 
 // 16 SKUs principales (tabla Danich, flujo cajas/día) — el resto (15% baja frecuencia)
 // se agrupa en "Directo".
@@ -581,18 +583,23 @@ function buildSorter(opts = {}) {
   // (cero presión) y nunca se cruzan cajas. -----
   const nrob = Math.max(1, (opts.pal || {}).robots || 4);
   const robotX = r => nrob <= 1 ? (xR + xL) / 2 : 7 + r * ((19 - 7) / (nrob - 1));
-  const zSeg = 12.2, zLaneEnd = 13.0, zPick = 13.5;
-  segs.push({ id: 'seg_feed', kind: 'segre', geom: { type: 'polyline', points: [[xL - 0.61, 9.9], [0.4, 9.9], [0.4, zSeg]] }, height: 0.9, speed: vout, pitch: 0.55, next: ['segre0'] });
+  const zSeg = 12.6, zPick = 14.0, Rc = 0.7;
+  // RETORNO (curva 180° real) desde la evacuación a la línea de segregación: la caja entra
+  // a la curva moviéndose en -x y sale en +x sobre la línea de segregación (tangentes continuas).
+  const Ru = (zSeg - 9.9) / 2;
+  segs.push({ id: 'seg_feed', kind: 'segre', geom: { type: 'polyline', points: arcPts(0.4, 9.9 + Ru, Ru, -Math.PI / 2, -3 * Math.PI / 2, 16) }, height: 0.9, speed: vout, pitch: 0.55, next: ['segre0'] });
   for (let r = 0; r < nrob; r++) {
     const x0 = r === 0 ? 0.4 : robotX(r - 1), x1 = robotX(r);
     const cont = r < nrob - 1 ? 'segre' + (r + 1) : 'seg_end';
     segs.push({ id: 'segre' + r, kind: 'segre', geom: { type: 'straight', from: [x0, zSeg], to: [x1, zSeg] }, height: 0.9, speed: vout, pitch: 0.55,
       sort: { by: 'robot', robot: r, lane: 'rob' + r + '_lane', cont }, next: ['rob' + r + '_lane', cont] });
-    // SIN buffer real antes del KUKA: carril CORTO (1-2 cajas) + punto de pick. El robot toma
-    // la caja del punto de pick con su tiempo de ciclo; si está ocupado, se acumula 1-2 cajas y
-    // luego la segregación frena (cero presión) -> mide si los KUKA son suficientes.
-    segs.push({ id: 'rob' + r + '_lane', kind: 'roblane', geom: { type: 'straight', from: [robotX(r), zSeg + 0.2], to: [robotX(r), zLaneEnd] }, height: 0.9, speed: vlane, pitch: 0.5, cap: 2, next: ['rob' + r + '_pick'] });
-    segs.push({ id: 'rob' + r + '_pick', kind: 'pick', robot: r, geom: { type: 'straight', from: [robotX(r), zLaneEnd], to: [robotX(r), zPick] }, height: 0.9, speed: vlane, pitch: 0.5 });
+    // CURVA 90° real de entrada al carril del robot (de +x a +z) + recta corta hasta el pick.
+    // SIN buffer real antes del KUKA: el carril acumula 1-2 cajas; si el robot está ocupado la
+    // segregación frena por cero presión -> mide si los KUKA son suficientes.
+    const lx = robotX(r) + Rc;                          // x del carril/robot tras la curva
+    const lanePts = [...arcPts(robotX(r), zSeg + Rc, Rc, -Math.PI / 2, 0, 8), [lx, zPick - 0.5]];
+    segs.push({ id: 'rob' + r + '_lane', kind: 'roblane', geom: { type: 'polyline', points: lanePts }, height: 0.9, speed: vlane, pitch: 0.5, cap: 2, next: ['rob' + r + '_pick'] });
+    segs.push({ id: 'rob' + r + '_pick', kind: 'pick', robot: r, geom: { type: 'straight', from: [lx, zPick - 0.5], to: [lx, zPick] }, height: 0.9, speed: vlane, pitch: 0.5 });
   }
   // remate de la línea (si alguna caja no se desvió -> overflow, debe ser ~0)
   segs.push({ id: 'seg_end', kind: 'segre', geom: { type: 'straight', from: [robotX(nrob - 1), zSeg], to: [robotX(nrob - 1) + 2.2, zSeg] }, height: 0.9, speed: vout, pitch: 0.55, sink: true, reject: true });
