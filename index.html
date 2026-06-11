@@ -33,7 +33,7 @@
   <label style="margin-top:6px;color:#9fc3ff">Paletizadores KUKA</label>
   <div style="display:flex;gap:6px;align-items:center">
     <span style="color:#aebbd0;font-size:11px;flex:1">Robots</span><input type="number" id="probots" min="1" max="12" value="9" style="width:42px;background:#121821;color:#fff;border:1px solid #2a3a5a;border-radius:6px;padding:3px;font-size:11px;text-align:center">
-    <span style="color:#aebbd0;font-size:11px;flex:1">Pos/robot</span><input type="number" id="ppos" min="1" max="8" value="2" style="width:42px;background:#121821;color:#fff;border:1px solid #2a3a5a;border-radius:6px;padding:3px;font-size:11px;text-align:center">
+    <span style="color:#aebbd0;font-size:11px;flex:1">Pos/robot</span><input type="number" id="ppos" min="1" max="8" value="5" style="width:42px;background:#121821;color:#fff;border:1px solid #2a3a5a;border-radius:6px;padding:3px;font-size:11px;text-align:center">
   </div>
   <div style="display:flex;gap:6px;align-items:center;margin-top:3px">
     <span style="color:#aebbd0;font-size:11px;flex:1">Cajas por pallet</span><input type="number" id="pcap" min="4" max="80" value="32" style="width:42px;background:#121821;color:#fff;border:1px solid #2a3a5a;border-radius:6px;padding:3px;font-size:11px;text-align:center">
@@ -584,13 +584,15 @@ function buildSorter(opts = {}) {
   const skuAt = (c, l) => skus.find(s => s.col === c && s.lvl === l);
   const directW = 0.15, directColor = 0x9aa3b0;
 
-  // --- KUKA: cada robot toma `positions` SKUs (= 'positions' salidas de segregación, 1 pallet
-  //     por SKU). La directa (15%) va al ÚLTIMO robot. Lo que excede la capacidad se apila en el
-  //     último robot (faltas) -> mide si alcanzan. ---
-  const pal = opts.pal || { robots: 9, positions: 2, cap: 32, pickTime: 15 };
-  const positions = Math.max(1, pal.positions || 2), nrob = Math.max(1, pal.robots || 9);
-  skus.forEach(s => s.robot = Math.min(Math.floor(s.idx / positions), nrob - 1));
-  const directRobot = Math.min(Math.floor(NSKU / positions), nrob - 1);
+  // --- KUKA: cada robot ARMA HASTA `positions` pallets (capacidad, 1 pallet por SKU). El reparto
+  //     de SKUs entre robots es independiente (los 17 SKUs se reparten parejo entre los robots; el
+  //     ciclo de 15 s limita en la práctica a ~2 SKUs por robot). La directa (15%) va al último
+  //     robot. Si a un robot le tocan más SKUs que `positions` -> faltas (mide si alcanzan). ---
+  const pal = opts.pal || { robots: 9, positions: 5, cap: 32, pickTime: 15 };
+  const positions = Math.max(1, pal.positions || 5), nrob = Math.max(1, pal.robots || 9);
+  const skusPerRobot = Math.max(1, Math.ceil((NSKU + 1) / nrob));   // reparte los 17 SKUs entre los robots
+  skus.forEach(s => s.robot = Math.min(Math.floor(s.idx / skusPerRobot), nrob - 1));
+  const directRobot = Math.min(Math.floor(NSKU / skusPerRobot), nrob - 1);
 
   const segs = [];
   const CELLd = 3;                                   // celda de la línea directa (PRIMERA)
@@ -1056,7 +1058,7 @@ function currentRecipe(meta) {
 }
 function applyRecipe() { if (!sim) return; sim.model.pocket = currentRecipe(sim.meta); sim._pocket = { idx: 0, inStep: 0, done: false }; sim._pocketNext = 0; }
 
-const palCfg = () => ({ robots: Math.max(1, +$('probots').value || 9), positions: Math.max(1, +$('ppos').value || 2), cap: Math.max(2, +$('pcap').value || 32), pickTime: Math.max(1, +$('ptime').value || 15), pull: $('ppull').checked });
+const palCfg = () => ({ robots: Math.max(1, +$('probots').value || 9), positions: Math.max(1, +$('ppos').value || 5), cap: Math.max(2, +$('pcap').value || 32), pickTime: Math.max(1, +$('ptime').value || 15), pull: $('ppull').checked });
 function applyPal() { if (!sim) return; sim.meta.pal = palCfg(); sim._pallets = {}; sim.palDone = 0; sim.palMiss = 0; sim._palSent = {}; sim._prioPtr = 0; sim._palRR = 0; }
 
 function build(rebuildRows = true) {
@@ -1076,7 +1078,7 @@ $('outs').oninput = e => { $('vOuts').textContent = e.target.value + ' (' + (e.t
 $('rate').oninput = e => { $('vRate').textContent = e.target.value; build(false); };
 $('orate').oninput = e => { $('vOut').textContent = e.target.value; build(false); };
 $('probots').onchange = () => build(false);   // nº de robots cambia la geometría del segregador
-$('ppos').onchange = () => build(false);       // posiciones/robot cambia el agrupamiento de carriles
+$('ppos').onchange = applyPal;                 // posiciones = capacidad de pallets (sólo umbral de faltas)
 $('pcap').onchange = applyPal; $('ppull').onchange = applyPal; $('ptime').onchange = applyPal;
 $('speed').oninput = e => { speed = +e.target.value; $('vSpeed').textContent = speed + '×'; if (ctl) ctl.setSpeed(speed); };
 
