@@ -26,10 +26,10 @@
   <h1>Sorter · 16 SKUs + Pocket <span id="hideCtl" title="Ocultar controles">✕</span></h1>
   <label>Columnas <span class="v" id="vOuts">4 (16 SKUs)</span></label>
   <input type="range" id="outs" min="1" max="4" step="1" value="4">
-  <label>Entrada (cajas/min) <span class="v" id="vRate">14</span></label>
-  <input type="range" id="rate" min="6" max="80" step="1" value="14">
-  <label>Velocidad de SALIDA (cajas/min) <span class="v" id="vOut">40</span></label>
-  <input type="range" id="orate" min="6" max="60" step="1" value="40">
+  <label>Entrada (cajas/min) <span class="v" id="vRate">24</span></label>
+  <input type="range" id="rate" min="6" max="80" step="1" value="24">
+  <label>Velocidad de SALIDA (cajas/min) <span class="v" id="vOut">24</span></label>
+  <input type="range" id="orate" min="6" max="60" step="1" value="24">
   <label style="margin-top:6px;color:#9fc3ff">Paletizadores KUKA</label>
   <div style="display:flex;gap:6px;align-items:center">
     <span style="color:#aebbd0;font-size:11px;flex:1">Robots</span><input type="number" id="probots" min="1" max="12" value="6" style="width:42px;background:#121821;color:#fff;border:1px solid #2a3a5a;border-radius:6px;padding:3px;font-size:11px;text-align:center">
@@ -39,6 +39,9 @@
     <span style="color:#aebbd0;font-size:11px;flex:1">Cajas por pallet</span><input type="number" id="pcap" min="4" max="80" value="32" style="width:42px;background:#121821;color:#fff;border:1px solid #2a3a5a;border-radius:6px;padding:3px;font-size:11px;text-align:center">
   </div>
   <div style="display:flex;gap:6px;align-items:center;margin-top:3px">
+    <span style="color:#aebbd0;font-size:11px;flex:1">Máx. cajas por tanda</span><input type="number" id="pbatch" min="1" max="20" value="4" style="width:42px;background:#121821;color:#fff;border:1px solid #2a3a5a;border-radius:6px;padding:3px;font-size:11px;text-align:center">
+  </div>
+  <div style="display:flex;gap:6px;align-items:center;margin-top:3px">
     <span style="color:#aebbd0;font-size:11px;flex:1">Ciclo pick (s/caja)</span><input type="number" id="ptime" min="1" max="60" step="1" value="15" style="width:42px;background:#121821;color:#fff;border:1px solid #2a3a5a;border-radius:6px;padding:3px;font-size:11px;text-align:center">
   </div>
   <label style="display:flex;gap:6px;align-items:center;margin-top:4px;cursor:pointer"><input type="checkbox" id="ppull" checked> <span style="font-size:11px">Tren a medida (sincronizado → 0 faltas)</span></label>
@@ -46,7 +49,7 @@
   <div id="recipeRows" style="max-height:150px;overflow:auto;display:grid;gap:3px;margin-top:2px"></div>
   <label>Velocidad simulación <span class="v" id="vSpeed">3×</span></label>
   <input type="range" id="speed" min="1" max="8" step="1" value="3">
-  <label style="display:flex;gap:6px;align-items:center;margin-top:8px;cursor:pointer"><input type="checkbox" id="hideKuka"> <span style="font-size:11px">Ocultar KUKAs y segregador (cajas salen al final del principal)</span></label>
+  <label style="display:flex;gap:6px;align-items:center;margin-top:8px;cursor:pointer"><input type="checkbox" id="hideKuka" checked> <span style="font-size:11px">Ocultar KUKAs y segregador (cajas salen al final del principal)</span></label>
   <button id="pdfBtn" style="width:100%;margin-top:10px;background:#f39200;color:#1a1a1a;border:0;border-radius:8px;padding:9px;font:700 12px system-ui;cursor:pointer">📄 Generar reporte PDF</button>
   <div class="hint">16 SKUs (4 columnas × 4 niveles, cada nivel un color/SKU) = 85%, más una SALIDA DIRECTA sin elevador = 15%. Entrada desordenada por SKU (mix Danich); el Virtual Pocket entrega un tren ordenado a la banda de salida. Baja la velocidad de salida para estresar (se llenan los buffers).</div>
 </div>
@@ -592,21 +595,33 @@ function buildSorter(opts = {}) {
   const pal = opts.pal || { robots: 6, positions: 10, cap: 32, pickTime: 15 };
   const positions = Math.max(1, pal.positions || 10), nrob = Math.max(1, pal.robots || 6);
   const NCONV = Math.max(1, opts.convs || 3), NAISLE_R = Math.max(1, NCONV - 1);   // pasillos = conveyors-1
-  const skusPerRobot = Math.max(1, Math.ceil((NSKU + 1) / nrob));   // SKUs por robot
   const robPerConv = Math.max(1, Math.ceil(nrob / NCONV));          // robots por conveyor
   const convOf = r => Math.min(Math.floor(r / robPerConv), NCONV - 1);
-  skus.forEach(s => { s.robot = Math.min(Math.floor(s.idx / skusPerRobot), nrob - 1); s.conv = convOf(s.robot); });
-  const directRobot = Math.min(Math.floor(NSKU / skusPerRobot), nrob - 1), directConv = convOf(directRobot);
+  // reparto BALANCEADO por volumen (LPT: el flujo más pesado primero al robot menos cargado).
+  // La SALIDA DIRECTA (15%) entra al MISMO pool, así NO recarga a un robot que ya tiene un grupo
+  // de SKUs. Con 6 robots cada uno queda ~16-17% del flujo (≈4/min a 24 c/min = su techo de pick),
+  // de modo que ningún buffer se llena ni se obstruye el sistema.
+  const _load = new Array(nrob).fill(0);
+  const _leastRobot = () => { let mr = 0; for (let r = 1; r < nrob; r++) if (_load[r] < _load[mr]) mr = r; return mr; };
+  let directRobot = 0;
+  const _items = [...skus.map(s => ({ s, w: s.w })), { direct: true, w: directW }].sort((a, b) => b.w - a.w);
+  for (const it of _items) { const r = _leastRobot(); _load[r] += it.w; if (it.direct) directRobot = r; else { it.s.robot = r; it.s.conv = convOf(r); } }
+  const directConv = convOf(directRobot);
 
   const segs = [];
   const CELLd = CELL;                                // misma celda para la salida DIRECTA (todo uniforme, paso 1,2 m)
   const colX = c => CELLd + (c + 1) * CELL;          // x de cada columna (salidas a paso 1,2 m)
-  const xR = colX(NCOL - 1) + CELL, xL = 0.4;        // extremos de la banda de evacuación
+  const LOUT = opts.outLen ?? 10;                     // largo del transportador recto de SALIDA (evacuación, m)
+  const xR = colX(NCOL - 1) + CELL, xL = xR - LOUT;   // evacuación de 10 m (extremo izquierdo = xR - LOUT)
   const outS = x => (xR - x);                         // inyección a la evacuación en la X de cada salida
 
+  // ----- TRAMO RECTO DE ENTRADA al S4500 (infeed ~10 m): la fuente entra aquí y alimenta el sorter -----
+  const LIN = opts.inLen ?? 10;                       // largo del transportador recto de entrada (m)
+  segs.push({ id: 'entry', kind: 'main', geom: { type: 'straight', from: [-LIN, 0], to: [0, 0] }, height: 0.9, speed: vmain, pitch: 0.5,
+    source: { rate, cv: 0.35, burst: 0.1, cap: NSKU * 9, batchMean: Math.max(1, (opts.batchCap || 4) * 0.6), batchCap: Math.max(1, opts.batchCap || 4) },
+    next: ['main_d'] });
   // ----- Línea principal: PRIMERO deriva la salida DIRECTA (sin elevador, 15%), luego columnas -----
   segs.push({ id: 'main_d', kind: 'main', geom: { type: 'straight', from: [0, 0], to: [CELLd, 0] }, height: 0.9, speed: vmain, pitch: 0.5,
-    source: { rate, cv: 0.35, burst: 0.1, cap: NSKU * 9, batchMean: 3, batchCap: 8 },
     sort: { by: 'direct', lane: 'direct_in', cont: 'main0' }, next: ['direct_in', 'main0'] });
   for (let c = 0; c < NCOL; c++) {
     const x0 = CELLd + c * CELL, x1 = CELLd + (c + 1) * CELL;
@@ -1095,7 +1110,8 @@ function applyPal() { if (!sim) return; sim.meta.pal = palCfg(); sim._pallets = 
 function build(rebuildRows = true) {
   const N = +$('outs').value;
   const rate = +$('rate').value * 60;
-  const model = buildSorter({ outputs: N, rate, outSpeed: voutNow(), pal: palCfg() });
+  const batchCap = Math.max(1, +$('pbatch').value || 4);
+  const model = buildSorter({ outputs: N, rate, outSpeed: voutNow(), pal: palCfg(), batchCap });
   if (rebuildRows || $('recipeRows').children.length !== model.meta.skus.length + 1) buildRecipeRows(model.meta);
   model.pocket = currentRecipe(model.meta);            // usa las 17 líneas de la UI
   if (ctl) ctl.stop();
@@ -1112,6 +1128,7 @@ $('orate').oninput = e => { $('vOut').textContent = e.target.value; build(false)
 $('probots').onchange = () => build(false);   // nº de robots cambia la geometría del segregador
 $('ppos').onchange = applyPal;                 // posiciones = capacidad de pallets (sólo umbral de faltas)
 $('pcap').onchange = applyPal; $('ppull').onchange = applyPal; $('ptime').onchange = applyPal;
+$('pbatch').onchange = () => build(false);     // tamaño de tanda cambia el patrón de la fuente
 $('speed').oninput = e => { speed = +e.target.value; $('vSpeed').textContent = speed + '×'; if (ctl) ctl.setSpeed(speed); };
 $('hideKuka').onchange = e => { if (ctl) ctl.setHideKuka(e.target.checked); };
 
