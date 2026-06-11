@@ -611,12 +611,13 @@ function buildSorter(opts = {}) {
   const segs = [];
   const CELLd = CELL;                                // misma celda para la salida DIRECTA (todo uniforme, paso 1,2 m)
   const colX = c => CELLd + (c + 1) * CELL;          // x de cada columna (salidas a paso 1,2 m)
-  const LOUT = opts.outLen ?? 10;                     // largo del transportador recto de SALIDA (evacuación, m)
-  const xR = colX(NCOL - 1) + CELL, xL = xR - LOUT;   // evacuación de 10 m (extremo izquierdo = xR - LOUT)
+  const LIN = opts.inLen ?? 10;                       // largo del transportador recto de ENTRADA (m)
+  // SALIDA (evacuación): su extremo izquierdo se ALINEA con el de la entrada (x = -LIN) para que
+  // ambos tramos rectos queden PAREJOS a ambos lados, sobre la misma vertical.
+  const xR = colX(NCOL - 1) + CELL, xL = -LIN;
   const outS = x => (xR - x);                         // inyección a la evacuación en la X de cada salida
 
   // ----- TRAMO RECTO DE ENTRADA al S4500 (infeed ~10 m): la fuente entra aquí y alimenta el sorter -----
-  const LIN = opts.inLen ?? 10;                       // largo del transportador recto de entrada (m)
   segs.push({ id: 'entry', kind: 'main', geom: { type: 'straight', from: [-LIN, 0], to: [0, 0] }, height: 0.9, speed: vmain, pitch: 0.5,
     source: { rate, cv: 0.35, burst: 0.1, cap: NSKU * 9, batchMean: Math.max(1, (opts.batchCap || 4) * 0.6), batchCap: Math.max(1, opts.batchCap || 4) },
     next: ['main_d'] });
