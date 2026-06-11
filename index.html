@@ -26,8 +26,8 @@
   <h1>Sorter · 16 SKUs + Pocket <span id="hideCtl" title="Ocultar controles">✕</span></h1>
   <label>Columnas <span class="v" id="vOuts">4 (16 SKUs)</span></label>
   <input type="range" id="outs" min="1" max="4" step="1" value="4">
-  <label>Entrada (cajas/min) <span class="v" id="vRate">33</span></label>
-  <input type="range" id="rate" min="6" max="80" step="1" value="33">
+  <label>Entrada (cajas/min) <span class="v" id="vRate">14</span></label>
+  <input type="range" id="rate" min="6" max="80" step="1" value="14">
   <label>Velocidad de SALIDA (cajas/min) <span class="v" id="vOut">40</span></label>
   <input type="range" id="orate" min="6" max="60" step="1" value="40">
   <label style="margin-top:6px;color:#9fc3ff">Paletizadores KUKA</label>
@@ -37,6 +37,9 @@
   </div>
   <div style="display:flex;gap:6px;align-items:center;margin-top:3px">
     <span style="color:#aebbd0;font-size:11px;flex:1">Cajas por pallet</span><input type="number" id="pcap" min="4" max="80" value="32" style="width:42px;background:#121821;color:#fff;border:1px solid #2a3a5a;border-radius:6px;padding:3px;font-size:11px;text-align:center">
+  </div>
+  <div style="display:flex;gap:6px;align-items:center;margin-top:3px">
+    <span style="color:#aebbd0;font-size:11px;flex:1">Ciclo pick (s/caja)</span><input type="number" id="ptime" min="1" max="60" step="1" value="15" style="width:42px;background:#121821;color:#fff;border:1px solid #2a3a5a;border-radius:6px;padding:3px;font-size:11px;text-align:center">
   </div>
   <label style="display:flex;gap:6px;align-items:center;margin-top:4px;cursor:pointer"><input type="checkbox" id="ppull" checked> <span style="font-size:11px">Tren a medida (sincronizado → 0 faltas)</span></label>
   <label>Receta de salida · 17 líneas (elige el SKU por línea)</label>
@@ -129,7 +132,7 @@ class SorterSim {
     this._build();
     this._pocket = { idx: 0, inStep: 0, done: false }; this._pocketNext = 0;
     this._pending = []; this._slotG = null; this._slotBase = 0;
-    this.robots = {}; this._palEvents = [];
+    this.robots = {}; this._palEvents = []; this._batch = null;
   }
 
   _build() {
@@ -182,7 +185,7 @@ class SorterSim {
     this.releasedLog.length = 0; this.relByColor = {};
     this._pocket = { idx: 0, inStep: 0, done: false }; this._pocketNext = 0;
     this._pending = []; this._slotG = null; this._slotBase = 0;
-    this.robots = {}; this._palEvents = [];
+    this.robots = {}; this._palEvents = []; this._batch = null;
     this._pallets = {}; this.palDone = 0; this.palMiss = 0; this._palSent = {}; this._prioPtr = 0; this._palRR = 0;
     for (const id in this.seg) { const r = this.seg[id]; if (r.isLift) { r.cooldownUntil = 0; r.feedCtr = 0; r.levelCtr = 0; } else { r.nextSpawn = 0; r.count = 0; } }
     this._ftEMA = 0;
@@ -209,12 +212,12 @@ class SorterSim {
         const src = seg.source;
         const overCap = src.cap && this.boxes.length >= src.cap;
         if (!overCap && this._entryFree(id)) {
-          const sk = this._sampleSku(); // entrada DESORDENADA por SKU (pesos Danich + dispersión)
+          const sk = this._nextSku(src); // entrada por TANDAS (lotes del mismo SKU; promedio horario = tabla)
           const box = new Box(id, T, sk.color); box.sku = sk.idx; box.col = sk.col; box.lvl = sk.lvl; box.direct = sk.direct;
           box.robot = sk.direct ? this.meta.directRobot : (this.meta.skus[sk.idx] ? this.meta.skus[sk.idx].robot : 0); // KUKA destino (carril de su SKU)
           this.boxes.push(box); this.generated++;
           this._inBySku = this._inBySku || {}; this._inBySku[sk.key] = (this._inBySku[sk.key] || 0) + 1;
-          seg.nextSpawn = T + this._interArrival(src);
+          seg.nextSpawn = T + this._batchGap(src);
         } else { seg.nextSpawn = T + 0.2; }
       }
     }
@@ -341,8 +344,8 @@ class SorterSim {
   _chooseNext(seg, b) {
     if (seg.sort) {
       const S = seg.sort;
-      if (S.by === 'col') { if (!b.direct && b.col === S.divertCol && this._entryFree(S.lane)) return S.lane; return S.cont && this._entryFree(S.cont) ? S.cont : null; }
-      if (S.by === 'direct') { if (b.direct && this._entryFree(S.lane)) return S.lane; return S.cont && this._entryFree(S.cont) ? S.cont : null; }
+      if (S.by === 'col') { if (!b.direct && b.col === S.divertCol) return this._entryFree(S.lane) ? S.lane : null; return S.cont && this._entryFree(S.cont) ? S.cont : null; } // es de esta columna: entra o ESPERA (cero presión), no se va a overflow
+      if (S.by === 'direct') { if (b.direct) return this._entryFree(S.lane) ? S.lane : null; return S.cont && this._entryFree(S.cont) ? S.cont : null; }
       if (S.by === 'color') { if (b.color === S.divertColor && this._entryFree(S.lane)) return S.lane; return S.cont && this._entryFree(S.cont) ? S.cont : null; }
       if (S.by === 'robot') { if (b.robot === S.robot) return this._entryFree(S.lane) ? S.lane : null; return S.cont && this._entryFree(S.cont) ? S.cont : null; }
       if (S.by === 'lane') { const mine = S.direct ? b.direct : (!b.direct && b.sku === S.sku); if (mine) return this._entryFree(S.lane) ? S.lane : null; return S.cont && this._entryFree(S.cont) ? S.cont : null; }
@@ -358,6 +361,28 @@ class SorterSim {
     let r = this.rng(), acc = 0;
     for (const s of skus) { acc += s.w; if (r < acc) return { idx: s.idx, col: s.col, lvl: s.lvl, color: s.color, direct: false, key: 'S' + s.idx }; }
     return { idx: -1, col: -1, lvl: -1, color: this.meta.directColor || 0x9aa3b0, direct: true, key: 'DIRECT' };
+  }
+
+  // ENTRADA POR TANDAS: la producción real llega en lotes (corridas) de un mismo SKU. Se elige
+  // el SKU de la tanda por peso (tabla Danich) y un tamaño de lote aleatorio (exponencial). Así
+  // se ven TANDAS a la entrada; el promedio por SKU y la tasa total se conservan (la pausa entre
+  // tandas compensa la ráfaga rápida dentro de la tanda).
+  _nextSku(src) {
+    if (!this._batch || this._batch.remaining <= 0) {
+      const sk = this._sampleSku(), mean = src.batchMean || 4, cap = src.batchCap || 9;
+      const size = Math.max(1, Math.min(cap, Math.round(-mean * Math.log(1 - this.rng()))));
+      this._batch = { sk, remaining: size, size };
+    }
+    this._batch.remaining--; this._batchLast = this._batch.remaining <= 0;
+    return this._batch.sk;
+  }
+  // intervalo entre cajas: RÁFAGA dentro de la tanda (un poco más rápida que el promedio, pero
+  // absorbible por la columna) + PAUSA al cerrar la tanda (conserva la tasa media de la tabla).
+  _batchGap(src) {
+    const perMin = Math.max(0.1, (src.rate || 1800) / 60), mean = 60 / perMin, intra = mean * 0.6;
+    if (!this._batchLast) return Math.max(0.5, intra * (0.7 + 0.6 * this.rng()));
+    const N = this._batch ? this._batch.size : 4, pause = mean * (0.4 * N + 0.6);
+    return Math.max(0.6, pause * (0.6 + 0.8 * this.rng()));
   }
 
   // PALETIZADO (robots KUKA, tras el SEGREGADOR): cada caja llega al carril de SU robot y
@@ -559,7 +584,7 @@ function buildSorter(opts = {}) {
   // --- KUKA: cada robot toma `positions` SKUs (= 'positions' salidas de segregación, 1 pallet
   //     por SKU). La directa (15%) va al ÚLTIMO robot. Lo que excede la capacidad se apila en el
   //     último robot (faltas) -> mide si alcanzan. ---
-  const pal = opts.pal || { robots: 9, positions: 2, cap: 32, pickTime: 2.5 };
+  const pal = opts.pal || { robots: 9, positions: 2, cap: 32, pickTime: 15 };
   const positions = Math.max(1, pal.positions || 2), nrob = Math.max(1, pal.robots || 9);
   skus.forEach(s => s.robot = Math.min(Math.floor(s.idx / positions), nrob - 1));
   const directRobot = Math.min(Math.floor(NSKU / positions), nrob - 1);
@@ -572,7 +597,7 @@ function buildSorter(opts = {}) {
 
   // ----- Línea principal: PRIMERO deriva la salida DIRECTA (sin elevador, 15%), luego columnas -----
   segs.push({ id: 'main_d', kind: 'main', geom: { type: 'straight', from: [0, 0], to: [CELLd, 0] }, height: 0.9, speed: vmain, pitch: 0.5,
-    source: { rate, cv: 0.35, burst: 0.1, cap: NSKU * 9 },
+    source: { rate, cv: 0.35, burst: 0.1, cap: NSKU * 9, batchMean: 3, batchCap: 8 },
     sort: { by: 'direct', lane: 'direct_in', cont: 'main0' }, next: ['direct_in', 'main0'] });
   for (let c = 0; c < NCOL; c++) {
     const x0 = CELLd + c * CELL, x1 = CELLd + (c + 1) * CELL;
@@ -613,9 +638,9 @@ function buildSorter(opts = {}) {
   const lanes = skus.map(s => ({ key: 'S' + s.idx, sku: s.idx, robot: s.robot, color: s.color }));
   lanes.push({ key: 'DIR', direct: true, robot: directRobot, color: directColor });
   const NL = lanes.length;                              // 17 (16 SKUs + directa)
-  const lxFirst = 1.6, lxLast = Math.max(8, NSKU + 8); // ancho de la zona de paletizado
-  const laneX = i => NL <= 1 ? (lxFirst + lxLast) / 2 : lxFirst + i * ((lxLast - lxFirst) / (NL - 1));
-  const zSeg = 12.6, zPick = 14.3, Rc = 0.55;
+  const SALIDA = 0.9144;                                // 36" entre salidas (sistema compacto)
+  const lxFirst = 1.6, laneX = i => lxFirst + i * SALIDA;
+  const zSeg = 12.6, zPick = 14.3, Rc = 0.4;
   // RETORNO (curva 180° real) de la evacuación a la línea de segregación (tangentes continuas)
   const Ru = (zSeg - 9.9) / 2;
   segs.push({ id: 'seg_feed', kind: 'segre', geom: { type: 'polyline', points: arcPts(0.4, 9.9 + Ru, Ru, -Math.PI / 2, -3 * Math.PI / 2, 16) }, height: 0.9, speed: vout, pitch: 0.55, next: ['segre0'] });
@@ -626,7 +651,7 @@ function buildSorter(opts = {}) {
     // curva 90° real al carril del SKU + recta hasta el pick; el pallet va detrás
     const lx = laneX(i) + Rc;
     const lanePts = [...arcPts(laneX(i), zSeg + Rc, Rc, -Math.PI / 2, 0, 6), [lx, zPick - 0.4]];
-    segs.push({ id: 'lane' + i, kind: 'roblane', color: L.color, geom: { type: 'polyline', points: lanePts }, height: 0.9, speed: vlane, pitch: 0.5, cap: 2, next: ['pick' + i] });
+    segs.push({ id: 'lane' + i, kind: 'roblane', color: L.color, geom: { type: 'polyline', points: lanePts }, height: 0.9, speed: vlane, pitch: 0.5, cap: 1, next: ['pick' + i] });
     segs.push({ id: 'pick' + i, kind: 'pick', robot: L.robot, sku: L.sku, direct: !!L.direct, color: L.color, geom: { type: 'straight', from: [lx, zPick - 0.4], to: [lx, zPick] }, height: 0.9, speed: vlane, pitch: 0.5 });
   }
   // remate de la línea (si alguna caja no se desvió -> overflow, debe ser ~0)
@@ -1027,7 +1052,7 @@ function currentRecipe(meta) {
 }
 function applyRecipe() { if (!sim) return; sim.model.pocket = currentRecipe(sim.meta); sim._pocket = { idx: 0, inStep: 0, done: false }; sim._pocketNext = 0; }
 
-const palCfg = () => ({ robots: Math.max(1, +$('probots').value || 9), positions: Math.max(1, +$('ppos').value || 2), cap: Math.max(2, +$('pcap').value || 32), pickTime: 2.5, pull: $('ppull').checked });
+const palCfg = () => ({ robots: Math.max(1, +$('probots').value || 9), positions: Math.max(1, +$('ppos').value || 2), cap: Math.max(2, +$('pcap').value || 32), pickTime: Math.max(1, +$('ptime').value || 15), pull: $('ppull').checked });
 function applyPal() { if (!sim) return; sim.meta.pal = palCfg(); sim._pallets = {}; sim.palDone = 0; sim.palMiss = 0; sim._palSent = {}; sim._prioPtr = 0; sim._palRR = 0; }
 
 function build(rebuildRows = true) {
@@ -1047,7 +1072,8 @@ $('outs').oninput = e => { $('vOuts').textContent = e.target.value + ' (' + (e.t
 $('rate').oninput = e => { $('vRate').textContent = e.target.value; build(false); };
 $('orate').oninput = e => { $('vOut').textContent = e.target.value; build(false); };
 $('probots').onchange = () => build(false);   // nº de robots cambia la geometría del segregador
-$('ppos').onchange = applyPal; $('pcap').onchange = applyPal; $('ppull').onchange = applyPal;
+$('ppos').onchange = () => build(false);       // posiciones/robot cambia el agrupamiento de carriles
+$('pcap').onchange = applyPal; $('ppull').onchange = applyPal; $('ptime').onchange = applyPal;
 $('speed').oninput = e => { speed = +e.target.value; $('vSpeed').textContent = speed + '×'; if (ctl) ctl.setSpeed(speed); };
 
 // ---- Reporte PDF (jsPDF vía CDN) : entrada/salida por SKU, ocupación de buffers, paletizado, parámetros ----

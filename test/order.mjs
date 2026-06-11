@@ -43,14 +43,14 @@ function run(opts, seed, SEC) {
   return { backSku, nSku, segLoss, collide, rejected: sim.rejected, done: r.pal.done, miss: r.pal.miss, gen: sim.generated, out: r.totalOut };
 }
 
-// ====== ESCENARIO 1: nominal (9 robots x2, default) ======
-let R = run({ outputs: 4, rate: 33 * 60, outSpeed: 0.95, pal: { robots: 9, positions: 2, cap: 32, pickTime: 2.5 } }, 12345, 700);
+// ====== ESCENARIO 1: nominal (tasa real de la tabla 14/min P90, pick 15 s, 9 robots x2) ======
+let R = run({ outputs: 4, rate: 14 * 60, outSpeed: 1.0, pal: { robots: 9, positions: 2, cap: 32, pickTime: 15 } }, 12345, 900);
 console.log(`[NOMINAL 9x2]  generadas ${R.gen} · entregadas ${R.out} · pallets ${R.done} · faltas ${R.miss}`);
 console.log(`  orden POR SKU (${R.nSku} SKUs): retrocesos ${R.backSku}  ${R.backSku === 0 ? '✓ cada SKU en orden' : '✗'}`);
 console.log(`  perdidas en segregador ${R.segLoss}  · rechazo total ${R.rejected}  · colisiones ${R.collide}  ${R.segLoss === 0 && R.collide === 0 && R.rejected === 0 ? '✓' : '✗'}`);
 
-// ====== ESCENARIO 2: estrés (salida lenta, tasa alta) — el overflow de la línea principal es válido ======
-let S = run({ outputs: 4, rate: 60 * 60, outSpeed: 0.5, pal: { robots: 9, positions: 2, cap: 32, pickTime: 2.5 } }, 999, 700);
+// ====== ESCENARIO 2: estrés (tasa alta sobre el techo de los KUKA) — backpressure, sin pérdidas ======
+let S = run({ outputs: 4, rate: 30 * 60, outSpeed: 1.0, pal: { robots: 9, positions: 2, cap: 32, pickTime: 15 } }, 999, 700);
 console.log(`\n[ESTRÉS]  entregadas ${S.out} · faltas ${S.miss} · perdidas-segregador ${S.segLoss} · overflow-principal ${S.rejected}`);
 console.log(`  orden por SKU retrocesos ${S.backSku}  · colisiones ${S.collide}  ${S.backSku === 0 && S.collide === 0 && S.segLoss === 0 ? '✓' : '✗'}`);
 
