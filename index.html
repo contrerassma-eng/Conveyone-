@@ -32,8 +32,8 @@
   <input type="range" id="orate" min="6" max="60" step="1" value="40">
   <label style="margin-top:6px;color:#9fc3ff">Paletizadores KUKA</label>
   <div style="display:flex;gap:6px;align-items:center">
-    <span style="color:#aebbd0;font-size:11px;flex:1">Robots</span><input type="number" id="probots" min="1" max="6" value="4" style="width:42px;background:#121821;color:#fff;border:1px solid #2a3a5a;border-radius:6px;padding:3px;font-size:11px;text-align:center">
-    <span style="color:#aebbd0;font-size:11px;flex:1">Pos/robot</span><input type="number" id="ppos" min="1" max="8" value="5" style="width:42px;background:#121821;color:#fff;border:1px solid #2a3a5a;border-radius:6px;padding:3px;font-size:11px;text-align:center">
+    <span style="color:#aebbd0;font-size:11px;flex:1">Robots</span><input type="number" id="probots" min="1" max="12" value="9" style="width:42px;background:#121821;color:#fff;border:1px solid #2a3a5a;border-radius:6px;padding:3px;font-size:11px;text-align:center">
+    <span style="color:#aebbd0;font-size:11px;flex:1">Pos/robot</span><input type="number" id="ppos" min="1" max="8" value="2" style="width:42px;background:#121821;color:#fff;border:1px solid #2a3a5a;border-radius:6px;padding:3px;font-size:11px;text-align:center">
   </div>
   <div style="display:flex;gap:6px;align-items:center;margin-top:3px">
     <span style="color:#aebbd0;font-size:11px;flex:1">Cajas por pallet</span><input type="number" id="pcap" min="4" max="80" value="32" style="width:42px;background:#121821;color:#fff;border:1px solid #2a3a5a;border-radius:6px;padding:3px;font-size:11px;text-align:center">
@@ -211,7 +211,7 @@ class SorterSim {
         if (!overCap && this._entryFree(id)) {
           const sk = this._sampleSku(); // entrada DESORDENADA por SKU (pesos Danich + dispersión)
           const box = new Box(id, T, sk.color); box.sku = sk.idx; box.col = sk.col; box.lvl = sk.lvl; box.direct = sk.direct;
-          { const R = this.meta.pal ? this.meta.pal.robots : 4; box.robot = sk.direct ? (R - 1) : (sk.col % R); } // KUKA destino (segregador); directa al robot menos cargado
+          box.robot = sk.direct ? this.meta.directRobot : (this.meta.skus[sk.idx] ? this.meta.skus[sk.idx].robot : 0); // KUKA destino (carril de su SKU)
           this.boxes.push(box); this.generated++;
           this._inBySku = this._inBySku || {}; this._inBySku[sk.key] = (this._inBySku[sk.key] || 0) + 1;
           seg.nextSpawn = T + this._interArrival(src);
@@ -286,8 +286,8 @@ class SorterSim {
         rs.phase = Math.max(0, Math.min(1, 1 - (rs.until - this.t) / pickTime));
         if (this.t >= rs.until) { this._palletize(rs.box); rs.busy = false; rs.box = null; rs.color = null; rs.phase = 0; }
       } else {
-        const b = this._boxAtEnd(sid);                  // caja esperando en el punto de pick
-        if (b) { const k = this.boxes.indexOf(b); if (k >= 0) this.boxes.splice(k, 1); rs.busy = true; rs.until = this.t + pickTime; rs.box = b; rs.color = b.color; rs.phase = 0; }
+        const b = this._boxAtEnd(sid);                  // caja esperando en el punto de pick de ESTA salida
+        if (b) { const k = this.boxes.indexOf(b); if (k >= 0) this.boxes.splice(k, 1); rs.busy = true; rs.until = this.t + pickTime; rs.box = b; rs.color = b.color; rs.phase = 0; rs.px = sg.path.points[0][0]; rs.sku = b.direct ? 'DIR' : ('S' + b.sku); }
       }
     }
 
@@ -345,6 +345,7 @@ class SorterSim {
       if (S.by === 'direct') { if (b.direct && this._entryFree(S.lane)) return S.lane; return S.cont && this._entryFree(S.cont) ? S.cont : null; }
       if (S.by === 'color') { if (b.color === S.divertColor && this._entryFree(S.lane)) return S.lane; return S.cont && this._entryFree(S.cont) ? S.cont : null; }
       if (S.by === 'robot') { if (b.robot === S.robot) return this._entryFree(S.lane) ? S.lane : null; return S.cont && this._entryFree(S.cont) ? S.cont : null; }
+      if (S.by === 'lane') { const mine = S.direct ? b.direct : (!b.direct && b.sku === S.sku); if (mine) return this._entryFree(S.lane) ? S.lane : null; return S.cont && this._entryFree(S.cont) ? S.cont : null; }
     }
     const nx = seg.next;
     if (!nx.length) return null;
@@ -505,7 +506,7 @@ class SorterSim {
       return { id: b.id, x: p[0], z: p[1], y: seg.height, dx: d[0], dz: d[1], color: b.color, held: !!seg.pocketBuffer };
     });
     // estado de cada robot KUKA (para animar el brazo y el pick)
-    const robots = Object.keys(this.robots).map(r => ({ r: +r, busy: this.robots[r].busy, phase: this.robots[r].phase, color: this.robots[r].color }));
+    const robots = Object.keys(this.robots).map(r => ({ r: +r, busy: this.robots[r].busy, phase: this.robots[r].phase, color: this.robots[r].color, px: this.robots[r].px, sku: this.robots[r].sku }));
     const events = this._palEvents; this._palEvents = [];   // eventos de pallet completo (consumidos por el render)
     return {
       time: this.t, boxes,
@@ -555,6 +556,14 @@ function buildSorter(opts = {}) {
   const skuAt = (c, l) => skus.find(s => s.col === c && s.lvl === l);
   const directW = 0.15, directColor = 0x9aa3b0;
 
+  // --- KUKA: cada robot toma `positions` SKUs (= 'positions' salidas de segregación, 1 pallet
+  //     por SKU). La directa (15%) va al ÚLTIMO robot. Lo que excede la capacidad se apila en el
+  //     último robot (faltas) -> mide si alcanzan. ---
+  const pal = opts.pal || { robots: 9, positions: 2, cap: 32, pickTime: 2.5 };
+  const positions = Math.max(1, pal.positions || 2), nrob = Math.max(1, pal.robots || 9);
+  skus.forEach(s => s.robot = Math.min(Math.floor(s.idx / positions), nrob - 1));
+  const directRobot = Math.min(Math.floor(NSKU / positions), nrob - 1);
+
   const segs = [];
   const CELLd = 3;                                   // celda de la línea directa (PRIMERA)
   const colX = c => CELLd + (c + 1) * CELL;          // x de cada columna
@@ -594,32 +603,31 @@ function buildSorter(opts = {}) {
   segs.push({ id: 'outfeed', kind: 'outfeed', geom: { type: 'straight', from: [xR, 9.9], to: [xL, 9.9] }, height: 0.9, speed: vout, pitch: 0.55, entryByColor: true, next: ['deliv'] });
   segs.push({ id: 'deliv', kind: 'deliv', geom: { type: 'straight', from: [xL, 9.9], to: [xL - 0.61, 9.9] }, height: 0.9, speed: vout, pitch: 0.55, next: ['seg_feed'] });
 
-  // ----- SEGREGADOR -> KUKA: el tren ordenado sube a la línea de segregación y cada caja
-  // se desvía al carril de SU robot (1 robot por subconjunto de SKUs). Orden conservado:
-  // cada robot recibe la subsecuencia en orden; si su carril está lleno, la línea espera
-  // (cero presión) y nunca se cruzan cajas. -----
-  const nrob = Math.max(1, (opts.pal || {}).robots || 4);
-  const robotX = r => nrob <= 1 ? (xR + xL) / 2 : 7 + r * ((19 - 7) / (nrob - 1));
-  const zSeg = 12.6, zPick = 14.0, Rc = 0.7;
-  // RETORNO (curva 180° real) desde la evacuación a la línea de segregación: la caja entra
-  // a la curva moviéndose en -x y sale en +x sobre la línea de segregación (tangentes continuas).
+  // ----- SEGREGADOR -> KUKA: UNA SALIDA (carril) POR SKU. Cada robot toma `positions` carriles
+  // (2 salidas) y arma 1 pallet por SKU. La línea recorre todas las salidas; cada caja se desvía
+  // al carril de SU SKU y "el resto" sigue de largo a la siguiente. Sin buffer real: cada carril
+  // acumula 1-2 cajas y el robot pickea con su tiempo de ciclo (compartido entre sus 2 salidas).
+  const lanes = skus.map(s => ({ key: 'S' + s.idx, sku: s.idx, robot: s.robot, color: s.color }));
+  lanes.push({ key: 'DIR', direct: true, robot: directRobot, color: directColor });
+  const NL = lanes.length;                              // 17 (16 SKUs + directa)
+  const lxFirst = 1.6, lxLast = Math.max(8, NSKU + 8); // ancho de la zona de paletizado
+  const laneX = i => NL <= 1 ? (lxFirst + lxLast) / 2 : lxFirst + i * ((lxLast - lxFirst) / (NL - 1));
+  const zSeg = 12.6, zPick = 14.3, Rc = 0.55;
+  // RETORNO (curva 180° real) de la evacuación a la línea de segregación (tangentes continuas)
   const Ru = (zSeg - 9.9) / 2;
   segs.push({ id: 'seg_feed', kind: 'segre', geom: { type: 'polyline', points: arcPts(0.4, 9.9 + Ru, Ru, -Math.PI / 2, -3 * Math.PI / 2, 16) }, height: 0.9, speed: vout, pitch: 0.55, next: ['segre0'] });
-  for (let r = 0; r < nrob; r++) {
-    const x0 = r === 0 ? 0.4 : robotX(r - 1), x1 = robotX(r);
-    const cont = r < nrob - 1 ? 'segre' + (r + 1) : 'seg_end';
-    segs.push({ id: 'segre' + r, kind: 'segre', geom: { type: 'straight', from: [x0, zSeg], to: [x1, zSeg] }, height: 0.9, speed: vout, pitch: 0.55,
-      sort: { by: 'robot', robot: r, lane: 'rob' + r + '_lane', cont }, next: ['rob' + r + '_lane', cont] });
-    // CURVA 90° real de entrada al carril del robot (de +x a +z) + recta corta hasta el pick.
-    // SIN buffer real antes del KUKA: el carril acumula 1-2 cajas; si el robot está ocupado la
-    // segregación frena por cero presión -> mide si los KUKA son suficientes.
-    const lx = robotX(r) + Rc;                          // x del carril/robot tras la curva
-    const lanePts = [...arcPts(robotX(r), zSeg + Rc, Rc, -Math.PI / 2, 0, 8), [lx, zPick - 0.5]];
-    segs.push({ id: 'rob' + r + '_lane', kind: 'roblane', geom: { type: 'polyline', points: lanePts }, height: 0.9, speed: vlane, pitch: 0.5, cap: 2, next: ['rob' + r + '_pick'] });
-    segs.push({ id: 'rob' + r + '_pick', kind: 'pick', robot: r, geom: { type: 'straight', from: [lx, zPick - 0.5], to: [lx, zPick] }, height: 0.9, speed: vlane, pitch: 0.5 });
+  for (let i = 0; i < NL; i++) {
+    const L = lanes[i], x0 = i === 0 ? 0.4 : laneX(i - 1), x1 = laneX(i), cont = i < NL - 1 ? 'segre' + (i + 1) : 'seg_end';
+    segs.push({ id: 'segre' + i, kind: 'segre', geom: { type: 'straight', from: [x0, zSeg], to: [x1, zSeg] }, height: 0.9, speed: vout, pitch: 0.55,
+      sort: { by: 'lane', sku: L.sku, direct: !!L.direct, lane: 'lane' + i, cont }, next: ['lane' + i, cont] });
+    // curva 90° real al carril del SKU + recta hasta el pick; el pallet va detrás
+    const lx = laneX(i) + Rc;
+    const lanePts = [...arcPts(laneX(i), zSeg + Rc, Rc, -Math.PI / 2, 0, 6), [lx, zPick - 0.4]];
+    segs.push({ id: 'lane' + i, kind: 'roblane', color: L.color, geom: { type: 'polyline', points: lanePts }, height: 0.9, speed: vlane, pitch: 0.5, cap: 2, next: ['pick' + i] });
+    segs.push({ id: 'pick' + i, kind: 'pick', robot: L.robot, sku: L.sku, direct: !!L.direct, color: L.color, geom: { type: 'straight', from: [lx, zPick - 0.4], to: [lx, zPick] }, height: 0.9, speed: vlane, pitch: 0.5 });
   }
   // remate de la línea (si alguna caja no se desvió -> overflow, debe ser ~0)
-  segs.push({ id: 'seg_end', kind: 'segre', geom: { type: 'straight', from: [robotX(nrob - 1), zSeg], to: [robotX(nrob - 1) + 2.2, zSeg] }, height: 0.9, speed: vout, pitch: 0.55, sink: true, reject: true });
+  segs.push({ id: 'seg_end', kind: 'segre', geom: { type: 'straight', from: [laneX(NL - 1), zSeg], to: [laneX(NL - 1) + 2.2, zSeg] }, height: 0.9, speed: vout, pitch: 0.55, sink: true, reject: true });
 
   // receta: tren consecutivo (1 caja por SKU) INTERCALADO por columnas (paraleliza los
   // 4 elevadores de descenso) + directo. El orden del tren lo dicta esta secuencia.
@@ -627,7 +635,7 @@ function buildSorter(opts = {}) {
   const steps = skus.map(s => ({ color: s.color, qty: 1 })); steps.push({ color: directColor, qty: 1 });
   const pocket = opts.pocket || { loop: true, steps, interval: 0.15 }; // libera tirante (cero presión arma el tren)
 
-  return { meta: { name: 'Sorter 4500 · 16 SKUs + directa', boxSize: [0.4, 0.13, 0.3], skus, directW, directColor, directName: DIRECT_NAME, ncol: NCOL, nlvl: NLVL, pal: opts.pal || { robots: 4, positions: 5, cap: 32, pickTime: 2.5 }, ref: { perMin: 11 } }, segments: segs, pocket };
+  return { meta: { name: 'Sorter 4500 · 16 SKUs + directa', boxSize: [0.4, 0.13, 0.3], skus, directW, directColor, directName: DIRECT_NAME, ncol: NCOL, nlvl: NLVL, pal, directRobot, ref: { perMin: 11 } }, segments: segs, pocket };
 }
 
 
@@ -806,76 +814,73 @@ function mountSorter(sim, opts = {}) {
     for (const [id, m] of pool) if (!seen.has(id)) { scene.remove(m); pool.delete(id); }
   }
 
-  // ---- estaciones de robot (del layout: tramos kind 'pick') ----
-  const stations = sim.model.segments.filter(s => s.kind === 'pick').map(s => ({ r: s.robot, x: s.geom.from[0], z: s.geom.to[1] }));
-  const palZ = (stations[0] ? stations[0].z : 13.5) + 1.85;  // fila de pallets detrás de los robots
+  // ---- SALIDAS de pick: 1 por SKU (del layout, kind 'pick'). Cada robot agrupa sus 'positions'. ----
+  const picks = sim.model.segments.filter(s => s.kind === 'pick').map(s => ({ r: s.robot, x: s.geom.from[0], z: s.geom.to[1], key: s.direct ? 'DIR' : ('S' + s.sku), color: s.color }));
+  const zPickF = picks[0] ? picks[0].z : 14.3, palZ = zPickF + 1.7;     // fila de pallets detrás de las salidas
+  const palKeyX = {}; for (const p of picks) palKeyX[p.r + ':' + p.key] = p.x;   // 'r:SKU' -> x de su pallet (= x de su carril)
+  const colOfKey = k => { const sku = k.slice(k.indexOf(':') + 1); return sku === 'DIR' ? (sim.meta.directColor || 0x9aa3b0) : (sim.meta.skus[+sku.slice(1)] ? sim.meta.skus[+sku.slice(1)].color : 0x999999); };
 
-  // ---- robots KUKA (paletizadores) con brazo articulado SINCRONIZADO al pick ----
+  // ---- robots KUKA: uno por robot, en el CENTROIDE de sus salidas; brazo sincronizado al pick ----
   const kukaBaseMat = new THREE.MeshStandardMaterial({ color: 0x2a2f36, metalness: 0.5, roughness: 0.5 });
   const kukaArmMat = new THREE.MeshStandardMaterial({ color: QIMAROX_ORANGE, metalness: 0.35, roughness: 0.45 });
-  const robotRig = {};
-  function buildKuka(st) {
-    const g = new THREE.Group(); g.position.set(st.x, 0, st.z + 0.9); scene.add(g);
-    const base = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.42, 0.3, 16), kukaBaseMat); base.position.y = 0.15; g.add(base);
+  const robotRig = {}; const byRobotPicks = {};
+  for (const p of picks) (byRobotPicks[p.r] || (byRobotPicks[p.r] = [])).push(p);
+  for (const r in byRobotPicks) {
+    const ps = byRobotPicks[r], bx = ps.reduce((a, p) => a + p.x, 0) / ps.length, bz = zPickF + 0.95;
+    const g = new THREE.Group(); g.position.set(bx, 0, bz); scene.add(g);
+    g.add(posMesh(new THREE.CylinderGeometry(0.34, 0.42, 0.3, 16), kukaBaseMat, 0, 0.15, 0));
     const col = new THREE.Group(); col.position.y = 0.3; g.add(col);
     col.add(posMesh(new THREE.CylinderGeometry(0.22, 0.26, 0.55, 14), kukaBaseMat, 0, 0.27, 0));
     const sh = new THREE.Group(); sh.position.y = 0.5; col.add(sh);
-    sh.add(posMesh(new THREE.BoxGeometry(0.16, 0.95, 0.16), kukaArmMat, 0, 0.47, 0));
-    const el = new THREE.Group(); el.position.y = 0.92; sh.add(el);
-    el.add(posMesh(new THREE.BoxGeometry(0.13, 0.13, 1.05), kukaArmMat, 0, 0, -0.45));
-    const wr = new THREE.Group(); wr.position.z = -0.95; el.add(wr);
+    sh.add(posMesh(new THREE.BoxGeometry(0.16, 1.05, 0.16), kukaArmMat, 0, 0.52, 0));
+    const el = new THREE.Group(); el.position.y = 1.02; sh.add(el);
+    el.add(posMesh(new THREE.BoxGeometry(0.13, 0.13, 1.15), kukaArmMat, 0, 0, -0.5));
+    const wr = new THREE.Group(); wr.position.z = -1.05; el.add(wr);
     wr.add(posMesh(new THREE.BoxGeometry(0.4, 0.12, 0.34), kukaBaseMat, 0, -0.12, 0));
-    const held = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.13, 0.3), boxMat(0xffffff)); held.position.y = -0.22; held.visible = false; wr.add(held);
-    robotRig[st.r] = { col, sh, el, wr, held };
+    const held = new THREE.Mesh(boxGeo, boxMat(0xffffff)); held.visible = false; scene.add(held);  // EN ESCENA: viaja del pick al pallet
+    robotRig[r] = { col, sh, el, wr, held, bx, bz };
   }
-  for (const st of stations) buildKuka(st);
   function poseRobot(rs) {
     const rig = robotRig[rs.r]; if (!rig) return;
-    if (!rs.busy) { rig.col.rotation.y = 0; rig.sh.rotation.x = -0.25; rig.el.rotation.x = 0.45; rig.wr.rotation.x = -0.2; rig.held.visible = false; return; }
-    const ph = rs.phase;
-    const swing = ph < 0.4 ? 0 : ph > 0.7 ? 1 : (ph - 0.4) / 0.3;        // gira de pick (-z) a pallet (+z)
-    rig.col.rotation.y = swing * Math.PI;
-    const grab = Math.max(0, 1 - Math.abs(ph - 0.18) / 0.18), place = Math.max(0, 1 - Math.abs(ph - 0.85) / 0.18);
-    const dip = Math.max(grab, place);                                    // baja a tomar y a depositar
-    rig.sh.rotation.x = -0.25 - dip * 0.55; rig.el.rotation.x = 0.45 + dip * 0.7; rig.wr.rotation.x = -rig.sh.rotation.x - rig.el.rotation.x;
-    rig.held.visible = ph > 0.15 && ph < 0.9;                            // caja en el gripper
-    if (rig.held.visible && rs.color != null) rig.held.material = boxMat(rs.color);
+    if (!rs.busy || rs.px == null) { rig.col.rotation.y = 0; rig.sh.rotation.x = -0.3; rig.el.rotation.x = 0.5; rig.wr.rotation.x = -0.2; rig.held.visible = false; return; }
+    const ph = rs.phase, lx = rs.px;
+    const tgtZ = ph < 0.5 ? zPickF : palZ;                               // apunta a la salida y luego al pallet
+    rig.col.rotation.y = Math.atan2(rig.bx - lx, rig.bz - tgtZ);
+    const grab = Math.max(0, 1 - Math.abs(ph - 0.18) / 0.18), place = Math.max(0, 1 - Math.abs(ph - 0.85) / 0.18), dip = Math.max(grab, place);
+    rig.sh.rotation.x = -0.3 - dip * 0.5; rig.el.rotation.x = 0.5 + dip * 0.6; rig.wr.rotation.x = -rig.sh.rotation.x - rig.el.rotation.x;
+    // la caja VIAJA de su salida (carril) a SU pallet (mismo x), en arco -> se ve que LLEGA al pallet
+    rig.held.visible = ph > 0.12 && ph < 0.97;
+    if (rig.held.visible) { const t = Math.max(0, Math.min(1, (ph - 0.18) / 0.72)); rig.held.position.set(lx, 1.0 + Math.sin(t * Math.PI) * 0.45, zPickF + (palZ - zPickF) * t); rig.held.material = boxMat(rs.color); }
   }
 
-  // ---- pallets creciendo en 3D por robot + pallet COMPLETO que sale y aparece otro ----
+  // ---- pallets creciendo en 3D, 1 por SKU bajo su carril + pallet COMPLETO que sale ----
   const palGroup = new THREE.Group(); scene.add(palGroup);
   const palMesh = []; const palBoxGeo = new THREE.BoxGeometry(0.42, 0.14, 0.32);
   const woodMat = new THREE.MeshStandardMaterial({ color: 0x8a6a3a, roughness: 0.85 });
-  const flyPallets = [];                                                 // pallets completos saliendo
+  const flyPallets = [];
   function spawnFullPallet(ev) {
-    const st = stations.find(s => s.r === ev.r); if (!st) return;
-    const col = ev.sku === 'DIR' ? (sim.meta.directColor || 0x9aa3b0) : (sim.meta.skus[+ev.sku.slice(1)] ? sim.meta.skus[+ev.sku.slice(1)].color : 0x999999);
-    const grp = new THREE.Group();
-    grp.add(posMesh(new THREE.BoxGeometry(0.95, 0.12, 0.75), woodMat, 0, 0.06, 0));   // pallet de madera
-    grp.add(posMesh(new THREE.BoxGeometry(0.9, 1.1, 0.7), new THREE.MeshStandardMaterial({ color: col, roughness: 0.6 }), 0, 0.67, 0)); // carga completa
-    grp.position.set(st.x, 0, palZ + 0.2); grp.userData.t0 = sim.t; scene.add(grp); flyPallets.push(grp);
+    const px = palKeyX[ev.r + ':' + ev.sku]; if (px == null) return;
+    const col = colOfKey(ev.r + ':' + ev.sku), grp = new THREE.Group();
+    grp.add(posMesh(new THREE.BoxGeometry(0.95, 0.12, 0.75), woodMat, 0, 0.06, 0));
+    grp.add(posMesh(new THREE.BoxGeometry(0.9, 1.1, 0.7), new THREE.MeshStandardMaterial({ color: col, roughness: 0.6 }), 0, 0.67, 0));
+    grp.position.set(px, 0, palZ + 0.2); grp.userData.t0 = sim.t; scene.add(grp); flyPallets.push(grp);
   }
   function updateFlyPallets() {
-    for (let i = flyPallets.length - 1; i >= 0; i--) { const g = flyPallets[i], age = sim.t - g.userData.t0; g.position.z = palZ + 0.2 + age * 1.1; g.position.x += 0; if (age > 3) { scene.remove(g); flyPallets.splice(i, 1); } }
+    for (let i = flyPallets.length - 1; i >= 0; i--) { const g = flyPallets[i], age = sim.t - g.userData.t0; g.position.z = palZ + 0.2 + age * 1.1; if (age > 3) { scene.remove(g); flyPallets.splice(i, 1); } }
   }
   function updatePallets(pal) {
-    const byRobot = {};
-    for (const [key, n] of Object.entries(pal.open)) { const ci = key.indexOf(':'); const r = ci >= 0 ? +key.slice(0, ci) : 0; const sku = ci >= 0 ? key.slice(ci + 1) : key; (byRobot[r] || (byRobot[r] = [])).push([sku, n]); }
     let mi = 0;
-    for (const st of stations) {
-      const list = byRobot[st.r] || [];
-      list.forEach(([sku, n], pi) => {
-        const col = sku === 'DIR' ? (sim.meta.directColor || 0x9aa3b0) : (sim.meta.skus[+sku.slice(1)] ? sim.meta.skus[+sku.slice(1)].color : 0x999999);
-        const px = st.x + (pi - (list.length - 1) / 2) * 1.0;
-        for (let k = 0; k < n; k++) {
-          let m = palMesh[mi];
-          if (!m) { m = new THREE.Mesh(palBoxGeo, new THREE.MeshStandardMaterial({ roughness: 0.6 })); palGroup.add(m); palMesh.push(m); }
-          m.visible = true; m.material.color.setHex(col);
-          const layer = Math.floor(k / 4), inL = k % 4;
-          m.position.set(px + (inL % 2 ? 0.46 : 0), 0.18 + layer * 0.15, palZ + (inL < 2 ? 0 : 0.34));
-          mi++;
-        }
-      });
+    for (const [key, n] of Object.entries(pal.open)) {
+      const px = palKeyX[key]; if (px == null) continue;                 // pallet bajo el carril de su SKU
+      const col = colOfKey(key);
+      for (let k = 0; k < n; k++) {
+        let m = palMesh[mi];
+        if (!m) { m = new THREE.Mesh(palBoxGeo, new THREE.MeshStandardMaterial({ roughness: 0.6 })); palGroup.add(m); palMesh.push(m); }
+        m.visible = true; m.material.color.setHex(col);
+        const layer = Math.floor(k / 4), inL = k % 4;
+        m.position.set(px + (inL % 2 ? 0.46 : 0) - 0.23, 0.18 + layer * 0.15, palZ + (inL < 2 ? 0 : 0.34));
+        mi++;
+      }
     }
     for (let j = mi; j < palMesh.length; j++) palMesh[j].visible = false;
   }
@@ -982,7 +987,7 @@ function currentRecipe(meta) {
 }
 function applyRecipe() { if (!sim) return; sim.model.pocket = currentRecipe(sim.meta); sim._pocket = { idx: 0, inStep: 0, done: false }; sim._pocketNext = 0; }
 
-const palCfg = () => ({ robots: Math.max(1, +$('probots').value || 4), positions: Math.max(1, +$('ppos').value || 5), cap: Math.max(2, +$('pcap').value || 32), pickTime: 2.5, pull: $('ppull').checked });
+const palCfg = () => ({ robots: Math.max(1, +$('probots').value || 9), positions: Math.max(1, +$('ppos').value || 2), cap: Math.max(2, +$('pcap').value || 32), pickTime: 2.5, pull: $('ppull').checked });
 function applyPal() { if (!sim) return; sim.meta.pal = palCfg(); sim._pallets = {}; sim.palDone = 0; sim.palMiss = 0; sim._palSent = {}; sim._prioPtr = 0; sim._palRR = 0; }
 
 function build(rebuildRows = true) {
