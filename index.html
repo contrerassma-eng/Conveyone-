@@ -30,11 +30,8 @@
   <input type="range" id="rate" min="6" max="80" step="1" value="33">
   <label>Velocidad de SALIDA (cajas/min) <span class="v" id="vOut">40</span></label>
   <input type="range" id="orate" min="6" max="60" step="1" value="40">
-  <label>Receta del Virtual Pocket</label>
-  <select id="recipe">
-    <option value="train">Tren consecutivo (1 por SKU)</option>
-    <option value="FIFO">FIFO (lo que llegue)</option>
-  </select>
+  <label>Receta de salida · 17 líneas (elige el SKU por línea)</label>
+  <div id="recipeRows" style="max-height:150px;overflow:auto;display:grid;gap:3px;margin-top:2px"></div>
   <label>Velocidad simulación <span class="v" id="vSpeed">3×</span></label>
   <input type="range" id="speed" min="1" max="8" step="1" value="3">
   <div class="hint">16 SKUs (4 columnas × 4 niveles, cada nivel un color/SKU) = 85%, más una SALIDA DIRECTA sin elevador = 15%. Entrada desordenada por SKU (mix Danich); el Virtual Pocket entrega un tren ordenado a la banda de salida. Baja la velocidad de salida para estresar (se llenan los buffers).</div>
@@ -389,6 +386,20 @@ function boundsOf(pts) { let mnx = Infinity, mnz = Infinity, mxx = -Infinity, mx
 // ===== LAYOUT (paramétrico) — 16 SKUs (4 columnas × 4 niveles = colores) + directa 15% =====
 function hslHex(h, s, l) { const a = s * Math.min(l, 1 - l); const f = n => { const k = (n + h * 12) % 12; const c = l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)); return Math.round(255 * c); }; return (f(0) << 16) | (f(8) << 8) | f(4); }
 
+// 16 SKUs principales (tabla Danich, flujo cajas/día) — el resto (15% baja frecuencia)
+// se agrupa en "Directo".
+const DANICH_SKUS = [
+  { name: 'PpPna 57 Mr#', flow: 3516 }, { name: 'Pal S/Plat Porc Mr#', flow: 2313 },
+  { name: 'PpPna 59 Mr#', flow: 1852 }, { name: 'Chu Vet Porc Mr#', flow: 1764 },
+  { name: 'Cos 75 TF 4un', flow: 1732 }, { name: 'Chu Ctro Porc Mr#', flow: 1484 },
+  { name: 'Chu Ctro Mr#', flow: 1097 }, { name: 'Chu Vet Repas Mr#', flow: 944 },
+  { name: 'Cos 75 Mit#', flow: 914 }, { name: 'Gord chic#', flow: 878 },
+  { name: 'Pal S/Plat Mr#', flow: 873 }, { name: 'PpPna 57#', flow: 815 },
+  { name: 'Cne Long#', flow: 800 }, { name: 'Recortes (Ganglios)#', flow: 697 },
+  { name: 'Resto Hso#', flow: 662 }, { name: 'PpPna 59#', flow: 620 },
+];
+const DIRECT_NAME = 'Directo · cola 15%';
+
 function buildSorter(opts = {}) {
   const NCOL = opts.outputs ?? 4, NLVL = 4, NSKU = NCOL * NLVL;
   const CELL = opts.cell ?? 4;                       // celda principal (capacidad 8 a pitch 0.5)
@@ -398,10 +409,11 @@ function buildSorter(opts = {}) {
   const rate = opts.rate ?? 11 * 60 * (opts.rateMul ?? 3); // ref Danich ~11 c/min, escalado
 
   // --- SKUs: 16 buffereados (85%) + directo (15%), pesos decrecientes (curva ABC) ---
+  // SKUs: 16 (Danich, peso por flujo real) repartidos en la grilla columnas×niveles
+  const flows = DANICH_SKUS.map(s => s.flow); const ftot = flows.slice(0, NSKU).reduce((a, b) => a + b, 0);
   const skus = [];
-  let raw = []; for (let i = 0; i < NSKU; i++) raw.push(Math.pow(0.90, i));
-  const sraw = raw.reduce((a, b) => a + b, 0);
-  for (let i = 0; i < NSKU; i++) skus.push({ idx: i, col: Math.floor(i / NLVL), lvl: i % NLVL, color: hslHex(i / NSKU, 0.62, 0.55), w: 0.85 * raw[i] / sraw });
+  for (let i = 0; i < NSKU; i++) skus.push({ idx: i, name: DANICH_SKUS[i] ? DANICH_SKUS[i].name : ('SKU' + i), col: i % NCOL, lvl: Math.floor(i / NCOL), color: hslHex(i / NSKU, 0.62, 0.55), w: 0.85 * flows[i] / ftot });
+  const skuAt = (c, l) => skus.find(s => s.col === c && s.lvl === l);
   const directW = 0.15, directColor = 0x9aa3b0;
 
   const segs = [];
@@ -428,9 +440,9 @@ function buildSorter(opts = {}) {
   // ----- Columnas: in -> SUBE(SKU a su nivel) -> 4 niveles(=SKU) -> BAJA(pocket) -> BANDA PLANA 1m -> evacuación -----
   for (let c = 0; c < NCOL; c++) {
     const x = colX(c);
-    segs.push({ id: 'o' + c + '_in', kind: 'infeed', color: skus[c * NLVL].color, geom: { type: 'straight', from: [x, 0.4], to: [x, 2.4] }, height: 0.9, speed: vlane, pitch: 0.5, next: ['o' + c + '_up'] });
+    segs.push({ id: 'o' + c + '_in', kind: 'infeed', color: skuAt(c, 0).color, geom: { type: 'straight', from: [x, 0.4], to: [x, 2.4] }, height: 0.9, speed: vlane, pitch: 0.5, next: ['o' + c + '_up'] });
     segs.push({ id: 'o' + c + '_up', kind: 'lift', col: c, carrierSpeed: 0.6, carrierPitch: 0.5, geom: { type: 'lift', at: [x, 2.5], h0: 0.9, h1: 2.7 }, next: ['o' + c + '_lvl0', 'o' + c + '_lvl1', 'o' + c + '_lvl2', 'o' + c + '_lvl3'] });
-    for (let l = 0; l < NLVL; l++) { const sk = skus[c * NLVL + l];
+    for (let l = 0; l < NLVL; l++) { const sk = skuAt(c, l);
       segs.push({ id: 'o' + c + '_lvl' + l, kind: 'buffer', color: sk.color, sku: sk.idx, geom: { type: 'straight', from: [x, 2.6], to: [x, 8.4] }, height: heights[l], speed: vlane, pitch: 0.5, cap: 12, pocketBuffer: true, next: ['o' + c + '_down'] }); }
     segs.push({ id: 'o' + c + '_down', kind: 'lift', col: c, carrierSpeed: 0.6, carrierPitch: 0.5, geom: { type: 'lift', at: [x, 8.5], h0: 2.7, h1: 0.9 }, pocketControlled: true, next: ['o' + c + '_flat'] });
     // BANDA PLANA de entrega (1 m) entre el elevador de bajada y la evacuación
@@ -443,11 +455,11 @@ function buildSorter(opts = {}) {
 
   // receta: tren consecutivo (1 caja por SKU) INTERCALADO por columnas (paraleliza los
   // 4 elevadores de descenso) + directo. El orden del tren lo dicta esta secuencia.
-  const order = []; for (let l = 0; l < NLVL; l++) for (let c = 0; c < NCOL; c++) order.push(skus[c * NLVL + l]);
-  const steps = order.map(s => ({ color: s.color, qty: 1 })); steps.push({ color: directColor, qty: 2 });
+  // receta por defecto: 16 SKUs en orden (idx ya intercala columnas) + 17ª línea = Directo
+  const steps = skus.map(s => ({ color: s.color, qty: 1 })); steps.push({ color: directColor, qty: 1 });
   const pocket = opts.pocket || { loop: true, steps, interval: opts.outInterval ?? 0 };
 
-  return { meta: { name: 'Sorter 4500 · 16 SKUs + directa', boxSize: [0.4, 0.13, 0.3], skus, directW, directColor, ncol: NCOL, nlvl: NLVL, ref: { perMin: 11 } }, segments: segs, pocket };
+  return { meta: { name: 'Sorter 4500 · 16 SKUs + directa', boxSize: [0.4, 0.13, 0.3], skus, directW, directColor, directName: DIRECT_NAME, ncol: NCOL, nlvl: NLVL, ref: { perMin: 11 } }, segments: segs, pocket };
 }
 
 
@@ -594,10 +606,13 @@ function mountSorter(sim, opts = {}) {
     renderer.render(scene, camera);
     drawHUD(fr);
   }
+  const colorName = {}; for (const s of (sim.meta.skus || [])) colorName[s.color] = s.name; if (sim.meta.directColor != null) colorName[sim.meta.directColor] = sim.meta.directName || 'Directo';
+  function nameOfColor(c) { if (c === 'FIFO' || c === '—' || c == null) return c || 'FIFO'; if (Array.isArray(c)) return c.map(x => colorName[x] || '').join('+'); return colorName[c] || hex(c); }
   function drawHUD(fr) {
     const st = fr.stats, pk = fr.pocket;
     let html = `<b>t</b> ${fmt(fr.time)}<br>generadas ${st.generated} · liberadas <b>${st.released}</b> · rechazo ${st.rejected}<br>en sistema ${st.inSystem} · salida <b>${st.throughput.toFixed(1)}</b> c/min<br>`;
-    html += `<b>Pocket pide:</b> <span style="color:${hex(pk.color)}">${Array.isArray(pk.color) ? pk.color.join('+') : pk.color}</span>${pk.remaining ? ' ×' + pk.remaining : ''}<br>`;
+    const pkName = nameOfColor(pk.color);
+    html += `<b>Pocket pide:</b> <span style="color:${hex(pk.color)}">${pkName}</span>${pk.remaining ? ' ×' + pk.remaining : ''}<br>`;
     html += '<b>Buffers</b><br>';
     for (const bf of fr.buffers) html += `<span style="color:${hex(bf.color)}">●</span> ${bf.color}: ${bf.count}/${bf.cap} [${bf.levels.join('·')}]<br>`;
     hud.innerHTML = html;
@@ -624,26 +639,45 @@ let ctl = null, sim = null, speed = 3, seed = 12345;
 
 const $ = id => document.getElementById(id);
 
-function build() {
-  const N = +$('outs').value;                          // columnas (×4 niveles = SKUs)
-  const rate = +$('rate').value * 60;                  // entrada cajas/min -> /h
-  const orate = +$('orate').value;                     // velocidad de SALIDA (cajas/min)
-  const outInterval = orate > 0 ? 60 / orate : 0;
-  const opts = { outputs: N, rate, outInterval };
-  if ($('recipe').value === 'FIFO') opts.pocket = { loop: true, steps: [], interval: outInterval };
-  const model = buildSorter(opts);
+const outIntervalNow = () => { const o = +$('orate').value; return o > 0 ? 60 / o : 0; };
+function skuOptions(meta) { const o = meta.skus.map(s => ({ label: s.name, color: s.color })); o.push({ label: meta.directName, color: meta.directColor }); return o; }
+function buildRecipeRows(meta) {
+  const opts = skuOptions(meta), cont = $('recipeRows'); cont.innerHTML = '';
+  for (let i = 0; i < opts.length; i++) {
+    const row = document.createElement('div'); row.style.cssText = 'display:flex;gap:5px;align-items:center';
+    const num = document.createElement('span'); num.textContent = (i + 1); num.style.cssText = 'width:16px;color:#7f8ca3;text-align:right;font-size:11px';
+    const dot = document.createElement('span'); dot.style.cssText = 'width:9px;height:9px;border-radius:2px;flex:0 0 auto';
+    const sel = document.createElement('select'); sel.style.cssText = 'flex:1;background:#121821;color:#dfe7f3;border:1px solid #2a3a5a;border-radius:6px;padding:3px;font-size:11px';
+    opts.forEach((op, j) => { const e = document.createElement('option'); e.value = j; e.textContent = op.label; sel.appendChild(e); });
+    sel.value = (i < opts.length) ? i : 0;             // por defecto: línea i = SKU i (frecuencia desc; Directo último)
+    const paint = () => { dot.style.background = hex(opts[+sel.value].color); };
+    sel.onchange = () => { paint(); applyRecipe(); };
+    paint(); row.appendChild(num); row.appendChild(dot); row.appendChild(sel); cont.appendChild(row);
+  }
+}
+function currentRecipe(meta) {
+  const opts = skuOptions(meta), sels = $('recipeRows').querySelectorAll('select');
+  const steps = []; sels.forEach(s => steps.push({ color: opts[+s.value].color, qty: 1 }));
+  return { loop: true, steps, interval: outIntervalNow() };
+}
+function applyRecipe() { if (!sim) return; sim.model.pocket = currentRecipe(sim.meta); sim._pocket = { idx: 0, inStep: 0, done: false }; sim._pocketNext = 0; }
+
+function build(rebuildRows = true) {
+  const N = +$('outs').value;
+  const rate = +$('rate').value * 60;
+  const model = buildSorter({ outputs: N, rate, outInterval: outIntervalNow() });
+  if (rebuildRows || $('recipeRows').children.length !== model.meta.skus.length + 1) buildRecipeRows(model.meta);
+  model.pocket = currentRecipe(model.meta);            // usa las 17 líneas de la UI
   if (ctl) ctl.stop();
   app.innerHTML = '';
-  sim = new SorterSim(model, seed);
-  window._sim = sim;
+  sim = new SorterSim(model, seed); window._sim = sim;
   ctl = mountSorter(sim, { container: app, speed, warmup: 120 });
   ctl.start();
 }
 
-$('outs').oninput = e => { $('vOuts').textContent = e.target.value + ' (' + (e.target.value * 4) + ' SKUs)'; build(); };
-$('rate').oninput = e => { $('vRate').textContent = e.target.value; build(); };
-$('orate').oninput = e => { $('vOut').textContent = e.target.value; build(); };
-$('recipe').onchange = build;
+$('outs').oninput = e => { $('vOuts').textContent = e.target.value + ' (' + (e.target.value * 4) + ' SKUs)'; build(true); };
+$('rate').oninput = e => { $('vRate').textContent = e.target.value; build(false); };
+$('orate').oninput = e => { $('vOut').textContent = e.target.value; if (sim) applyRecipe(); };
 $('speed').oninput = e => { speed = +e.target.value; $('vSpeed').textContent = speed + '×'; if (ctl) ctl.setSpeed(speed); };
 
 // mostrar / ocultar controles
