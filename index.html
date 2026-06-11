@@ -32,8 +32,8 @@
   <input type="range" id="orate" min="6" max="60" step="1" value="40">
   <label style="margin-top:6px;color:#9fc3ff">Paletizadores KUKA</label>
   <div style="display:flex;gap:6px;align-items:center">
-    <span style="color:#aebbd0;font-size:11px;flex:1">Robots</span><input type="number" id="probots" min="1" max="12" value="9" style="width:42px;background:#121821;color:#fff;border:1px solid #2a3a5a;border-radius:6px;padding:3px;font-size:11px;text-align:center">
-    <span style="color:#aebbd0;font-size:11px;flex:1">Pos/robot</span><input type="number" id="ppos" min="1" max="8" value="5" style="width:42px;background:#121821;color:#fff;border:1px solid #2a3a5a;border-radius:6px;padding:3px;font-size:11px;text-align:center">
+    <span style="color:#aebbd0;font-size:11px;flex:1">Robots</span><input type="number" id="probots" min="1" max="12" value="6" style="width:42px;background:#121821;color:#fff;border:1px solid #2a3a5a;border-radius:6px;padding:3px;font-size:11px;text-align:center">
+    <span style="color:#aebbd0;font-size:11px;flex:1">Pos/robot</span><input type="number" id="ppos" min="1" max="12" value="10" style="width:42px;background:#121821;color:#fff;border:1px solid #2a3a5a;border-radius:6px;padding:3px;font-size:11px;text-align:center">
   </div>
   <div style="display:flex;gap:6px;align-items:center;margin-top:3px">
     <span style="color:#aebbd0;font-size:11px;flex:1">Cajas por pallet</span><input type="number" id="pcap" min="4" max="80" value="32" style="width:42px;background:#121821;color:#fff;border:1px solid #2a3a5a;border-radius:6px;padding:3px;font-size:11px;text-align:center">
@@ -216,7 +216,7 @@ class SorterSim {
           const sk = this._nextSku(src); // entrada por TANDAS (lotes del mismo SKU; promedio horario = tabla)
           const box = new Box(id, T, sk.color); box.sku = sk.idx; box.col = sk.col; box.lvl = sk.lvl; box.direct = sk.direct;
           box.robot = sk.direct ? this.meta.directRobot : (this.meta.skus[sk.idx] ? this.meta.skus[sk.idx].robot : 0); // KUKA destino (carril de su SKU)
-          box.aisle = sk.direct ? this.meta.directAisle : (this.meta.skus[sk.idx] ? this.meta.skus[sk.idx].aisle : 0); // pasillo de paletizado
+          box.conv = sk.direct ? this.meta.directConv : (this.meta.skus[sk.idx] ? this.meta.skus[sk.idx].conv : 0); // conveyor de paletizado
           this.boxes.push(box); this.generated++;
           this._inBySku = this._inBySku || {}; this._inBySku[sk.key] = (this._inBySku[sk.key] || 0) + 1;
           seg.nextSpawn = T + this._batchGap(src);
@@ -352,7 +352,7 @@ class SorterSim {
       if (S.by === 'color') { if (b.color === S.divertColor && this._entryFree(S.lane)) return S.lane; return S.cont && this._entryFree(S.cont) ? S.cont : null; }
       if (S.by === 'robot') { if (b.robot === S.robot) return this._entryFree(S.lane) ? S.lane : null; return S.cont && this._entryFree(S.cont) ? S.cont : null; }
       if (S.by === 'lane') { const mine = S.direct ? b.direct : (!b.direct && b.sku === S.sku); if (mine) return this._entryFree(S.lane) ? S.lane : null; return S.cont && this._entryFree(S.cont) ? S.cont : null; }
-      if (S.by === 'aisle') { if (b.aisle === S.aisle) return this._entryFree(S.lane) ? S.lane : null; return S.cont && this._entryFree(S.cont) ? S.cont : null; } // a su PASILLO o sigue por la espina
+      if (S.by === 'conv') { if (b.conv === S.conv) return this._entryFree(S.lane) ? S.lane : null; return S.cont && this._entryFree(S.cont) ? S.cont : null; } // a su CONVEYOR o sigue por la espina
     }
     const nx = seg.next;
     if (!nx.length) return null;
@@ -587,19 +587,16 @@ function buildSorter(opts = {}) {
   const skuAt = (c, l) => skus.find(s => s.col === c && s.lvl === l);
   const directW = 0.15, directColor = 0x9aa3b0;
 
-  // --- KUKA: cada robot ARMA HASTA `positions` pallets (capacidad, 1 pallet por SKU). El reparto
-  //     de SKUs entre robots es independiente (los 17 SKUs se reparten parejo entre los robots; el
-  //     ciclo de 15 s limita en la práctica a ~2 SKUs por robot). La directa (15%) va al último
-  //     robot. Si a un robot le tocan más SKUs que `positions` -> faltas (mide si alcanzan). ---
-  const pal = opts.pal || { robots: 9, positions: 5, cap: 32, pickTime: 15 };
-  const positions = Math.max(1, pal.positions || 5), nrob = Math.max(1, pal.robots || 9);
-  const skusPerRobot = Math.max(1, Math.ceil((NSKU + 1) / nrob));   // reparte los 17 SKUs entre los robots
-  skus.forEach(s => s.robot = Math.min(Math.floor(s.idx / skusPerRobot), nrob - 1));
-  const directRobot = Math.min(Math.floor(NSKU / skusPerRobot), nrob - 1);
-  // PASILLOS de paletizado: los 17 SKUs se reparten en NAISLE pasillos (cada pasillo lleva su grupo)
-  const NAISLE = Math.max(1, opts.aisles || 3), LPA = Math.ceil((NSKU + 1) / NAISLE);
-  skus.forEach(s => s.aisle = Math.min(Math.floor(s.idx / LPA), NAISLE - 1));
-  const directAisle = Math.min(Math.floor(NSKU / LPA), NAISLE - 1);
+  // --- KUKA: 3 CONVEYORS + 2 PASILLOS de robots (3 c/u). Cada robot ARMA HASTA `positions` pallets
+  //     (frente y espalda). SKU -> robot (reparto parejo) -> conveyor (grupo) -> pasillo. ---
+  const pal = opts.pal || { robots: 6, positions: 10, cap: 32, pickTime: 15 };
+  const positions = Math.max(1, pal.positions || 10), nrob = Math.max(1, pal.robots || 6);
+  const NCONV = Math.max(1, opts.convs || 3), NAISLE_R = Math.max(1, NCONV - 1);   // pasillos = conveyors-1
+  const skusPerRobot = Math.max(1, Math.ceil((NSKU + 1) / nrob));   // SKUs por robot
+  const robPerConv = Math.max(1, Math.ceil(nrob / NCONV));          // robots por conveyor
+  const convOf = r => Math.min(Math.floor(r / robPerConv), NCONV - 1);
+  skus.forEach(s => { s.robot = Math.min(Math.floor(s.idx / skusPerRobot), nrob - 1); s.conv = convOf(s.robot); });
+  const directRobot = Math.min(Math.floor(NSKU / skusPerRobot), nrob - 1), directConv = convOf(directRobot);
 
   const segs = [];
   const CELLd = CELL;                                // misma celda para la salida DIRECTA (todo uniforme, paso 1,2 m)
@@ -643,40 +640,39 @@ function buildSorter(opts = {}) {
   segs.push({ id: 'outfeed', kind: 'outfeed', geom: { type: 'straight', from: [xR, 9.9], to: [xL, 9.9] }, height: 0.9, speed: vout, pitch: 0.55, entryByColor: true, next: ['deliv'] });
   segs.push({ id: 'deliv', kind: 'deliv', geom: { type: 'straight', from: [xL, 9.9], to: [xL - 0.61, 9.9] }, height: 0.9, speed: vout, pitch: 0.55, next: ['seg_feed'] });
 
-  // ----- LLEGADA IDEAL: ESPINA de distribución -> N PASILLOS (con curvas de empalme). En cada
-  // pasillo el tren de SU grupo de SKUs corre y en cada robot una ESPUELA (curva) desvía SU SKU;
-  // el resto sigue de largo. Pallets a ambos lados. Sin acumulación: el pocket ecualiza (1 c/15 s).
-  const lanes = skus.map(s => ({ key: 'S' + s.idx, sku: s.idx, robot: s.robot, aisle: s.aisle, color: s.color }));
-  lanes.push({ key: 'DIR', direct: true, robot: directRobot, aisle: directAisle, color: directColor });
-  const NL = lanes.length;                              // 17 (16 SKUs + directa)
-  const spineX = 0.5, Rc = 0.55, SAL = 1.2, aZ = a => 12.5 + a * 3.4;    // paso espuelas 1,2 m; pasillos 3,4 m
-  const ax = (j) => spineX + 1.8 + j * SAL;            // x de cada espuela dentro del pasillo
-  const zPickOf = a => aZ(a) + Rc + 0.4;             // z del punto de pick (espuela corta; pallets caben en el pasillo)
-  const byA = []; for (let a = 0; a < NAISLE; a++) byA[a] = lanes.filter(L => L.aisle === a);
+  // ----- LLEGADA IDEAL: ESPINA -> 3 CONVEYORS (por grupo) + 2 PASILLOS de robots (3 c/u). Cada
+  // robot pica de SU conveyor (espuela con curva) y apila a ambos lados (frente/espalda).
+  const spineX = 1.0, Rc = 0.55, CZ = 4.0, Z0 = 12.5;          // conveyor0 z=12.5, paso 4 m entre conveyors
+  const convZ = c => Z0 + c * CZ;                              // z de cada conveyor
+  const robPA = Math.max(1, Math.ceil(nrob / NAISLE_R));       // robots por pasillo
+  const robotAisle = r => Math.min(Math.floor(r / robPA), NAISLE_R - 1);
+  const aisleZ = pa => convZ(pa) + CZ / 2;                     // pasillo entre conv pa y pa+1
+  const X0 = 3.0, XP = 4.0, robotX = r => X0 + (r % robPA) * XP;  // 3 robots equidistantes (paso 4 m)
   // EMPALME evacuación -> espina (curva 90°)
   segs.push({ id: 'seg_feed', kind: 'segre', geom: { type: 'polyline', points: [[xL - 0.61, 9.9], [spineX + Rc, 9.9], ...arcPts(spineX + Rc, 9.9 + Rc, Rc, -Math.PI / 2, -Math.PI, 6)] }, height: 0.9, speed: vout, pitch: 0.55, next: ['spine0'] });
-  // ESPINA de distribución (vertical) con divert a cada PASILLO por grupo de SKUs
-  for (let a = 0; a < NAISLE; a++) {
-    const z0 = a === 0 ? 9.9 + Rc : aZ(a - 1), z1 = aZ(a), cont = a < NAISLE - 1 ? 'spine' + (a + 1) : 'spine_end';
-    segs.push({ id: 'spine' + a, kind: 'segre', geom: { type: 'straight', from: [spineX, z0], to: [spineX, z1] }, height: 0.9, speed: vout, pitch: 0.55,
-      sort: { by: 'aisle', aisle: a, lane: 'ais' + a + '_0', cont }, next: ['ais' + a + '_0', cont] });
+  // ESPINA de distribución (vertical) con divert a cada CONVEYOR por grupo (box.conv)
+  for (let c = 0; c < NCONV; c++) {
+    const z0 = c === 0 ? 9.9 + Rc : convZ(c - 1), z1 = convZ(c), cont = c < NCONV - 1 ? 'spine' + (c + 1) : 'spine_end';
+    segs.push({ id: 'spine' + c, kind: 'segre', geom: { type: 'straight', from: [spineX, z0], to: [spineX, z1] }, height: 0.9, speed: vout, pitch: 0.55,
+      sort: { by: 'conv', conv: c, lane: 'cv' + c + '_0', cont }, next: ['cv' + c + '_0', cont] });
   }
-  segs.push({ id: 'spine_end', kind: 'segre', geom: { type: 'straight', from: [spineX, aZ(NAISLE - 1)], to: [spineX, aZ(NAISLE - 1) + 1.4] }, height: 0.9, speed: vout, pitch: 0.55, sink: true, reject: true });
-  // PASILLOS: tren del grupo + ESPUELA por SKU (curva) al pick; el resto sigue de largo
-  let gi = 0;
-  for (let a = 0; a < NAISLE; a++) {
-    const grp = byA[a], z = aZ(a);
-    for (let j = 0; j < grp.length; j++) {
-      const L = grp[j], lx = ax(j), cont = j < grp.length - 1 ? 'ais' + a + '_' + (j + 1) : 'ais' + a + '_end';
-      const geom = j === 0 ? { type: 'straight', from: [spineX, z], to: [lx, z] } : { type: 'straight', from: [ax(j - 1), z], to: [lx, z] };
-      segs.push({ id: 'ais' + a + '_' + j, kind: 'segre', geom, height: 0.9, speed: vout, pitch: 0.55,
-        sort: { by: 'lane', sku: L.sku, direct: !!L.direct, robot: L.robot, lane: 'pick' + gi, cont }, next: ['pick' + gi, cont] });
-      // ESPUELA: curva 90° (+x -> +z, tangentes continuas) + recta al punto de pick
-      const px = lx + Rc, pz = zPickOf(a);
-      segs.push({ id: 'pick' + gi, kind: 'pick', robot: L.robot, sku: L.sku, direct: !!L.direct, color: L.color, aisle: a, geom: { type: 'polyline', points: [...arcPts(lx, z + Rc, Rc, -Math.PI / 2, 0, 5), [px, pz]] }, height: 0.9, speed: vlane, pitch: 0.5 });
-      gi++;
+  segs.push({ id: 'spine_end', kind: 'segre', geom: { type: 'straight', from: [spineX, convZ(NCONV - 1)], to: [spineX, convZ(NCONV - 1) + 1.4] }, height: 0.9, speed: vout, pitch: 0.55, sink: true, reject: true });
+  // CONVEYORS: cada uno lleva su grupo; divert al pick de cada robot (sort by:'robot'); el resto sigue
+  for (let c = 0; c < NCONV; c++) {
+    const z = convZ(c), robs = []; for (let r = 0; r < nrob; r++) if (convOf(r) === c) robs.push(r);
+    robs.sort((a, b) => robotX(a) - robotX(b));
+    let prevX = spineX;
+    for (let q = 0; q < robs.length; q++) {
+      const r = robs[q], rx = robotX(r), cont = q < robs.length - 1 ? 'cv' + c + '_' + (q + 1) : 'cv' + c + '_end';
+      segs.push({ id: 'cv' + c + '_' + q, kind: 'segre', geom: { type: 'straight', from: [prevX, z], to: [rx, z] }, height: 0.9, speed: vout, pitch: 0.55,
+        sort: { by: 'robot', robot: r, lane: 'pick' + r, cont }, next: ['pick' + r, cont] });
+      // ESPUELA: curva 90° del conveyor al pasillo del robot (±z según el lado) + recta al pick
+      const pa = robotAisle(r), pz = aisleZ(pa), up = pz > z;
+      const spur = up ? [...arcPts(rx, z + Rc, Rc, -Math.PI / 2, 0, 5), [rx + Rc, pz]] : [...arcPts(rx, z - Rc, Rc, Math.PI / 2, 0, 5), [rx + Rc, pz]];
+      segs.push({ id: 'pick' + r, kind: 'pick', robot: r, geom: { type: 'polyline', points: spur }, height: 0.9, speed: vlane, pitch: 0.5 });
+      prevX = rx;
     }
-    segs.push({ id: 'ais' + a + '_end', kind: 'segre', geom: { type: 'straight', from: [ax(grp.length - 1), z], to: [ax(grp.length - 1) + 1.4, z] }, height: 0.9, speed: vout, pitch: 0.55, sink: true, reject: true });
+    segs.push({ id: 'cv' + c + '_end', kind: 'segre', geom: { type: 'straight', from: [robotX(robs[robs.length - 1]), z], to: [robotX(robs[robs.length - 1]) + 1.4, z] }, height: 0.9, speed: vout, pitch: 0.55, sink: true, reject: true });
   }
 
   // receta: tren consecutivo (1 caja por SKU) INTERCALADO por columnas (paraleliza los
@@ -685,7 +681,7 @@ function buildSorter(opts = {}) {
   const steps = skus.map(s => ({ color: s.color, qty: 1 })); steps.push({ color: directColor, qty: 1 });
   const pocket = opts.pocket || { loop: true, steps, interval: 0.15 }; // libera tirante (cero presión arma el tren)
 
-  return { meta: { name: 'Sorter 4500 · 16 SKUs + directa', boxSize: [0.4, 0.13, 0.3], skus, directW, directColor, directName: DIRECT_NAME, ncol: NCOL, nlvl: NLVL, pal, directRobot, directAisle, naisle: NAISLE, ref: { perMin: 11 } }, segments: segs, pocket };
+  return { meta: { name: 'Sorter 4500 · 16 SKUs + directa', boxSize: [0.4, 0.13, 0.3], skus, directW, directColor, directName: DIRECT_NAME, ncol: NCOL, nlvl: NLVL, pal, directRobot, directConv, nconv: NCONV, naisle: NAISLE_R, ref: { perMin: 11 } }, segments: segs, pocket };
 }
 
 
@@ -876,18 +872,25 @@ function mountSorter(sim, opts = {}) {
     for (const [id, m] of pool) if (!seen.has(id)) { scene.remove(m); pool.delete(id); }
   }
 
-  // ---- SALIDAS de pick: 1 por SKU (del layout, kind 'pick'), con su (x,z) y pasillo. ----
-  const picks = sim.model.segments.filter(s => s.kind === 'pick').map(s => { const p = s.geom.points ? s.geom.points[s.geom.points.length - 1] : s.geom.to; return { r: s.robot, x: p[0], z: p[1], key: s.direct ? 'DIR' : ('S' + s.sku), color: s.color }; });
-  const palKeyP = {}; for (const p of picks) palKeyP[p.r + ':' + p.key] = { x: p.x, z: p.z };   // 'r:SKU' -> {x,z} de su pallet
+  // ---- PICK: 1 por ROBOT (kind 'pick'). Cada robot apila sus SKUs en filas a AMBOS lados (frente/espalda). ----
+  const picks = sim.model.segments.filter(s => s.kind === 'pick').map(s => { const p = s.geom.points ? s.geom.points[s.geom.points.length - 1] : s.geom.to; return { r: s.robot, x: p[0], z: p[1] }; });
+  const robotInfo = {}; for (const p of picks) robotInfo[p.r] = { x: p.x, z: p.z };
+  const skusByRobot = {};                                              // robot -> [ 'S#' / 'DIR' ]
+  for (const s of (sim.meta.skus || [])) (skusByRobot[s.robot] = skusByRobot[s.robot] || []).push('S' + s.idx);
+  (skusByRobot[sim.meta.directRobot] = skusByRobot[sim.meta.directRobot] || []).push('DIR');
+  const palKeyP = {};                                                  // 'r:SKU' -> {x, z, side} (fila frente -z / espalda +z)
+  for (const r in robotInfo) {
+    const info = robotInfo[r], keys = skusByRobot[r] || [];
+    keys.forEach((k, idx) => { const side = (idx % 2 === 0) ? -1 : 1, slot = Math.floor(idx / 2); palKeyP[r + ':' + k] = { x: info.x + (slot - 1) * 1.0, z: info.z + side * 1.15, side }; });
+  }
   const colOfKey = k => { const sku = k.slice(k.indexOf(':') + 1); return sku === 'DIR' ? (sim.meta.directColor || 0x9aa3b0) : (sim.meta.skus[+sku.slice(1)] ? sim.meta.skus[+sku.slice(1)].color : 0x999999); };
 
-  // ---- robots KUKA: uno por robot, en el CENTROIDE de sus salidas; brazo sincronizado al pick ----
+  // ---- robots KUKA: uno por robot, en su punto de pick; brazo sincronizado pick -> pallet ----
   const kukaBaseMat = new THREE.MeshStandardMaterial({ color: 0x2a2f36, metalness: 0.5, roughness: 0.5 });
   const kukaArmMat = new THREE.MeshStandardMaterial({ color: QIMAROX_ORANGE, metalness: 0.35, roughness: 0.45 });
-  const robotRig = {}; const byRobotPicks = {};
-  for (const p of picks) (byRobotPicks[p.r] || (byRobotPicks[p.r] = [])).push(p);
-  for (const r in byRobotPicks) {
-    const ps = byRobotPicks[r], bx = ps.reduce((a, p) => a + p.x, 0) / ps.length, zp = ps[0].z, bz = zp + 0.45;
+  const robotRig = {};
+  for (const r in robotInfo) {
+    const info = robotInfo[r], bx = info.x, bz = info.z;
     const g = new THREE.Group(); g.position.set(bx, 0, bz); kukaGroup.add(g);
     g.add(posMesh(new THREE.CylinderGeometry(0.34, 0.42, 0.3, 16), kukaBaseMat, 0, 0.15, 0));
     const col = new THREE.Group(); col.position.y = 0.3; g.add(col);
@@ -898,22 +901,22 @@ function mountSorter(sim, opts = {}) {
     el.add(posMesh(new THREE.BoxGeometry(0.13, 0.13, 1.15), kukaArmMat, 0, 0, -0.5));
     const wr = new THREE.Group(); wr.position.z = -1.05; el.add(wr);
     wr.add(posMesh(new THREE.BoxGeometry(0.4, 0.12, 0.34), kukaBaseMat, 0, -0.12, 0));
-    const held = new THREE.Mesh(boxGeo, boxMat(0xffffff)); held.visible = false; kukaGroup.add(held);  // viaja del pick al pallet
-    robotRig[r] = { col, sh, el, wr, held, bx, bz, zPick: zp, palZ: zp + 0.75 };
+    const held = new THREE.Mesh(boxGeo, boxMat(0xffffff)); held.visible = false; kukaGroup.add(held);
+    robotRig[r] = { col, sh, el, wr, held, bx, bz, zPick: info.z };
   }
   function poseRobot(rs) {
     const rig = robotRig[rs.r]; if (!rig) return;
     if (!rs.busy || rs.px == null) { rig.col.rotation.y = 0; rig.sh.rotation.x = -0.3; rig.el.rotation.x = 0.5; rig.wr.rotation.x = -0.2; rig.held.visible = false; return; }
-    const ph = rs.phase, lx = rs.px;
-    const tgtZ = ph < 0.5 ? rig.zPick : rig.palZ;                        // apunta a la salida y luego al pallet
-    rig.col.rotation.y = Math.atan2(rig.bx - lx, rig.bz - tgtZ);
+    const ph = rs.phase, pp = palKeyP[rs.r + ':' + (rs.sku || '')] || { x: rig.bx, z: rig.zPick + 1.15 };
+    const tgtX = ph < 0.45 ? rs.px : pp.x, tgtZ = ph < 0.45 ? rig.zPick : pp.z;   // apunta al pick y luego al pallet (frente/espalda)
+    rig.col.rotation.y = Math.atan2(rig.bx - tgtX, rig.bz - tgtZ);
     const grab = Math.max(0, 1 - Math.abs(ph - 0.18) / 0.18), place = Math.max(0, 1 - Math.abs(ph - 0.85) / 0.18), dip = Math.max(grab, place);
     rig.sh.rotation.x = -0.3 - dip * 0.5; rig.el.rotation.x = 0.5 + dip * 0.6; rig.wr.rotation.x = -rig.sh.rotation.x - rig.el.rotation.x;
-    rig.held.visible = ph > 0.12 && ph < 0.97;                          // la caja VIAJA del pick a SU pallet -> se ve que llega
-    if (rig.held.visible) { const t = Math.max(0, Math.min(1, (ph - 0.18) / 0.72)); rig.held.position.set(lx, 1.0 + Math.sin(t * Math.PI) * 0.45, rig.zPick + (rig.palZ - rig.zPick) * t); rig.held.material = boxMat(rs.color); }
+    rig.held.visible = ph > 0.12 && ph < 0.97;                          // la caja VIAJA del pick a SU pallet (frente o espalda)
+    if (rig.held.visible) { const t = Math.max(0, Math.min(1, (ph - 0.18) / 0.72)); rig.held.position.set(rs.px + (pp.x - rs.px) * t, 1.0 + Math.sin(t * Math.PI) * 0.45, rig.zPick + (pp.z - rig.zPick) * t); rig.held.material = boxMat(rs.color); }
   }
 
-  // ---- pallets creciendo en 3D, 1 por SKU detrás de su salida + pallet COMPLETO que sale ----
+  // ---- pallets creciendo en 3D (filas a ambos lados) + pallet COMPLETO que sale ----
   const palGroup = new THREE.Group(); kukaGroup.add(palGroup);
   const palMesh = []; const palBoxGeo = new THREE.BoxGeometry(0.42, 0.14, 0.32);
   const woodMat = new THREE.MeshStandardMaterial({ color: 0x8a6a3a, roughness: 0.85 });
@@ -923,23 +926,23 @@ function mountSorter(sim, opts = {}) {
     const col = colOfKey(ev.r + ':' + ev.sku), grp = new THREE.Group();
     grp.add(posMesh(new THREE.BoxGeometry(0.95, 0.12, 0.75), woodMat, 0, 0.06, 0));
     grp.add(posMesh(new THREE.BoxGeometry(0.9, 1.1, 0.7), new THREE.MeshStandardMaterial({ color: col, roughness: 0.6 }), 0, 0.67, 0));
-    const z0 = p.z + 0.75; grp.position.set(p.x, 0, z0); grp.userData.t0 = sim.t; grp.userData.z0 = z0; kukaGroup.add(grp); flyPallets.push(grp);
+    grp.position.set(p.x, 0, p.z); grp.userData.t0 = sim.t; grp.userData.z0 = p.z; grp.userData.dir = p.side; kukaGroup.add(grp); flyPallets.push(grp);
     if (hideKuka) grp.visible = false;
   }
   function updateFlyPallets() {
-    for (let i = flyPallets.length - 1; i >= 0; i--) { const g = flyPallets[i], age = sim.t - g.userData.t0; g.position.z = g.userData.z0 + age * 1.1; if (age > 3) { scene.remove(g); flyPallets.splice(i, 1); } }
+    for (let i = flyPallets.length - 1; i >= 0; i--) { const g = flyPallets[i], age = sim.t - g.userData.t0; g.position.z = g.userData.z0 + g.userData.dir * age * 1.1; if (age > 3) { scene.remove(g); flyPallets.splice(i, 1); } }
   }
   function updatePallets(pal) {
     let mi = 0;
     for (const [key, n] of Object.entries(pal.open)) {
-      const p = palKeyP[key]; if (!p) continue;                          // pallet detrás de la salida de su SKU
+      const p = palKeyP[key]; if (!p) continue;
       const col = colOfKey(key);
       for (let k = 0; k < n; k++) {
         let m = palMesh[mi];
         if (!m) { m = new THREE.Mesh(palBoxGeo, new THREE.MeshStandardMaterial({ roughness: 0.6 })); palGroup.add(m); palMesh.push(m); }
         m.visible = true; m.material.color.setHex(col);
         const layer = Math.floor(k / 4), inL = k % 4;
-        m.position.set(p.x + (inL % 2 ? 0.46 : 0) - 0.23, 0.18 + layer * 0.15, p.z + 0.75 + (inL < 2 ? 0 : 0.34));
+        m.position.set(p.x + (inL % 2 ? 0.46 : 0) - 0.23, 0.18 + layer * 0.15, p.z + (inL < 2 ? 0 : 0.34));
         mi++;
       }
     }
@@ -1086,7 +1089,7 @@ function currentRecipe(meta) {
 }
 function applyRecipe() { if (!sim) return; sim.model.pocket = currentRecipe(sim.meta); sim._pocket = { idx: 0, inStep: 0, done: false }; sim._pocketNext = 0; }
 
-const palCfg = () => ({ robots: Math.max(1, +$('probots').value || 9), positions: Math.max(1, +$('ppos').value || 5), cap: Math.max(2, +$('pcap').value || 32), pickTime: Math.max(1, +$('ptime').value || 15), pull: $('ppull').checked });
+const palCfg = () => ({ robots: Math.max(1, +$('probots').value || 6), positions: Math.max(1, +$('ppos').value || 10), cap: Math.max(2, +$('pcap').value || 32), pickTime: Math.max(1, +$('ptime').value || 15), pull: $('ppull').checked });
 function applyPal() { if (!sim) return; sim.meta.pal = palCfg(); sim._pallets = {}; sim.palDone = 0; sim.palMiss = 0; sim._palSent = {}; sim._prioPtr = 0; sim._palRR = 0; }
 
 function build(rebuildRows = true) {
