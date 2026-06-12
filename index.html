@@ -51,7 +51,7 @@
   <input type="range" id="speed" min="1" max="8" step="1" value="3">
   <label style="display:flex;gap:6px;align-items:center;margin-top:8px;cursor:pointer"><input type="checkbox" id="hideKuka" checked> <span style="font-size:11px">Ocultar KUKAs y segregador (cajas salen al final del principal)</span></label>
   <button id="pdfBtn" style="width:100%;margin-top:10px;background:#f39200;color:#1a1a1a;border:0;border-radius:8px;padding:9px;font:700 12px system-ui;cursor:pointer">📄 Generar reporte PDF</button>
-  <div class="hint">16 SKUs (4 columnas × 4 niveles, cada nivel un color/SKU) = 85%, más una SALIDA DIRECTA sin elevador = 15%. Entrada desordenada por SKU (mix Danich); el Virtual Pocket entrega un tren ordenado a la banda de salida. Baja la velocidad de salida para estresar (se llenan los buffers).</div>
+  <div class="hint">16 SKUs (4 columnas × 4 niveles, cada nivel un color/SKU) = 85%, más una SALIDA DIRECTA sin elevador = 15%. Entrada desordenada por SKU (mix Danich); el Virtual Pocket entrega un tren ordenado a la banda de salida. Baja la velocidad de salida para estresar (se llenan los buffers).<br><b style="color:#9fc3ff">VR (Meta Quest):</b> abre este link en el navegador del visor y pulsa <b>ENTRAR VR</b> — stick izq camina · stick der gira 45° · gatillo apunta al piso y teletransporta.</div>
 </div>
 
 <!-- Diagnóstico (script clásico): captura errores aunque falle la carga del módulo/scripts -->
@@ -72,6 +72,7 @@
 <!-- three.js INCRUSTADO (sin CDN): funciona offline y en navegadores que bloquean jsdelivr -->
 <script src="vendor/three.min.js"></script>
 <script src="vendor/OrbitControls.js"></script>
+<script src="vendor/VRButton.js"></script>
 <!-- chequeo explícito: ¿cargaron los scripts locales? -->
 <script>
   if (typeof THREE === 'undefined') window.showErr('No cargó vendor/three.min.js (revisa que el deploy de Pages ya terminó y que la ruta /vendor/ existe).');
@@ -738,6 +739,100 @@ function mountSorter(sim, opts = {}) {
   };
   applyView(views.iso, true);
 
+  // ---- VR (WebXR · Meta Quest): RIG (dolly) con cámara y 2 controladores. La planta está a
+  //      escala real (metros), 'local-floor' pone tus pies en y=0. Locomoción AMBOS estilos:
+  //      stick IZQ = caminar suave (2 m/s, dirección de la mirada) · stick DER = giro por pasos
+  //      de 45° (confort) · GATILLO (cualquier mano) = apuntar al piso y soltar = teletransporte.
+  const rig = new THREE.Group(); rig.add(camera); scene.add(rig);
+  const VRC = { move: 2.0, snap: Math.PI / 4, snapOn: 0.7, snapOff: 0.3, dead: 0.15, maxTp: 12, vigK: 0.55, turned: false, homed: false };  // histéresis 0.7/0.3 · teleport ≤12 m
+  const rigHome = () => { rig.position.set(b.cx, 0, -6); rig.rotation.y = Math.PI; };  // spawn: frente al sorter, mirando la línea
+  const _UP = new THREE.Vector3(0, 1, 0), _v1 = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3(), _m4 = new THREE.Matrix4();
+  const tpMark = new THREE.Mesh(new THREE.RingGeometry(0.18, 0.26, 24), new THREE.MeshBasicMaterial({ color: 0x2ee56a, side: THREE.DoubleSide }));
+  tpMark.rotation.x = -Math.PI / 2; tpMark.visible = false; scene.add(tpMark);
+  // VIÑETA de confort: túnel que se cierra (opacidad 0.55) mientras hay locomoción suave
+  const vig = new THREE.Mesh(new THREE.RingGeometry(0.55, 3.5, 24), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0, side: THREE.DoubleSide, depthTest: false, depthWrite: false }));
+  vig.position.z = -0.6; vig.renderOrder = 999; vig.visible = false; camera.add(vig);
+  const xrCtrls = [];
+  if (renderer.xr && renderer.xr.getController) {
+    for (let i = 0; i < 2; i++) {
+      const c = renderer.xr.getController(i);
+      const ray = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1)]), new THREE.LineBasicMaterial({ color: 0x4da3ff }));
+      ray.visible = false; c.add(ray); c.userData.ray = ray;
+      const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.028, 0.12, 10), new THREE.MeshStandardMaterial({ color: 0xe8e8e8, roughness: 0.5 }));
+      grip.rotation.x = Math.PI / 2; c.add(grip);
+      c.addEventListener('connected', e => { c.userData.src = e.data; });    // inputSource (sticks + háptica)
+      c.addEventListener('disconnected', () => { c.userData.src = null; });
+      c.addEventListener('selectstart', () => { c.userData.aiming = true; ray.visible = true; });
+      c.addEventListener('selectend', () => {
+        c.userData.aiming = false; ray.visible = false; tpMark.visible = false;
+        const t = c.userData.tp; c.userData.tp = null;
+        if (t) {
+          camera.getWorldPosition(_v1); rig.position.x += t.x - _v1.x; rig.position.z += t.z - _v1.z;  // aterriza el VISOR sobre el punto
+          const g = c.userData.src && c.userData.src.gamepad;                                          // pulso háptico: "llegué"
+          if (g && g.hapticActuators && g.hapticActuators[0] && g.hapticActuators[0].pulse) g.hapticActuators[0].pulse(0.5, 50);
+        }
+      });
+      rig.add(c); xrCtrls.push(c);
+    }
+    if (renderer.xr.setReferenceSpaceType) renderer.xr.setReferenceSpaceType('local-floor');  // pies en y=0 (no 'local')
+    renderer.xr.addEventListener('sessionstart', () => {
+      controls.enabled = false; rigHome();
+      renderer.setPixelRatio(1);                                                              // Quest: fill-rate (72 fps)
+      if (renderer.xr.setFoveation) renderer.xr.setFoveation(1);
+    });
+    renderer.xr.addEventListener('sessionend', () => {
+      controls.enabled = true; rig.position.set(0, 0, 0); rig.rotation.y = 0;
+      vig.material.opacity = 0; vig.visible = false;
+      renderer.setPixelRatio(Math.min(devicePixelRatio || 1, Math.min(innerWidth, innerHeight) < 600 ? 1.5 : 2));
+      applyView(views.iso, true);
+    });
+  }
+  function xrUpdate(dt) {
+    if (!renderer.xr || !renderer.xr.isPresenting) return;
+    const session = renderer.xr.getSession();
+    let moving = false, anyB = false;
+    if (session) for (const src of session.inputSources) {           // sticks (Quest: axes[2]/[3])
+      if (!src.gamepad || !src.gamepad.axes) continue;
+      const ax = src.gamepad.axes, x = ax.length > 2 ? ax[2] : (ax[0] || 0), y = ax.length > 3 ? ax[3] : (ax[1] || 0);
+      const bt = src.gamepad.buttons || [];
+      if (bt[5] && bt[5].pressed) anyB = true;                       // B/Y: volver al punto de inicio (anti-perderse)
+      if (src.handedness === 'right') {                              // giro por pasos, pivotando en el VISOR (no en el rig)
+        if (Math.abs(x) > VRC.snapOn && !VRC.turned) {
+          VRC.turned = true; const a = -Math.sign(x) * VRC.snap;
+          camera.getWorldPosition(_v1);
+          const px = rig.position.x - _v1.x, pz = rig.position.z - _v1.z, ca = Math.cos(a), sa = Math.sin(a);
+          rig.position.x = _v1.x + px * ca + pz * sa; rig.position.z = _v1.z - px * sa + pz * ca;
+          rig.rotation.y += a;
+        } else if (Math.abs(x) < VRC.snapOff) VRC.turned = false;
+      } else if (Math.hypot(x, y) > VRC.dead) {                      // caminar suave hacia DONDE MIRAS (sin componente vertical)
+        moving = true;
+        camera.getWorldDirection(_v1); _v1.y = 0; _v1.normalize();
+        _v2.crossVectors(_v1, _UP);                                  // forward × up = derecha
+        rig.position.addScaledVector(_v1, -y * VRC.move * dt).addScaledVector(_v2, x * VRC.move * dt);
+      }
+    }
+    if (anyB && !VRC.homed) { VRC.homed = true; rigHome(); } else if (!anyB) VRC.homed = false;
+    const vo = vig.material.opacity, vt = moving ? VRC.vigK : 0;     // viñeta de confort: cierra al moverse
+    vig.material.opacity = vo + (vt - vo) * Math.min(1, dt * 6); vig.visible = vig.material.opacity > 0.02;
+    for (const c of xrCtrls) {                                       // teletransporte: rayo del control al piso (y=0)
+      if (!c.userData.aiming) continue;
+      _m4.identity().extractRotation(c.matrixWorld);
+      _v2.set(0, 0, -1).applyMatrix4(_m4); _v1.setFromMatrixPosition(c.matrixWorld);
+      let hit = false;
+      if (_v2.y < -0.08) { const t = -_v1.y / _v2.y; if (t > 0 && t < VRC.maxTp) { _v3.copy(_v1).addScaledVector(_v2, t); hit = true; } }
+      if (hit) { c.userData.tp = { x: _v3.x, z: _v3.z }; tpMark.position.set(_v3.x, 0.02, _v3.z); tpMark.visible = true; c.userData.ray.scale.set(1, 1, _v1.distanceTo(_v3)); }
+      else { c.userData.tp = null; tpMark.visible = false; c.userData.ray.scale.set(1, 1, 5); }
+    }
+  }
+  // Botón ENTRAR VR (sólo si el navegador soporta WebXR; en el Quest abre la sesión inmersiva)
+  if (typeof navigator !== 'undefined' && navigator.xr && THREE.VRButton && THREE.VRButton.createButton) {
+    renderer.xr.enabled = true;
+    const vrBtn = THREE.VRButton.createButton(renderer);
+    Object.assign(vrBtn.style, { position: 'absolute', right: '12px', bottom: '12px', width: 'auto', padding: '8px 14px', border: '1px solid #2a6df3', borderRadius: '8px', background: 'rgba(20,40,80,.85)', color: '#fff', font: '700 12px system-ui', opacity: '0.85', zIndex: '5' });
+    vrBtn.title = 'Stick izq: caminar · Stick der: giro 45° · Gatillo: apuntar al piso y soltar = teletransporte';
+    app.appendChild(vrBtn);
+  }
+
   scene.add(new THREE.HemisphereLight(0xcfe0ff, 0x202830, 0.95));
   const sun = new THREE.DirectionalLight(0xffffff, 0.95); sun.position.set(b.cx + 12, 24, b.cz - 8); scene.add(sun);
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(span * 4, span * 4), new THREE.MeshStandardMaterial({ color: SCENE_COL.ground, roughness: 1 }));
@@ -972,7 +1067,39 @@ function mountSorter(sim, opts = {}) {
   app.appendChild(banner);
   const bar = elDiv({ position: 'absolute', bottom: '12px', left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: '8px' });
   app.appendChild(bar);
-  for (const k of Object.keys(views)) bar.appendChild(mkBtn(k.toUpperCase(), () => applyView(views[k])));
+  for (const k of Object.keys(views)) bar.appendChild(mkBtn(k.toUpperCase(), () => { if (FP.on) fpToggle(false); applyView(views[k]); }));
+
+  // ---- PRIMERA PERSONA (escritorio): caminar la planta a altura de ojos (1,65 m).
+  //      WASD/flechas mueve · Shift corre (4 m/s) · arrastra el mouse para mirar. Sin colisión
+  //      con equipos (inspección); en VR este modo se ignora (manda el visor).
+  const FP = { on: false, yaw: Math.PI, pitch: -0.05, eye: 1.65, v: 1.4, vRun: 4.0, drag: false, lx: 0, ly: 0, keys: {} };
+  const fpBtn = mkBtn('🚶 Caminar', () => fpToggle());
+  fpBtn.title = 'WASD/flechas camina · Shift corre · arrastrar el mouse mira';
+  bar.appendChild(fpBtn);
+  function fpToggle(force) {
+    FP.on = force != null ? force : !FP.on; controls.enabled = !FP.on;
+    fpBtn.textContent = FP.on ? '🛰 Órbita' : '🚶 Caminar';
+    if (FP.on) { camera.rotation.order = 'YXZ'; camera.position.set(b.cx, FP.eye, -5); FP.yaw = Math.PI; FP.pitch = -0.05; }
+    else applyView(views.iso, true);
+  }
+  const fpDom = renderer.domElement;
+  if (fpDom && fpDom.addEventListener) {
+    fpDom.addEventListener('mousedown', e => { if (FP.on) { FP.drag = true; FP.lx = e.clientX; FP.ly = e.clientY; } });
+    fpDom.addEventListener('mousemove', e => { if (FP.on && FP.drag) { FP.yaw -= (e.clientX - FP.lx) * 0.005; FP.pitch = Math.max(-1.48, Math.min(1.48, FP.pitch - (e.clientY - FP.ly) * 0.005)); FP.lx = e.clientX; FP.ly = e.clientY; } });
+  }
+  addEventListener('mouseup', () => { FP.drag = false; });
+  addEventListener('keydown', e => { if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT')) return; FP.keys[e.code] = 1; });
+  addEventListener('keyup', e => { FP.keys[e.code] = 0; });
+  function fpUpdate(dt) {
+    if (!FP.on || (renderer.xr && renderer.xr.isPresenting)) return;
+    camera.rotation.y = FP.yaw; camera.rotation.x = FP.pitch;
+    const k = FP.keys, f = (k.KeyW || k.ArrowUp ? 1 : 0) - (k.KeyS || k.ArrowDown ? 1 : 0), l = (k.KeyD || k.ArrowRight ? 1 : 0) - (k.KeyA || k.ArrowLeft ? 1 : 0);
+    if (!f && !l) return;
+    const v = (k.ShiftLeft || k.ShiftRight) ? FP.vRun : FP.v;
+    camera.position.x += (-Math.sin(FP.yaw) * f + Math.cos(FP.yaw) * l) * v * dt;   // yaw=0 mira -z
+    camera.position.z += (-Math.cos(FP.yaw) * f - Math.sin(FP.yaw) * l) * v * dt;
+    camera.position.y = FP.eye;
+  }
 
   // ---- Gráfico OCULTABLE: tasa de SALIDA por SKU (cajas/min, en vivo) ----
   const chart = elDiv({ position: 'absolute', left: '12px', bottom: '56px', width: '238px', maxHeight: '44vh', overflow: 'auto', background: 'rgba(16,21,32,.93)', border: '1px solid #243049', borderRadius: '10px', padding: '8px 10px', color: '#dfe7f3', font: '11px system-ui' });
@@ -1018,8 +1145,9 @@ function mountSorter(sim, opts = {}) {
   sim._palEvents = [];                                  // no spawnear de golpe los pallets del warmup
 
   let running = false, last = 0, speed = opts.speed || 3;
+  const useAnimLoop = typeof renderer.setAnimationLoop === 'function';   // requerido por WebXR
   function loop(ts) {
-    if (!running) return; requestAnimationFrame(loop);
+    if (!running) return; if (!useAnimLoop) requestAnimationFrame(loop);
     const dt = Math.min(0.05, (ts - last) / 1000 || 0.016); last = ts;
     const steps = Math.max(1, Math.round((dt * speed) / 0.016));
     for (let k = 0; k < steps; k++) sim.step(0.016 * speed);
@@ -1030,7 +1158,9 @@ function mountSorter(sim, opts = {}) {
     for (const ev of fr.palEvents) spawnFullPallet(ev);  // pallet completo -> sale y aparece otro
     updateFlyPallets();
     for (const a of liftAnimators) a(sim.t);             // portadores mk5 en movimiento
-    controls.update();
+    xrUpdate(dt);                                        // locomoción VR (sticks + teletransporte)
+    fpUpdate(dt);                                        // caminar en escritorio (si está activo)
+    if ((!renderer.xr || !renderer.xr.isPresenting) && !FP.on) controls.update();   // en VR/caminar no manda la órbita
     renderer.render(scene, camera);
     drawHUD(fr);
     updateChart();                                       // tasas de salida por SKU (en vivo)
@@ -1054,8 +1184,8 @@ function mountSorter(sim, opts = {}) {
   }
 
   return {
-    start() { if (!running) { running = true; last = performance.now(); requestAnimationFrame(loop); } },
-    stop() { running = false; },
+    start() { if (!running) { running = true; last = performance.now(); if (useAnimLoop) renderer.setAnimationLoop(loop); else requestAnimationFrame(loop); } },
+    stop() { running = false; if (useAnimLoop) renderer.setAnimationLoop(null); },
     setSpeed(x) { speed = x; },
     view(n) { if (views[n]) applyView(views[n]); },
     setHideKuka(v) { hideKuka = !!v; kukaGroup.visible = !hideKuka; },   // oculta segregador + KUKAs + pallets
