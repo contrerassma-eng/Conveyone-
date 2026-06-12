@@ -134,6 +134,19 @@ disciplina del método foto3d — capa `web`, jamás se funde sin cita.
 | Bastidor rodillo vivo | **canal 6" × 4 ga, riel-guía 1-5/8"** *(confianza media)* | [190-NSP · Bulletin 677](https://cdn.hytrol.com/2015_677_190nsp.pdf) |
 | Soportes | piso ajustable: pipe + side channel + leg, nivelable y anclado | [Supports · Bulletin 667](https://cdn.hytrol.com/2014_667_support.pdf) |
 
+**Match con el catálogo Hytrol.** `lib.ref(id)` devuelve la **designación real** y el enlace
+a ficha/manual y catálogo. Confirmado contra `hytrol.com/products` + Bulletin 713:
+`190-E24`, `190-E24EZ`, `190-E24SS` (spur 30°/45°), `190-E24C` (curva), `TA`, **`SBI`
+(Inclined Slider Bed)**, `SB`/`SBC` son modelos reales. Los códigos del usuario que no son
+SKU exacto se mapean a su familia real (`E24CT→190-E24`, `E34EZCT→190-E24EZ`,
+`T90/T30/DV→190-E24SS`, `LBP-CURVE→SBC`) — ver `docs/web_facts.json › catalog_model_verification`.
+
+**Render de alta resolución (vistas laterales).** El equipo se dibuja según la elevación
+real: bastidor de **canal formado en C** (alma + alas + riel-guía), **rodillos Ø1.9" a 3"
+con muñón** en cada extremo (InstancedMesh), bandas con **cama deslizante + correa de carga
+y de retorno envolviendo poleas de extremo + paquete motriz** (motor + guarda de cadena), y
+**soportes de piso tipo H** (patas de canal + placas + travesaño + rodilla diagonal).
+
 **Asumido** (no de cut-sheet, marcado en `web_facts.json`): profundidad de bastidor de las
 bandas, diámetro de polea (~4"), espesor de banda y sección de las patas de soporte.
 

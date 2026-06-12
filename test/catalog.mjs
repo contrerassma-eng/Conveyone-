@@ -116,6 +116,10 @@ check('spec TA: superficie de banda (no rodillos)', lib.spec('TA').surface === '
 check('spec rollers: bastidor 6" y riel-guía 1-5/8" (familia 190)', near(s190.frameDepth, 6 * IN) && near(s190.railHeight, 1.625 * IN));
 check('spec: toda ficha cita su fuente web', lib.list().every(m => { const sp = lib.spec(m.id); return !sp || !!sp.src; }));
 check('web_facts: cada hecho lleva fuente con URL', wf.facts.every(f => wf.sources[f.source] && wf.sources[f.source].url));
+// match con catálogo Hytrol: cada modelo referencia su designación real + ficha/catálogo
+check('catálogo: todo modelo mapea a designación Hytrol real + doc', lib.list().every(m => { const r = lib.ref(m.id); return r && r.hytrol && /^https?:/.test(r.doc) && /^https?:/.test(r.cat); }));
+check('catálogo: SBI = Inclined Slider Bed (modelo real)', lib.ref('SBI').hytrol === 'SBI');
+check('catálogo: E24SS = 190-E24SS spur (Bulletin 713)', lib.ref('E24SS').hytrol === '190-E24SS');
 
 // 8) GUARDAR / CARGAR (serialize -> hydrate) conserva el grafo y vuelve a compilar
 const json = lib.serialize(gd);

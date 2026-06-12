@@ -251,6 +251,32 @@ function specMetric(id) {
   };
 }
 
+// ───── REFERENCIA al catálogo Hytrol real (designación oficial + ficha/manual) ─────
+// Verificado contra hytrol.com/products y los boletines (ver docs/web_facts.json).
+const DOC = {
+  E24: 'https://cdn.hytrol.com/E24.pdf',                                   // Bulletin 713
+  TA: 'https://cdn.hytrol.com/2012_642_ta.pdf',                            // Bulletin 642
+  LR: 'https://hytrol.com/products/transport/live-roller-conveyor/',
+  BELT: 'https://hytrol.com/products/transport/belt-over-conveyor/',
+  SUP: 'https://cdn.hytrol.com/2014_667_support.pdf',
+};
+const REFS = {
+  'E24CT':     { hytrol: '190-E24',    note: 'Rodillo vivo 24V (transporte)', doc: DOC.E24, cat: DOC.LR },
+  'E34EZCT':   { hytrol: '190-E24EZ',  note: 'Acumulación EZLogic 24V',       doc: DOC.E24, cat: DOC.LR },
+  '190-E24':   { hytrol: '190-E24',    note: 'Rodillo vivo 24V (transporte)', doc: DOC.E24, cat: DOC.LR },
+  '190-E24EZ': { hytrol: '190-E24EZ',  note: 'Acumulación EZLogic 24V',       doc: DOC.E24, cat: DOC.LR },
+  'E24SS':     { hytrol: '190-E24SS',  note: 'Spur recto 30°/45° (24V)',      doc: DOC.E24, cat: DOC.LR },
+  'T90':       { hytrol: '190-E24SS',  note: 'Transferencia/spur (familia E24SS)', doc: DOC.E24, cat: DOC.LR },
+  'T30':       { hytrol: '190-E24SS',  note: 'Spur 30° (familia E24SS)',      doc: DOC.E24, cat: DOC.LR },
+  'DV90':      { hytrol: '190-E24SS',  note: 'Desvío por spur (familia E24SS)', doc: DOC.E24, cat: DOC.LR },
+  'DV30':      { hytrol: '190-E24SS',  note: 'Desvío por spur 30°',           doc: DOC.E24, cat: DOC.LR },
+  'MG':        { hytrol: '190-E24',    note: 'Empalme sobre rodillo vivo 24V', doc: DOC.E24, cat: DOC.LR },
+  'TA':        { hytrol: 'TA',         note: 'Banda cama deslizante (transporte)', doc: DOC.TA, cat: DOC.BELT },
+  'SBI':       { hytrol: 'SBI',        note: 'Banda cama deslizante INCLINADA', doc: DOC.TA, cat: DOC.BELT },
+  'LBP':       { hytrol: 'TA/LBP',     note: 'Banda modular (LBP) — genérica', doc: DOC.TA, cat: DOC.BELT },
+  'LBP-CURVE': { hytrol: 'SBC',        note: 'Curva de banda (cama deslizante)', doc: DOC.TA, cat: DOC.BELT },
+};
+
 function modelById(id) { const m = CATALOG.find(x => x.id === id); if (!m) throw new Error('modelo desconocido: ' + id); return m; }
 function resolveCfg(model, overrides = {}) {
   const c = Object.assign({}, model.defaults, overrides);
@@ -282,6 +308,8 @@ export function createConveyorLibrary() {
     // ficha física (capa WEB, ver docs/web_facts.json): superficie, OD/pitch de rodillo,
     // profundidad de bastidor, riel-guía, polea, etc. en METROS (+ pulgadas en .inches).
     spec(id) { return specMetric(id); },
+    // referencia al catálogo Hytrol real: designación oficial + ficha/manual citado
+    ref(id) { return REFS[id] || null; },
     // claves de nodo de un modelo (in/out/out2/in2…), para la UI
     nodeKeys(id) { const m = modelById(id); const n = FAMILIES[m.family].nodes({ x: 0, z: 0, rot: 0 }, resolveCfg(m)); return Object.keys(n).filter(k => k[0] !== '_'); },
 

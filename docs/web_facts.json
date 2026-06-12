@@ -6,7 +6,30 @@
     "E24MC": { "title": "190-E24MC 24VDC Live Roller Modular Conveyor — Product Focus Sheet", "url": "https://cdn.hytrol.com/190-E24MC-Product-Focus-Sheet.pdf", "publisher": "Hytrol Conveyor Co." },
     "TA-642": { "title": "TA Medium Duty Slider Bed — Installation & Maintenance Manual (Bulletin 642)", "url": "https://cdn.hytrol.com/2012_642_ta.pdf", "publisher": "Hytrol Conveyor Co." },
     "SUPPORT-667": { "title": "Conveyor Supports — Installation (Bulletin 667)", "url": "https://cdn.hytrol.com/2014_667_support.pdf", "publisher": "Hytrol Conveyor Co." },
-    "190-NSP-677": { "title": "190-NSP — Installation & Maintenance Manual (Bulletin 677)", "url": "https://cdn.hytrol.com/2015_677_190nsp.pdf", "publisher": "Hytrol Conveyor Co." }
+    "190-NSP-677": { "title": "190-NSP — Installation & Maintenance Manual (Bulletin 677)", "url": "https://cdn.hytrol.com/2015_677_190nsp.pdf", "publisher": "Hytrol Conveyor Co." },
+    "CAT-LR": { "title": "Live Roller / Powered Roller Conveyor — catálogo de modelos", "url": "https://hytrol.com/products/transport/live-roller-conveyor/", "publisher": "Hytrol Conveyor Co." },
+    "CAT-BELT": { "title": "Belt-Over Roller & Slider Conveyors — catálogo de modelos", "url": "https://hytrol.com/products/transport/belt-over-conveyor/", "publisher": "Hytrol Conveyor Co." }
+  },
+  "catalog_model_verification": {
+    "_note": "Designaciones confirmadas contra el catálogo Hytrol (páginas de producto) y el Bulletin 713. Las que no son SKU Hytrol exacto se marcan como alias de una familia real.",
+    "real": {
+      "190-E24": "24V live roller (transport) — CAT-LR / E24-713",
+      "190-E24EZ": "EZLogic zero-pressure accumulation — CAT-LR / E24-713",
+      "190-E24SS": "straight spur 30°/45° — E24-713 (la página de catálogo lo rotula 'stainless'; el Bulletin 713 lo define como straight spur)",
+      "190-E24C": "live roller curve (tapered rollers) — E24-713",
+      "190-E24MC": "modular — E24MC",
+      "TA": "slider bed belt (transport) — CAT-BELT / TA-642",
+      "SBI": "Inclined Slider Bed — CAT-BELT (confirmado como modelo real)",
+      "SB": "slider bed; SBC: curved slider bed — CAT-BELT"
+    },
+    "aliases": {
+      "E24CT": "→ 190-E24 (transporte). 'CT' no es SKU de transporte recto; usar 190-E24.",
+      "E34EZCT": "→ 190-E24EZ (acumulación EZLogic).",
+      "T90/T30/DV90/DV30": "→ familia 190-E24SS (spur/transferencia de rodillo motorizado).",
+      "MG": "empalme genérico sobre rodillo vivo 24V.",
+      "LBP": "banda modular genérica (Low Back Pressure); Hytrol no publica SKU 'LBP' en estas páginas.",
+      "LBP-CURVE": "→ SBC (curva de banda de cama deslizante)."
+    }
   },
   "facts": [
     { "model": "190-E24", "level": "web", "source": "E24-713",

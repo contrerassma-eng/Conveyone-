@@ -131,74 +131,101 @@ export function initBuilder() {
     const c = inst.cfg, h0 = c.entryHeight, h1 = c.exitHeight != null ? c.exitHeight : c.entryHeight;
     const t = total > 1 ? k / total : 0; return h0 + (h1 - h0) * t;
   }
-  // materiales (galvanizado, rodillo, banda) — compartidos
-  const matFrame = new THREE.MeshStandardMaterial({ color: 0xc2c8ce, metalness: 0.45, roughness: 0.5 });
-  const matRail = new THREE.MeshStandardMaterial({ color: 0xaeb5bd, metalness: 0.4, roughness: 0.5 });
-  const matRoller = new THREE.MeshStandardMaterial({ color: 0xc8ccd0, metalness: 0.65, roughness: 0.32 });
-  const matBelt = new THREE.MeshStandardMaterial({ color: 0x23282f, roughness: 0.85, metalness: 0.05 });
-  const matLeg = new THREE.MeshStandardMaterial({ color: 0x9aa0a6, metalness: 0.35, roughness: 0.6 });
-  const matSel = new THREE.MeshStandardMaterial({ color: 0x2e6fd6, metalness: 0.4, roughness: 0.5, emissive: 0x12345a, emissiveIntensity: 0.4 });
-  const rollerGeo = new THREE.CylinderGeometry(0.5, 0.5, 1, 12);   // se escala por instancia (OD/largo reales)
+  // materiales (galvanizado, rodillo, banda, motor) — compartidos
+  const matFrame = new THREE.MeshStandardMaterial({ color: 0xc2c8ce, metalness: 0.5, roughness: 0.45 });
+  const matRail = new THREE.MeshStandardMaterial({ color: 0xb6bdc4, metalness: 0.45, roughness: 0.5 });
+  const matRoller = new THREE.MeshStandardMaterial({ color: 0xccd0d4, metalness: 0.7, roughness: 0.28 });
+  const matAxle = new THREE.MeshStandardMaterial({ color: 0x40464d, metalness: 0.6, roughness: 0.4 });
+  const matBelt = new THREE.MeshStandardMaterial({ color: 0x20252b, roughness: 0.9, metalness: 0.04 });
+  const matLeg = new THREE.MeshStandardMaterial({ color: 0x969ca2, metalness: 0.4, roughness: 0.55 });
+  const matMotor = new THREE.MeshStandardMaterial({ color: 0x2b2f36, metalness: 0.3, roughness: 0.6 });
+  const matSel = new THREE.MeshStandardMaterial({ color: 0x2e6fd6, metalness: 0.4, roughness: 0.5, emissive: 0x12345a, emissiveIntensity: 0.45 });
+  const rollerGeo = new THREE.CylinderGeometry(0.5, 0.5, 1, 18);   // se escala por instancia (OD/largo reales)
+  const axleGeo = new THREE.CylinderGeometry(0.5, 0.5, 1, 6);      // muñón hexagonal del rodillo
   const _Y = new THREE.Vector3(0, 1, 0), _q = new THREE.Quaternion(), _ax = new THREE.Vector3(), _dummy = new THREE.Object3D();
+  const TOR = 0.025;   // tapa visual (la altura de la pieza = top of roller/belt)
 
-  function segMeta(p0, p1) { const dx = p1[0] - p0[0], dz = p1[1] - p0[1], L = Math.hypot(dx, dz) || 1e-3; return { dx: dx / L, dz: dz / L, L, rotY: Math.atan2(dx, dz), mx: (p0[0] + p1[0]) / 2, mz: (p0[1] + p1[1]) / 2 }; }
+  function segMeta(p0, p1) { const dx = p1[0] - p0[0], dz = p1[1] - p0[1], L = Math.hypot(dx, dz) || 1e-3; return { dx: dx / L, dz: dz / L, L, rotY: Math.atan2(dx, dz), mx: (p0[0] + p1[0]) / 2, mz: (p0[1] + p1[1]) / 2, ox: Math.cos(Math.atan2(dx, dz)), oz: -Math.sin(Math.atan2(dx, dz)) }; }
+  function box(group, w, h, d, x, y, z, rotY, mat) { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); m.position.set(x, y, z); m.rotation.y = rotY; group.add(m); return m; }
 
-  // bastidor de canal a cada lado + riel-guía (guard rail). depth y railH reales (m).
+  // BASTIDOR de canal formado en C (alma + ala superior + ala inferior) a cada lado + riel-guía.
+  // Vista lateral: alma vertical de `depth`; alas hacia adentro; guard rail por encima del TOR.
   function addFrame(group, p0, p1, h0, h1, width, depth, railH, sel) {
-    const s = segMeta(p0, p1), midH = (h0 + h1) / 2, ox = Math.cos(s.rotY), oz = -Math.sin(s.rotY);
+    const s = segMeta(p0, p1), midH = (h0 + h1) / 2, fm = sel ? matSel : matFrame, rm = sel ? matSel : matRail;
+    const flange = 0.035, web = 0.004;
     for (const sd of [-1, 1]) {
-      const ch = new THREE.Mesh(new THREE.BoxGeometry(0.012, depth, s.L), sel ? matSel : matFrame);
-      ch.position.set(s.mx + ox * sd * width / 2, midH - depth / 2 + 0.025, s.mz + oz * sd * width / 2); ch.rotation.y = s.rotY; group.add(ch);
-      if (railH > 1e-4) {
-        const rl = new THREE.Mesh(new THREE.BoxGeometry(0.012, railH, s.L), sel ? matSel : matRail);
-        rl.position.set(s.mx + ox * sd * width / 2, midH + 0.025 + railH / 2, s.mz + oz * sd * width / 2); rl.rotation.y = s.rotY; group.add(rl);
-      }
+      const cx = s.mx + s.ox * sd * width / 2, cz = s.mz + s.oz * sd * width / 2, inn = -sd; // ala hacia adentro
+      box(group, web, depth, s.L, cx, midH + TOR - depth / 2, cz, s.rotY, fm);                                   // alma
+      box(group, flange, web * 2, s.L, cx + s.ox * inn * flange / 2, midH + TOR - 0.002, cz + s.oz * inn * flange / 2, s.rotY, fm); // ala superior
+      box(group, flange, web * 2, s.L, cx + s.ox * inn * flange / 2, midH + TOR - depth + 0.002, cz + s.oz * inn * flange / 2, s.rotY, fm); // ala inferior
+      if (railH > 1e-4) box(group, web * 1.6, railH, s.L, cx, midH + TOR + railH / 2, cz, s.rotY, rm);            // riel-guía
     }
   }
-  // rodillos reales: OD = spec.rollerDia, paso = spec.rollerPitch, eje horizontal cruzado.
+  // RODILLOS reales (OD/paso) con muñón en cada extremo; eje horizontal cruzado.
   function addRollers(group, p0, p1, h0, h1, width, dia, pitch) {
-    const s = segMeta(p0, p1), n = Math.max(1, Math.floor(s.L / pitch)), len = Math.max(0.1, width - 0.06);
-    const inst = new THREE.InstancedMesh(rollerGeo, matRoller, n);
+    const s = segMeta(p0, p1), n = Math.max(1, Math.floor(s.L / pitch)), len = Math.max(0.1, width - 0.075);
+    const roll = new THREE.InstancedMesh(rollerGeo, matRoller, n), axl = new THREE.InstancedMesh(axleGeo, matAxle, n);
     _ax.set(s.dz, 0, -s.dx).normalize(); _q.setFromUnitVectors(_Y, _ax);
     for (let k = 0; k < n; k++) {
-      const t = (k + 0.5) * pitch / s.L, x = p0[0] + (p1[0] - p0[0]) * t, z = p0[1] + (p1[1] - p0[1]) * t, y = (h0 + (h1 - h0) * t) - dia / 2 + 0.025;
-      _dummy.position.set(x, y, z); _dummy.quaternion.copy(_q); _dummy.scale.set(dia, len, dia); _dummy.updateMatrix(); inst.setMatrixAt(k, _dummy.matrix);
+      const t = (k + 0.5) * pitch / s.L, x = p0[0] + (p1[0] - p0[0]) * t, z = p0[1] + (p1[1] - p0[1]) * t, y = (h0 + (h1 - h0) * t) + TOR - dia / 2;
+      _dummy.position.set(x, y, z); _dummy.quaternion.copy(_q);
+      _dummy.scale.set(dia, len, dia); _dummy.updateMatrix(); roll.setMatrixAt(k, _dummy.matrix);
+      _dummy.scale.set(0.011, width + 0.02, 0.011); _dummy.updateMatrix(); axl.setMatrixAt(k, _dummy.matrix);
     }
-    inst.instanceMatrix.needsUpdate = true; inst.userData.instId = group.userData.instId; group.add(inst);
+    roll.instanceMatrix.needsUpdate = axl.instanceMatrix.needsUpdate = true;
+    roll.userData.instId = axl.userData.instId = group.userData.instId; group.add(roll); group.add(axl);
   }
-  // superficie de banda + poleas de extremo (modelos TA/SBI/LBP).
-  function addBelt(group, p0, p1, h0, h1, width, belt, sel) {
-    const s = segMeta(p0, p1), midH = (h0 + h1) / 2;
-    const top = new THREE.Mesh(new THREE.BoxGeometry(width - 0.04, belt, s.L), sel ? matSel : matBelt);
-    top.position.set(s.mx, midH + 0.025 - belt / 2, s.mz); top.rotation.y = s.rotY; top.userData.instId = group.userData.instId; group.add(top);
+  // BANDA: cama deslizante (pan) + correa de carga y de retorno envolviendo poleas de extremo.
+  function addBelt(group, poly, sp, width, sel, h0fn) {
+    const belt = sp.belt || 0.006, pulley = sp.pulleyDia || 0.10;
+    for (let i = 0; i < poly.length - 1; i++) {
+      const s = segMeta(poly[i], poly[i + 1]), hA = h0fn(i), hB = h0fn(i + 1), midH = (hA + hB) / 2;
+      box(group, width - 0.04, belt, s.L, s.mx, midH + TOR - belt / 2, s.mz, s.rotY, sel ? matSel : matBelt);    // correa de carga
+      box(group, width - 0.05, 0.01, s.L, s.mx, midH + TOR - belt - 0.012, s.mz, s.rotY, matFrame);              // pan deslizante
+      box(group, width - 0.04, belt, s.L, s.mx, midH + TOR - pulley - belt, s.mz, s.rotY, matBelt);              // retorno
+    }
+    // poleas de extremo (eje cruzado) — la correa envuelve
+    for (const e of [0, poly.length - 1]) {
+      const p = poly[e], h = h0fn(e), s = segMeta(poly[Math.max(0, e - 1)], poly[Math.min(poly.length - 1, e + 1)]);
+      _ax.set(s.dz, 0, -s.dx).normalize(); _q.setFromUnitVectors(_Y, _ax);
+      const pl = new THREE.Mesh(new THREE.CylinderGeometry(pulley / 2, pulley / 2, width - 0.05, 16), matRoller);
+      pl.position.set(p[0], h + TOR - pulley / 2, p[1]); pl.quaternion.copy(_q); group.add(pl);
+    }
+    return pulley;
   }
-  function addPulley(group, p, h, width, dia) {
-    const s = { rotY: 0 }; const pl = new THREE.Mesh(new THREE.CylinderGeometry(dia / 2, dia / 2, width - 0.04, 14), matRoller);
-    pl.position.set(p[0], h - dia / 2 + 0.025, p[1]); pl.rotation.z = Math.PI / 2; group.add(pl);  // eje cruzado aproximado
+  // PAQUETE de accionamiento (motor + reductor + guarda de cadena) junto a la polea motriz.
+  function addDrive(group, p, rotY, h, width, pulley) {
+    const off = width / 2 + 0.12;
+    box(group, 0.16, 0.16, 0.28, p[0] + Math.cos(rotY) * off, h - pulley / 2, p[1] - Math.sin(rotY) * off, rotY, matMotor); // motor
+    box(group, 0.06, pulley + 0.06, 0.10, p[0] + Math.cos(rotY) * (width / 2 + 0.02), h - pulley / 2, p[1] - Math.sin(rotY) * (width / 2 + 0.02), rotY, matFrame); // guarda de cadena
   }
-  // soporte de piso tipo H (dos patas + travesaño + placas), a la altura de la banda.
+  // SOPORTE de piso tipo H (patas de canal + travesaño + placas de piso + rodilla diagonal).
   function addSupport(group, p, rotY, height, width, depth) {
-    const top = Math.max(0.1, height - depth), ox = Math.cos(rotY), oz = -Math.sin(rotY);
+    const top = Math.max(0.1, height - depth + TOR), ox = Math.cos(rotY), oz = -Math.sin(rotY);
     for (const sd of [-1, 1]) {
-      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.05, top, 0.05), matLeg);
-      leg.position.set(p[0] + ox * sd * width / 2, top / 2, p[1] + oz * sd * width / 2); group.add(leg);
-      const foot = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.02, 0.13), matLeg);
-      foot.position.set(p[0] + ox * sd * width / 2, 0.01, p[1] + oz * sd * width / 2); group.add(foot);
+      const lx = p[0] + ox * sd * width / 2, lz = p[1] + oz * sd * width / 2;
+      box(group, 0.045, top, 0.045, lx, top / 2, lz, rotY, matLeg);                 // pata
+      box(group, 0.12, 0.014, 0.12, lx, 0.007, lz, rotY, matLeg);                   // placa de piso
     }
-    const cross = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, width), matLeg);
-    cross.position.set(p[0], top - 0.06, p[1]); cross.rotation.y = rotY; group.add(cross);
+    box(group, 0.045, 0.05, width, p[0], top - 0.03, p[1], rotY, matLeg);           // travesaño superior
+    // rodilla diagonal (estabiliza el soporte en el sentido del flujo)
+    const brace = box(group, 0.03, 0.03, top * 0.7, p[0] - ox * 0.0 + (oz) * 0, top * 0.4, p[1], rotY, matLeg);
+    brace.position.set(p[0] + Math.sin(rotY) * 0.18, top * 0.4, p[1] + Math.cos(rotY) * 0.18); brace.rotation.set(0.5, rotY, 0);
   }
 
   function drawRun(g, inst, poly, sp, sel, supports) {
     const w = inst.cfg.width, dia = sp && sp.rollerDia ? sp.rollerDia : 0.0483, pitch = sp && sp.rollerPitch ? sp.rollerPitch : 0.0762;
     const depth = sp ? sp.frameDepth : 0.14, railH = sp ? sp.railHeight : 0.04, useRollers = !sp || sp.surface === 'rollers';
+    const hAt = i => heightsAlong(inst, i, poly.length - 1);
     for (let i = 0; i < poly.length - 1; i++) {
-      const h0 = heightsAlong(inst, i, poly.length - 1), h1 = heightsAlong(inst, i + 1, poly.length - 1);
-      addFrame(g, poly[i], poly[i + 1], h0, h1, w, depth, railH, sel);
-      if (useRollers) addRollers(g, poly[i], poly[i + 1], h0, h1, w, dia, pitch);
-      else addBelt(g, poly[i], poly[i + 1], h0, h1, w, sp.belt || 0.006, sel);
+      addFrame(g, poly[i], poly[i + 1], hAt(i), hAt(i + 1), w, depth, railH, sel);
+      if (useRollers) addRollers(g, poly[i], poly[i + 1], hAt(i), hAt(i + 1), w, dia, pitch);
     }
-    if (!useRollers && sp && sp.pulleyDia) { addPulley(g, poly[0], heightsAlong(inst, 0, poly.length - 1), w, sp.pulleyDia); addPulley(g, poly[poly.length - 1], heightsAlong(inst, poly.length - 1, poly.length - 1), w, sp.pulleyDia); }
+    if (!useRollers) {
+      const pulley = addBelt(g, poly, sp, w, sel, hAt);
+      const r1 = segMeta(poly[poly.length - 2], poly[poly.length - 1]).rotY;     // motriz en el extremo de salida
+      addDrive(g, poly[poly.length - 1], r1, hAt(poly.length - 1), w, pulley);
+    }
     if (supports) {
       const r0 = segMeta(poly[0], poly[1]).rotY, r1 = segMeta(poly[poly.length - 2], poly[poly.length - 1]).rotY;
       addSupport(g, poly[0], r0, inst.cfg.entryHeight, w, depth);
@@ -246,17 +273,19 @@ export function initBuilder() {
     if (!selected) { insp.style.display = 'none'; return; }
     insp.style.display = 'block';
     const m = lib.get(selected.model), c = selected.cfg;
-    document.getElementById('iTitle').textContent = m.id;
-    const sp = lib.spec(selected.model); let specTxt = m.note;
+    const ref = lib.ref(selected.model);
+    document.getElementById('iTitle').textContent = m.id + (ref && ref.hytrol !== m.id ? ' · Hytrol ' + ref.hytrol : '');
+    const sp = lib.spec(selected.model); const mm = v => v != null ? (v * 1000).toFixed(0) + ' mm' : '—';
+    let html = (ref ? `<b style="color:#9fc3ff">Hytrol ${ref.hytrol}</b> — ${ref.note}<br>` : '') + m.note;
     if (sp) {
-      const mm = v => v != null ? (v * 1000).toFixed(0) + ' mm' : '—';
-      specTxt += '\n— Ficha (Hytrol, ' + (sp.src || 'web') + '): ';
-      if (sp.surface === 'rollers') specTxt += `rodillo Ø${mm(sp.rollerDia)} (${sp.inches.rollerDiaIn}") × ${sp.gauge} ga · paso ${mm(sp.rollerPitch)} (${sp.inches.rollerPitchIn}" centers)`;
-      else specTxt += `banda${sp.modular ? ' modular' : ' cama deslizante'} · polea Ø${mm(sp.pulleyDia)}`;
-      specTxt += ` · bastidor ${mm(sp.frameDepth)}` + (sp.railHeight ? ` · riel-guía ${mm(sp.railHeight)}` : '');
-      if (sp.speedFpm) specTxt += ` · ${sp.speedFpm[0]}–${sp.speedFpm[1]} fpm`;
+      html += '<br><span style="color:#8fa3bd">Ficha (' + (sp.src || 'web') + '):</span> ';
+      if (sp.surface === 'rollers') html += `rodillo Ø${mm(sp.rollerDia)} (${sp.inches.rollerDiaIn}") × ${sp.gauge} ga · paso ${mm(sp.rollerPitch)} (${sp.inches.rollerPitchIn}" centers)`;
+      else html += `banda${sp.modular ? ' modular' : ' cama deslizante'} · polea Ø${mm(sp.pulleyDia)}`;
+      html += ` · bastidor ${mm(sp.frameDepth)}` + (sp.railHeight ? ` · riel-guía ${mm(sp.railHeight)}` : '');
+      if (sp.speedFpm) html += ` · ${sp.speedFpm[0]}–${sp.speedFpm[1]} fpm`;
     }
-    document.getElementById('iNote').textContent = specTxt;
+    if (ref) html += `<br><a href="${ref.doc}" target="_blank" style="color:#4da3ff">ficha/manual</a> · <a href="${ref.cat}" target="_blank" style="color:#4da3ff">catálogo</a>`;
+    document.getElementById('iNote').innerHTML = html;
     iFields.innerHTML = '';
     const upd = () => { lib.refresh(selected); resnap(selected); rebuild(); };
     const fam = selected.family;
