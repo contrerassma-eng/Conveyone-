@@ -67,5 +67,49 @@ check('motor: hay generación y entrega', eng.stats.generated > 0 && eng.stats.d
 check('graphToModel: 1ª pieza es fuente', !!model.segments.find(s => s.id === a.id).source);
 check('graphToModel: última pieza es sumidero', !!model.segments.find(s => s.id === b.id).sink);
 
+// 6) DESVIADOR 1->2: una entrada reparte a dos salidas; ambas reciben cajas
+const gd = { instances: [], links: [] };
+const din = lib.place('TA', { x: 0, z: 0, rot: 0 }, { length: 4 }); gd.instances.push(din);
+const dv = lib.place('DV90'); gd.instances.push(dv);
+const oA = lib.place('190-E24', null, { length: 3 }); gd.instances.push(oA);   // salida recta (out)
+const oB = lib.place('190-E24', null, { length: 3 }); gd.instances.push(oB);   // salida desvío (out2)
+lib.connect(gd, din.id, dv.id);
+lib.connect(gd, dv.id, oA.id, { fromNode: 'out' });
+lib.connect(gd, dv.id, oB.id, { fromNode: 'out2' });
+check('divert: expone nodos in/out/out2', lib.nodeKeys('DV90').join(',') === 'in,out,out2');
+check('divert: validación sin errores', !lib.validate(gd).some(i => i.level === 'error'));
+const md = lib.graphToModel(gd, { rate: 1400 });
+const ed = new ConveyorSim(md, { seed: 11 });
+for (let i = 0; i < 5000; i++) ed.step(0.05);
+let collideD = 0; for (const seg of ed.segments.values()) { const arr = ed.boxes.filter(x => x.segId === seg.id).map(x => x.s).sort((p, q) => p - q); for (let i = 1; i < arr.length; i++) if (arr[i] - arr[i - 1] < seg.pitch - 1e-3) collideD++; }
+check('divert: fluye sin solapes', collideD === 0);
+check('divert: el flujo se reparte a las dos ramas', ed.stats.delivered > 0 && ed.stats.generated > ed.stats.delivered);
+
+// 7) MERGE 2->1: dos entradas convergen a un tronco sin solape
+const gm = { instances: [], links: [] };
+const f1 = lib.place('TA', { x: 0, z: 0, rot: 0 }, { length: 4 }); gm.instances.push(f1);
+const f2 = lib.place('TA', { x: 0, z: 3, rot: 0 }, { length: 4 }); gm.instances.push(f2);
+const mg = lib.place('MG'); gm.instances.push(mg);
+const trunk = lib.place('190-E24', null, { length: 4 }); gm.instances.push(trunk);
+lib.connect(gm, f1.id, mg.id, { toNode: 'in' });
+lib.connect(gm, f2.id, mg.id, { toNode: 'in2' });   // 2º upstream: snap del origen
+lib.connect(gm, mg.id, trunk.id);
+check('merge: expone nodos in/in2/out', lib.nodeKeys('MG').join(',') === 'in,in2,out');
+const mm = lib.graphToModel(gm, { rate: 700 });
+const em = new ConveyorSim(mm, { seed: 13 });
+for (let i = 0; i < 5000; i++) em.step(0.05);
+let collideM = 0; for (const seg of em.segments.values()) { const arr = em.boxes.filter(x => x.segId === seg.id).map(x => x.s).sort((p, q) => p - q); for (let i = 1; i < arr.length; i++) if (arr[i] - arr[i - 1] < seg.pitch - 1e-3) collideM++; }
+check('merge: dos fuentes (in/in2 sin enlace previo no aplica; ambas TA son fuente)', mm.segments.filter(s => s.source).length === 2);
+check('merge: confluye sin solapes', collideM === 0);
+check('merge: el tronco entrega cajas de ambas líneas', em.stats.delivered > 0);
+
+// 8) GUARDAR / CARGAR (serialize -> hydrate) conserva el grafo y vuelve a compilar
+const json = lib.serialize(gd);
+const g2 = lib.hydrate(json);
+check('persistencia: round-trip conserva piezas y enlaces', g2.instances.length === gd.instances.length && g2.links.length === gd.links.length);
+check('persistencia: ids y modelos preservados', g2.instances[1].id === dv.id && g2.instances[1].model === 'DV90');
+const m2 = lib.graphToModel(g2, { rate: 1400 });
+check('persistencia: el grafo cargado vuelve a compilar a segmentos', m2.segments.length === md.segments.length);
+
 console.log(`\n${passed} ok, ${failed} fail` + (failed ? `  -> ${fails.join(', ')}` : ''));
 process.exit(failed ? 1 : 0);

@@ -57,12 +57,23 @@ nodo de entrada coincida con el de salida de la anterior.
 | `E24SS` | transferencia | transferencia de rodillo motorizado | 0° | ángulo 30°/90° |
 | `T90` | transferencia | transferencia 90° (pop-up) | 0° | requiere hueco aguas arriba |
 | `T30` | transferencia | spur de desvío 30° | 0° | alta tasa |
+| `DV90` | desviador (1→2) | celda con salida recta + desvío 90° | 0° | reparte por hueco |
+| `DV30` | desviador (1→2) | celda con salida recta + spur 30° | 0° | alta tasa |
+| `MG` | merge (2→1) | confluencia de dos líneas a un tronco | 0° | sin solape (R4) |
 
 Las **familias cinemáticas** (`src/catalog.js → FAMILIES`) son lo que el motor consume:
 
 - **`straight`** — un segmento recto; inclina si `entryHeight ≠ exitHeight`.
 - **`curve`** — un arco (`angleDeg`, `radius`); plano.
 - **`transfer`** — polilínea que gira el flujo `angleDeg`; plano.
+- **`divert`** — 1 entrada → 2 salidas: `out` continúa recto, `out2` desvía a `angleDeg`
+  (dos segmentos: celda + spur). El motor reparte por hueco (round-robin).
+- **`merge`** — 2 entradas (`in`, `in2`) → 1 tronco (`out`). El cero-presión evita solapes.
+
+Los **nodos** de cada pieza dependen de la familia: `in`/`out` (recta/curva/transferencia),
+`in`/`out`/`out2` (desviador), `in`/`in2`/`out` (merge). `lib.nodeKeys(id)` los enumera.
+Un enlace lleva `{ from, fromNode, to, toNode }`; al conectar hacia un destino que ya tiene
+entradas (p.ej. la 2ª línea de un merge), el snap mueve el ORIGEN en vez del destino.
 
 Config (`cfg`) de cada pieza: `length`, `width`, `speed` (m/s), `pitch`, `entryHeight`,
 `exitHeight`, y para curva/transferencia `angleDeg` (+ `radius`, `cw`).
@@ -92,13 +103,22 @@ Interfaz navegable (three.js r158, ESM por importmap CDN, igual que `examples/in
 - **Inspector** (derecha): configura la pieza seleccionada — tipo (modelo), ancho, largo,
   altura de ingreso, altura de salida, velocidad (fpm), ángulo/radio (curva/transferencia)
   y su pose (X, Z, rotación). Mover una pieza re-pega en cascada las que cuelgan de ella.
-- **Nodos conectables**: esferas verde (entrada) y azul (salida) en cada pieza. Con
-  **🔗 Conectar** tocas una salida y luego una entrada → enlace con snap.
+- **Nodos conectables**: esferas verde (entrada `in`/`in2`) y azul (salida `out`/`out2`)
+  en cada pieza. Con **🔗 Conectar** tocas una salida y luego una entrada → enlace con snap.
+  Así armas desvíos (1→2) y empalmes (2→1) tocando los nodos correspondientes.
 - **✓ Validar**: corre las reglas de arriba y las lista.
 - **▶ Simular**: compila el grafo, corre `ConveyorSim` y anima las cajas por la cadena.
+- **💾 / 📂 Guardar / Cargar**: exporta/importa el layout como JSON (`lib.serialize` /
+  `lib.hydrate`); además guarda el último layout en `localStorage` y lo restaura al abrir.
+- **ENTER VR** (Meta Quest): recorre a escala real la planta que armaste. Stick izquierdo
+  camina (dirección de la mirada), stick derecho gira 45° (confort), gatillo teletransporta.
+  Usa `renderer.setAnimationLoop` y referencia `local-floor` (WebXR exige https — GitHub
+  Pages cumple).
 
 ## Pruebas
 
-`node test/catalog.mjs` — 13 comprobaciones: todos los modelos se colocan y compilan,
-exponen nodos, el snap deja empalmes coincidentes, el validador atrapa configs imposibles,
-y un grafo Hytrol fluye en el motor sin solapes con generación/entrega.
+`node test/catalog.mjs` — 24 comprobaciones: todos los modelos se colocan y compilan,
+exponen sus nodos, el snap deja empalmes coincidentes, el validador atrapa configs
+imposibles, un grafo Hytrol fluye sin solapes, los **desviadores reparten 1→2**, los
+**merges confluyen 2→1** sin solape, y **guardar/cargar** conserva el grafo y vuelve a
+compilar.

@@ -58,8 +58,12 @@
     <button id="bConnect">🔗 Conectar</button>
     <button id="bValidate">✓ Validar</button>
     <button id="bRun">▶ Simular</button>
-    <button id="bClear">🧹 Limpiar</button>
+    <button id="bSave">💾</button>
+    <button id="bLoad">📂</button>
+    <button id="bClear">🧹</button>
   </div>
+  <input id="fileIn" type="file" accept="application/json" style="display:none">
+  <a id="dl" style="display:none"></a>
 
   <script type="importmap">
   { "imports": {
@@ -71,6 +75,7 @@
   <script type="module">
     import * as THREE from 'three';
     import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { VRButton } from 'three/addons/webxr/VRButton.js';
     import { createConveyorLibrary } from '../src/catalog.js';
     import { ConveyorSim } from '../src/engine.js';
 
@@ -87,6 +92,7 @@
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
     renderer.setSize(innerWidth, innerHeight); app.appendChild(renderer.domElement);
+    renderer.xr.enabled = true;
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true; controls.target.set(4, 0.5, 2);
     scene.add(new THREE.HemisphereLight(0xcfe0ff, 0x202830, 1.0));
@@ -169,22 +175,25 @@
         }
         legAt(g, poly[0][0], poly[0][1], inst.cfg.entryHeight);
         legAt(g, poly[poly.length - 1][0], poly[poly.length - 1][1], inst.cfg.exitHeight != null ? inst.cfg.exitHeight : inst.cfg.entryHeight);
-        // nodos
-        mkNode(inst, 'in', 0x2ee56a); mkNode(inst, 'out', 0x4da3ff);
+        // nodos: in/in2 (entrada, verde) · out/out2 (salida, azul)
+        for (const key of lib.nodeKeys(inst.model)) mkNode(inst, key);
       }
       // líneas de enlace
       for (const l of graph.links) {
         const A = byId(l.from), B = byId(l.to); if (!A || !B) continue;
-        const a = A.nodes.out.p, b = B.nodes.in.p;
-        const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(a[0], A.cfg.exitHeight ?? A.cfg.entryHeight, a[1]), new THREE.Vector3(b[0], B.cfg.entryHeight, b[1])]);
+        const na = A.nodes[l.fromNode || 'out'], nb = B.nodes[l.toNode || 'in']; if (!na || !nb) continue;
+        const ha = (l.fromNode || 'out').startsWith('out') ? (A.cfg.exitHeight ?? A.cfg.entryHeight) : A.cfg.entryHeight;
+        const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(na.p[0], ha, na.p[1]), new THREE.Vector3(nb.p[0], B.cfg.entryHeight, nb.p[1])]);
         linkRoot.add(new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0x3a4a5a })));
       }
       validateHud();
     }
-    function mkNode(inst, kind, col) {
-      const node = inst.nodes[kind], h = kind === 'in' ? inst.cfg.entryHeight : (inst.cfg.exitHeight ?? inst.cfg.entryHeight);
+    function mkNode(inst, key) {
+      const node = inst.nodes[key]; if (!node) return;
+      const isExit = key.startsWith('out'), col = isExit ? 0x4da3ff : 0x2ee56a;
+      const h = isExit ? (inst.cfg.exitHeight ?? inst.cfg.entryHeight) : inst.cfg.entryHeight;
       const s = new THREE.Mesh(new THREE.SphereGeometry(0.09, 12, 12), new THREE.MeshStandardMaterial({ color: col, emissive: col, emissiveIntensity: 0.4 }));
-      s.position.set(node.p[0], h + 0.06, node.p[1]); s.userData = { instId: inst.id, nodeKind: kind }; nodeRoot.add(s);
+      s.position.set(node.p[0], h + 0.06, node.p[1]); s.userData = { instId: inst.id, nodeKey: key, isExit }; nodeRoot.add(s);
     }
     const byId = id => graph.instances.find(i => i.id === id);
 
@@ -204,9 +213,12 @@
       document.getElementById('iNote').textContent = m.note;
       iFields.innerHTML = '';
       const upd = () => { lib.refresh(selected); resnap(selected); rebuild(); };
-      if (selected.family === 'straight') iFields.appendChild(field('Largo (m)', c.length, v => { c.length = Math.max(0.3, v); upd(); }));
-      if (selected.family === 'curve') { iFields.appendChild(field('Radio (m)', c.radius, v => { c.radius = Math.max(0.4, v); upd(); })); iFields.appendChild(field('Ángulo (°)', c.angleDeg, v => { c.angleDeg = v; upd(); }, 5)); }
-      if (selected.family === 'transfer') { iFields.appendChild(field('Largo (m)', c.length, v => { c.length = Math.max(0.3, v); upd(); })); iFields.appendChild(field('Ángulo (°)', c.angleDeg, v => { c.angleDeg = v; upd(); }, 5)); }
+      const fam = selected.family;
+      if (fam === 'straight' || fam === 'transfer' || fam === 'divert' || fam === 'merge')
+        iFields.appendChild(field('Largo (m)', c.length, v => { c.length = Math.max(0.3, v); upd(); }));
+      if (fam === 'curve') iFields.appendChild(field('Radio (m)', c.radius, v => { c.radius = Math.max(0.4, v); upd(); }));
+      if (fam === 'curve' || fam === 'transfer' || fam === 'divert' || fam === 'merge')
+        iFields.appendChild(field('Ángulo (°)', c.angleDeg, v => { c.angleDeg = v; upd(); }, 5));
       iFields.appendChild(field('Ancho (m)', c.width, v => { c.width = Math.max(0.2, v); upd(); }));
       iFields.appendChild(field('Altura ingreso (m)', c.entryHeight, v => { c.entryHeight = v; upd(); }, 0.05));
       iFields.appendChild(field('Altura salida (m)', c.exitHeight ?? c.entryHeight, v => { c.exitHeight = v; upd(); }, 0.05));
@@ -215,10 +227,14 @@
       iFields.appendChild(field('Pos Z (m)', selected.pose.z, v => { selected.pose.z = v; upd(); }, 0.25));
       iFields.appendChild(field('Rotación (°)', Math.round(selected.pose.rot * 180 / Math.PI), v => { selected.pose.rot = v * Math.PI / 180; upd(); }, 15));
     }
-    // al mover/reconfigurar una pieza, vuelve a pegar las que cuelgan de ella (snap en cascada)
+    // al mover/reconfigurar una pieza, re-pega en cascada las que cuelgan (solo las de un
+    // solo padre; un merge con dos entradas no puede seguir a ambas).
     function resnap(inst) {
-      const outs = graph.links.filter(l => l.from === inst.id);
-      for (const l of outs) { lib.connect(graph, inst.id, l.to); resnap(byId(l.to)); }
+      for (const l of graph.links.filter(l => l.from === inst.id)) {
+        if (graph.links.filter(x => x.to === l.to).length > 1) continue;
+        lib.connect(graph, inst.id, l.to, { fromNode: l.fromNode, toNode: l.toNode, snapWhich: 'to' });
+        resnap(byId(l.to));
+      }
     }
     document.getElementById('iDel').onclick = () => {
       if (!selected) return;
@@ -236,9 +252,12 @@
       if (connectMode) {
         const hit = raycaster.intersectObjects(nodeRoot.children, false)[0];
         if (!hit) return;
-        const { instId, nodeKind } = hit.object.userData;
-        if (!connectFrom) { if (nodeKind === 'out') { connectFrom = instId; showHint('Ahora toca el nodo de ENTRADA (verde) de la otra pieza'); } else showHint('Empieza por un nodo de SALIDA (azul)'); }
-        else { if (nodeKind === 'in' && instId !== connectFrom) { lib.connect(graph, connectFrom, instId); connectFrom = null; setConnect(false); rebuild(); } }
+        const { instId, nodeKey, isExit } = hit.object.userData;
+        if (!connectFrom) { if (isExit) { connectFrom = { instId, nodeKey }; showHint('Ahora toca el nodo de ENTRADA (verde) de la otra pieza'); } else showHint('Empieza por un nodo de SALIDA (azul)'); }
+        else if (!isExit && instId !== connectFrom.instId) {
+          lib.connect(graph, connectFrom.instId, instId, { fromNode: connectFrom.nodeKey, toNode: nodeKey });
+          connectFrom = null; setConnect(false); rebuild();
+        }
         return;
       }
       const hit = raycaster.intersectObjects(convRoot.children, true)[0];
@@ -251,6 +270,26 @@
     document.getElementById('bValidate').onclick = () => validateHud(true);
     document.getElementById('bClear').onclick = () => { stopSim(); graph.instances = []; graph.links = []; selected = null; renderInspector(); rebuild(); };
     document.getElementById('bRun').onclick = () => running ? stopSim() : startSim();
+
+    // guardar / cargar layout (JSON)
+    document.getElementById('bSave').onclick = () => {
+      const blob = new Blob([lib.serialize(graph)], { type: 'application/json' });
+      const a = document.getElementById('dl'); a.href = URL.createObjectURL(blob); a.download = 'layout.json'; a.click();
+      try { localStorage.setItem('builder.layout', lib.serialize(graph)); } catch (e) {}
+      showHint('Layout guardado (descarga + localStorage)'); setTimeout(() => showHint(''), 2500);
+    };
+    document.getElementById('bLoad').onclick = () => document.getElementById('fileIn').click();
+    document.getElementById('fileIn').onchange = e => {
+      const f = e.target.files[0]; if (!f) return;
+      const r = new FileReader(); r.onload = () => loadGraph(r.result); r.readAsText(f); e.target.value = '';
+    };
+    function loadGraph(json) {
+      try {
+        const g = lib.hydrate(json); stopSim();
+        graph.instances = g.instances; graph.links = g.links; selected = null; renderInspector(); rebuild();
+        showHint(`Cargado: ${g.instances.length} piezas`); setTimeout(() => showHint(''), 2500);
+      } catch (err) { showHint('JSON inválido: ' + err.message); }
+    }
 
     function startSim() {
       if (!graph.instances.length) { showHint('Añade al menos una pieza'); return; }
@@ -291,21 +330,75 @@
       for (const [id, m] of boxPool) if (!seen.has(id)) { boxRoot.remove(m); boxPool.delete(id); }
     }
 
-    // ---------- loop ----------
+    // ---------- VR (WebXR · Meta Quest): recorre la planta que armaste ----------
+    // RIG/dolly con cámara + 2 controles. Locomoción: stick izq camina (mirada),
+    // stick der gira 45° (histéresis, pivot en el visor), gatillo = teletransporte.
+    const rig = new THREE.Group(); rig.add(camera); scene.add(rig);
+    const VRC = { move: 2.0, snap: Math.PI / 4, on: 0.7, off: 0.3, dead: 0.15, maxTp: 14, vigK: 0.55, turned: false };
+    const _U = new THREE.Vector3(0, 1, 0), _a = new THREE.Vector3(), _b = new THREE.Vector3(), _c = new THREE.Vector3(), _m = new THREE.Matrix4();
+    const tpMark = new THREE.Mesh(new THREE.RingGeometry(0.18, 0.26, 24), new THREE.MeshBasicMaterial({ color: 0x2ee56a, side: THREE.DoubleSide }));
+    tpMark.rotation.x = -Math.PI / 2; tpMark.visible = false; scene.add(tpMark);
+    const vig = new THREE.Mesh(new THREE.RingGeometry(0.55, 3.5, 24), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0, side: THREE.DoubleSide, depthTest: false }));
+    vig.position.z = -0.6; vig.renderOrder = 999; camera.add(vig);
+    const xrCtrls = [];
+    for (let i = 0; i < 2; i++) {
+      const ct = renderer.xr.getController(i);
+      const ray = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1)]), new THREE.LineBasicMaterial({ color: 0x4da3ff }));
+      ray.visible = false; ct.add(ray); ct.userData.ray = ray;
+      ct.add(new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.028, 0.12, 10), new THREE.MeshStandardMaterial({ color: 0xe8e8e8 })).rotateX(Math.PI / 2));
+      ct.addEventListener('connected', e => { ct.userData.src = e.data; });
+      ct.addEventListener('selectstart', () => { ct.userData.aim = true; ray.visible = true; });
+      ct.addEventListener('selectend', () => {
+        ct.userData.aim = false; ray.visible = false; tpMark.visible = false;
+        const t = ct.userData.tp; ct.userData.tp = null;
+        if (t) { camera.getWorldPosition(_a); rig.position.x += t.x - _a.x; rig.position.z += t.z - _a.z; }
+      });
+      rig.add(ct); xrCtrls.push(ct);
+    }
+    if (renderer.xr.setReferenceSpaceType) renderer.xr.setReferenceSpaceType('local-floor');
+    renderer.xr.addEventListener('sessionstart', () => { controls.enabled = false; rig.position.set(2, 0, -2); rig.rotation.y = 0; renderer.setPixelRatio(1); if (renderer.xr.setFoveation) renderer.xr.setFoveation(1); });
+    renderer.xr.addEventListener('sessionend', () => { controls.enabled = true; rig.position.set(0, 0, 0); rig.rotation.y = 0; vig.material.opacity = 0; });
+    function xrUpdate(dt) {
+      if (!renderer.xr.isPresenting) return;
+      const session = renderer.xr.getSession(); let moving = false;
+      if (session) for (const src of session.inputSources) {
+        if (!src.gamepad || !src.gamepad.axes) continue;
+        const ax = src.gamepad.axes, x = ax.length > 2 ? ax[2] : (ax[0] || 0), y = ax.length > 3 ? ax[3] : (ax[1] || 0);
+        if (src.handedness === 'right') {
+          if (Math.abs(x) > VRC.on && !VRC.turned) { VRC.turned = true; const a = -Math.sign(x) * VRC.snap; camera.getWorldPosition(_a); const px = rig.position.x - _a.x, pz = rig.position.z - _a.z, ca = Math.cos(a), sa = Math.sin(a); rig.position.x = _a.x + px * ca + pz * sa; rig.position.z = _a.z - px * sa + pz * ca; rig.rotation.y += a; }
+          else if (Math.abs(x) < VRC.off) VRC.turned = false;
+        } else if (Math.hypot(x, y) > VRC.dead) { moving = true; camera.getWorldDirection(_a); _a.y = 0; _a.normalize(); _b.crossVectors(_a, _U); rig.position.addScaledVector(_a, -y * VRC.move * dt).addScaledVector(_b, x * VRC.move * dt); }
+      }
+      const vt = moving ? VRC.vigK : 0; vig.material.opacity += (vt - vig.material.opacity) * Math.min(1, dt * 6);
+      for (const ct of xrCtrls) {
+        if (!ct.userData.aim) continue;
+        _m.identity().extractRotation(ct.matrixWorld); _b.set(0, 0, -1).applyMatrix4(_m); _a.setFromMatrixPosition(ct.matrixWorld);
+        let hit = false; if (_b.y < -0.08) { const t = -_a.y / _b.y; if (t > 0 && t < VRC.maxTp) { _c.copy(_a).addScaledVector(_b, t); hit = true; } }
+        if (hit) { ct.userData.tp = { x: _c.x, z: _c.z }; tpMark.position.set(_c.x, 0.02, _c.z); tpMark.visible = true; }
+        else { ct.userData.tp = null; tpMark.visible = false; }
+      }
+    }
+    const vrBtn = VRButton.createButton(renderer);
+    Object.assign(vrBtn.style, { position: 'fixed', right: '10px', bottom: '64px', left: 'auto', width: 'auto' });
+    document.body.appendChild(vrBtn);
+
+    // ---------- loop (setAnimationLoop: requerido por WebXR) ----------
     addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
     let last = 0;
-    function loop(ts) {
-      requestAnimationFrame(loop);
+    renderer.setAnimationLoop(ts => {
       const dt = Math.min(0.05, (ts - last) / 1000 || 0.016); last = ts;
       if (running && sim) { for (let k = 0; k < 3; k++) sim.step(dt); drawBoxes(); validateHud(); }
-      controls.update(); renderer.render(scene, camera);
-    }
-    requestAnimationFrame(loop);
+      xrUpdate(dt);
+      if (!renderer.xr.isPresenting) controls.update();
+      renderer.render(scene, camera);
+    });
 
-    // semilla de ejemplo: una recta TA para que no abra vacío
-    addPiece('TA');
-    showHint('Toca piezas de la biblioteca (izq). Selecciona para configurar. 🔗 conecta nodos. ▶ simula.');
-    setTimeout(() => showHint(''), 6000);
+    // restaura el último layout (localStorage) o siembra una recta TA
+    let seeded = false;
+    try { const saved = localStorage.getItem('builder.layout'); if (saved) { loadGraph(saved); seeded = true; } } catch (e) {}
+    if (!seeded) { addPiece('TA'); }
+    showHint('Biblioteca (izq) · selecciona para configurar · 🔗 conecta nodos · ▶ simula · 💾/📂 guarda-carga · ENTER VR (Quest)');
+    setTimeout(() => showHint(''), 7000);
   </script>
 </body>
 </html>

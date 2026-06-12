@@ -12,24 +12,30 @@
 //   import { createConveyorLibrary } from './catalog.js';
 //   const lib = createConveyorLibrary();
 //   const g = { instances: [], links: [] };
-//   g.instances.push(lib.place('TA',  { x:0,  z:0, rot:0 }, { length:6 }));
-//   g.instances.push(lib.place('T90', null,               { }));      // se autoconecta por nodos
-//   lib.connect(g, g.instances[0].id, g.instances[1].id);             // out de A -> in de B (con snap)
-//   const issues = lib.validate(g);                 // reglas de diseño (pitch, inclinación, ...)
-//   const model  = lib.graphToModel(g);             // { meta, segments } -> new ConveyorSim(model)
+//   g.instances.push(lib.place('TA',  { x:0, z:0, rot:0 }, { length:6 }));
+//   g.instances.push(lib.place('DV90'));                       // desviador 1->2 (out, out2)
+//   lib.connect(g, g.instances[0].id, g.instances[1].id);     // out de A -> in de B (con snap)
+//   const issues = lib.validate(g);                            // reglas de diseño
+//   const model  = lib.graphToModel(g);                        // {meta, segments} para ConveyorSim
+//   const json   = lib.serialize(g);                           // guardar; lib.hydrate(json) -> grafo
 
-const FPM = 0.00508;            // 1 pie/min = 0.00508 m/s (para traducir velocidades comerciales)
+const FPM = 0.00508;            // 1 pie/min = 0.00508 m/s (velocidades comerciales)
 const IN = 0.0254;             // 1 pulgada
 const W24 = 24 * IN;           // ancho nominal 24"  ≈ 0.61 m
 const ROLLER19 = 1.9 * IN;     // rodillo Ø1.9"      ≈ 0.048 m
 const BOX = [0.40, 0.13, 0.30];// caja de referencia [largo, alto, ancho] (m)
 const GAP_MIN = 0.05;          // holgura mínima entre cajas (cero presión)
 
+// ───────────────────────── helpers de geometría ─────────────────────────
+const deg = d => (d || 0) * Math.PI / 180;
+const dirOf = rot => [Math.cos(rot), Math.sin(rot)];
+const dist2 = (a, b) => Math.hypot(b[0] - a[0], b[1] - a[1]);
+
 // ───────────────────────── FAMILIAS cinemáticas (lo que el motor entiende) ─────────────
-// Cada familia sabe construir su(s) segmento(s) y sus nodos in/out a partir de una pose
-// {x,z,rot} y una config {length,width,speed,pitch,entryHeight,exitHeight,angleDeg,radius}.
+// Cada familia construye: nodes(pose,cfg) -> {in,out,...}; segments(id,pose,cfg) -> [seg];
+// entrySeg(id,key)/exitSeg(id,key) -> id de segmento por nodo (para enrutar enlaces).
 const FAMILIES = {
-  // Recta: banda o rodillo en línea. Inclina si entryHeight≠exitHeight.
+  // Recta (banda/rodillo en línea). Inclina si entryHeight≠exitHeight.
   straight: {
     nodes(pose, c) {
       const d = dirOf(pose.rot), a = [pose.x, pose.z];
@@ -41,15 +47,16 @@ const FAMILIES = {
       return [{ id, geom: { type: 'straight', from: n.in.p, to: n.out.p },
         height: [c.entryHeight, c.exitHeight], speed: c.speed, pitch: c.pitch }];
     },
+    entrySeg: id => id, exitSeg: id => id,
   },
-  // Curva (banda modular LBP / curva 190): arco de `angleDeg`, radio = radius. Plana.
+
+  // Curva (banda modular LBP / curva 190): arco `angleDeg`, radio `radius`. Plana.
   curve: {
     nodes(pose, c) {
       const a = [pose.x, pose.z], sweep = deg(c.angleDeg) * (c.cw ? -1 : 1);
       const nrm = c.cw ? [Math.sin(pose.rot), -Math.cos(pose.rot)] : [-Math.sin(pose.rot), Math.cos(pose.rot)];
       const center = [a[0] + c.radius * nrm[0], a[1] + c.radius * nrm[1]];
-      const a0 = Math.atan2(a[1] - center[1], a[0] - center[0]);
-      const a1 = a0 + sweep;
+      const a0 = Math.atan2(a[1] - center[1], a[0] - center[0]), a1 = a0 + sweep;
       const out = [center[0] + c.radius * Math.cos(a1), center[1] + c.radius * Math.sin(a1)];
       return { in: { p: a, dir: pose.rot }, out: { p: out, dir: pose.rot + sweep }, _center: center, _a0: a0, _a1: a1 };
     },
@@ -58,7 +65,9 @@ const FAMILIES = {
       return [{ id, geom: { type: 'arc', center: n._center, radius: c.radius, a0: n._a0, a1: n._a1 },
         height: c.entryHeight, speed: c.speed, pitch: c.pitch }];
     },
+    entrySeg: id => id, exitSeg: id => id,
   },
+
   // Transferencia (90°/30°/E24SS): tramo corto que GIRA el flujo `angleDeg`. Plana.
   transfer: {
     nodes(pose, c) {
@@ -73,12 +82,50 @@ const FAMILIES = {
       return [{ id, geom: { type: 'polyline', points: [n.in.p, n._mid, n.out.p] },
         height: c.entryHeight, speed: c.speed, pitch: c.pitch }];
     },
+    entrySeg: id => id, exitSeg: id => id,
+  },
+
+  // Desviador 1->2: celda recta con salida que CONTINÚA (out) y un SPUR que desvía
+  // a `angleDeg` (out2). El motor reparte por hueco (round-robin) entre continuar y
+  // desviar. Dos segmentos: cell + cell__br.
+  divert: {
+    nodes(pose, c) {
+      const d0 = dirOf(pose.rot), a = [pose.x, pose.z];
+      const cEnd = [a[0] + c.length * d0[0], a[1] + c.length * d0[1]];
+      const mid = [a[0] + c.length * 0.5 * d0[0], a[1] + c.length * 0.5 * d0[1]];
+      const r2 = pose.rot + deg(c.angleDeg) * (c.cw ? -1 : 1);
+      const d2 = dirOf(r2), brEnd = [mid[0] + (c.branch || c.length) * d2[0], mid[1] + (c.branch || c.length) * d2[1]];
+      return { in: { p: a, dir: pose.rot }, out: { p: cEnd, dir: pose.rot }, out2: { p: brEnd, dir: r2 }, _mid: mid };
+    },
+    segments(id, pose, c) {
+      const n = this.nodes(pose, c), br = id + '__br';
+      return [
+        { id, geom: { type: 'straight', from: n.in.p, to: n.out.p }, height: c.entryHeight, speed: c.speed, pitch: c.pitch, next: [br] },
+        { id: br, geom: { type: 'polyline', points: [n._mid, n.out2.p] }, height: c.entryHeight, speed: c.speed, pitch: c.pitch },
+      ];
+    },
+    entrySeg: id => id,
+    exitSeg: (id, key) => key === 'out2' ? id + '__br' : id,
+  },
+
+  // Merge 2->1: dos entradas (in, in2 a `angleDeg`) que convergen al tronco (out).
+  // Ambas entradas mapean al inicio del tronco; el motor evita solape por hueco (R4).
+  merge: {
+    nodes(pose, c) {
+      const d0 = dirOf(pose.rot), a = [pose.x, pose.z];
+      const out = [a[0] + c.length * d0[0], a[1] + c.length * d0[1]];
+      const r2 = pose.rot - deg(c.angleDeg) * (c.cw ? -1 : 1);     // segunda línea entra angulada
+      return { in: { p: a, dir: pose.rot }, in2: { p: a, dir: r2 }, out: { p: out, dir: pose.rot } };
+    },
+    segments(id, pose, c) {
+      const n = this.nodes(pose, c);
+      return [{ id, geom: { type: 'straight', from: n.in.p, to: n.out.p }, height: c.entryHeight, speed: c.speed, pitch: c.pitch }];
+    },
+    entrySeg: id => id, exitSeg: id => id,
   },
 };
 
 // ───────────────────────── CATÁLOGO (modelos comerciales 24") ─────────────────────────
-// kind: etiqueta de comportamiento real (transporte/acumulación/...). family: cinemática.
-// defaults: config por defecto. caps: límites de diseño (para el validador).
 const CATALOG = [
   { id: 'E24CT',   label: 'E24CT · Rodillo motorizado 24V (transporte)', group: 'Rodillo MDR (24V)',
     kind: 'roller', family: 'straight',
@@ -145,71 +192,90 @@ const CATALOG = [
     defaults: { length: 1.5, angleDeg: 30, width: W24, speed: 75 * FPM, pitch: BOX[0] + GAP_MIN, entryHeight: 0.9, cw: true },
     caps: { maxInclineDeg: 0, rollerDia: ROLLER19 },
     note: 'Spur a 30° para desvío suave a alta tasa.' },
+
+  { id: 'DV90', label: 'Desviador 90° (1 → 2 salidas)', group: 'Desvío / Empalme',
+    kind: 'divert', family: 'divert',
+    defaults: { length: 1.5, branch: 1.5, angleDeg: 90, width: W24, speed: 70 * FPM, pitch: BOX[0] + GAP_MIN, entryHeight: 0.9, cw: true },
+    caps: { maxInclineDeg: 0, rollerDia: ROLLER19 },
+    note: 'Celda de desvío: continúa recto (out) o desvía a 90° (out2). Reparte por hueco.' },
+
+  { id: 'DV30', label: 'Desviador 30° (1 → 2 salidas)', group: 'Desvío / Empalme',
+    kind: 'divert', family: 'divert',
+    defaults: { length: 1.8, branch: 1.8, angleDeg: 30, width: W24, speed: 75 * FPM, pitch: BOX[0] + GAP_MIN, entryHeight: 0.9, cw: true },
+    caps: { maxInclineDeg: 0, rollerDia: ROLLER19 },
+    note: 'Spur de desvío 30°: continúa recto o desvía suave (alta tasa).' },
+
+  { id: 'MG', label: 'Empalme / merge (2 → 1)', group: 'Desvío / Empalme',
+    kind: 'merge', family: 'merge',
+    defaults: { length: 2.0, angleDeg: 30, width: W24, speed: 70 * FPM, pitch: BOX[0] + GAP_MIN, entryHeight: 0.9, cw: true },
+    caps: { maxInclineDeg: 0, rollerDia: ROLLER19 },
+    note: 'Confluencia de dos líneas (in, in2) a un tronco (out). Sin solape por hueco (R4).' },
 ];
 
-// ───────────────────────── helpers de geometría ─────────────────────────
-function deg(d) { return (d || 0) * Math.PI / 180; }
-function dirOf(rot) { return [Math.cos(rot), Math.sin(rot)]; }
-function angleOf(d) { return Math.atan2(d[1], d[0]); }
-function dist2(a, b) { return Math.hypot(b[0] - a[0], b[1] - a[1]); }
 function modelById(id) { const m = CATALOG.find(x => x.id === id); if (!m) throw new Error('modelo desconocido: ' + id); return m; }
-
-// fusiona defaults del modelo + overrides; rellena entry/exit height coherentes
 function resolveCfg(model, overrides = {}) {
   const c = Object.assign({}, model.defaults, overrides);
   if (c.entryHeight == null) c.entryHeight = 0.9;
-  if (c.exitHeight == null) c.exitHeight = c.entryHeight;     // plano salvo que sea inclinado
+  if (c.exitHeight == null) c.exitHeight = c.entryHeight;
   if (c.width == null) c.width = W24;
   if (c.cw == null) c.cw = model.defaults.cw != null ? model.defaults.cw : true;
   return c;
+}
+// reubica `inst` para que su nodo `key` quede en `targetP` orientado a `targetDir`.
+function snapNodeTo(refresh, inst, key, targetP, targetDir) {
+  inst.pose.rot += (targetDir - inst.nodes[key].dir); refresh(inst);
+  const dp = [targetP[0] - inst.nodes[key].p[0], targetP[1] - inst.nodes[key].p[1]];
+  inst.pose.x += dp[0]; inst.pose.z += dp[1]; refresh(inst);
 }
 
 // ───────────────────────── la función callable ─────────────────────────
 let _instSeq = 0;
 export function createConveyorLibrary() {
+  const refresh = inst => { inst.nodes = FAMILIES[inst.family].nodes(inst.pose, inst.cfg); return inst; };
   const api = {
     BOX, GAP_MIN, units: { FPM, IN, W24, ROLLER19 },
 
-    // catálogo
     models: CATALOG,
     list() { return CATALOG.map(m => ({ id: m.id, label: m.label, group: m.group, kind: m.kind, family: m.family })); },
     groups() { const g = {}; for (const m of CATALOG) (g[m.group] = g[m.group] || []).push(m.id); return g; },
     get(id) { return modelById(id); },
     defaults(id) { return resolveCfg(modelById(id)); },
+    // claves de nodo de un modelo (in/out/out2/in2…), para la UI
+    nodeKeys(id) { const m = modelById(id); const n = FAMILIES[m.family].nodes({ x: 0, z: 0, rot: 0 }, resolveCfg(m)); return Object.keys(n).filter(k => k[0] !== '_'); },
 
-    // crea una INSTANCIA colocada (pose en metros, rot en rad). Devuelve {id,model,family,cfg,pose,nodes}
-    place(modelId, pose, overrides) {
+    place(modelId, pose, overrides, fixedId) {
       const model = modelById(modelId);
       const cfg = resolveCfg(model, overrides);
       const p = Object.assign({ x: 0, z: 0, rot: 0 }, pose || {});
-      const inst = { id: modelId.replace(/[^A-Za-z0-9]/g, '') + '_' + (++_instSeq), model: model.id, family: model.family, kind: model.kind, cfg, pose: p };
-      inst.nodes = FAMILIES[model.family].nodes(p, cfg);
-      return inst;
+      const id = fixedId || (modelId.replace(/[^A-Za-z0-9]/g, '') + '_' + (++_instSeq));
+      const inst = { id, model: model.id, family: model.family, kind: model.kind, cfg, pose: p };
+      refresh(inst); return inst;
     },
+    refresh,
 
-    // recalcula nodos tras mover/configurar una instancia
-    refresh(inst) { inst.nodes = FAMILIES[inst.family].nodes(inst.pose, inst.cfg); return inst; },
-
-    // conecta out(A) -> in(B); por defecto SNAP: reubica B para que su nodo de entrada
-    // coincida con el de salida de A (continuidad C0 en el empalme).
+    // conecta out(A) [fromNode] -> in(B) [toNode]; SNAP por defecto. Si el destino ya
+    // tiene entradas (p.ej. un merge), mueve el ORIGEN en vez del destino.
     connect(graph, fromId, toId, opts = {}) {
       const A = graph.instances.find(i => i.id === fromId), B = graph.instances.find(i => i.id === toId);
       if (!A || !B) throw new Error('connect: instancia no encontrada');
-      if (opts.snap !== false) {
-        B.pose.x = A.nodes.out.p[0]; B.pose.z = A.nodes.out.p[1]; B.pose.rot = A.nodes.out.dir;
-        this.refresh(B);
-      }
+      const fromNode = opts.fromNode || 'out', toNode = opts.toNode || 'in';
       if (!graph.links) graph.links = [];
-      if (!graph.links.some(l => l.from === fromId && l.to === toId)) graph.links.push({ from: fromId, to: toId });
+      if (opts.snap !== false) {
+        const snapFrom = opts.snapWhich ? opts.snapWhich === 'from'
+          : graph.links.some(l => l.to === toId);   // destino ya conectado -> mover el origen
+        if (snapFrom) snapNodeTo(refresh, A, fromNode, B.nodes[toNode].p, B.nodes[toNode].dir);
+        else snapNodeTo(refresh, B, toNode, A.nodes[fromNode].p, A.nodes[fromNode].dir);
+      }
+      if (!graph.links.some(l => l.from === fromId && l.to === toId && l.fromNode === fromNode && l.toNode === toNode))
+        graph.links.push({ from: fromId, to: toId, fromNode, toNode });
       return graph;
     },
-    disconnect(graph, fromId, toId) {
-      graph.links = (graph.links || []).filter(l => !(l.from === fromId && l.to === toId)); return graph;
+    disconnect(graph, fromId, toId, fromNode, toNode) {
+      graph.links = (graph.links || []).filter(l => !(l.from === fromId && l.to === toId &&
+        (!fromNode || l.fromNode === fromNode) && (!toNode || l.toNode === toNode)));
+      return graph;
     },
 
-    // VALIDADOR de reglas de diseño (handoff): pitch ≥ caja+gap, inclinación ≤ tope de
-    // la familia, sin inclinación dentro de curvas/transferencias, nodos empalmados
-    // coincidentes, e instancias sueltas. Devuelve [{level,instId,msg}].
     validate(graph) {
       const issues = [];
       for (const inst of graph.instances) {
@@ -221,45 +287,69 @@ export function createConveyorLibrary() {
         const incl = L > 0 ? Math.atan2(dh, L) * 180 / Math.PI : (dh > 1e-6 ? 999 : 0);
         if (incl > (m.caps.maxInclineDeg || 0) + 1e-6)
           issues.push({ level: 'error', instId: inst.id, msg: `inclinación ${incl.toFixed(1)}° supera el máximo de ${m.label} (${m.caps.maxInclineDeg || 0}°)` });
-        if ((inst.family === 'curve' || inst.family === 'transfer') && dh > 1e-6)
-          issues.push({ level: 'error', instId: inst.id, msg: 'no se permite inclinación dentro de una curva/transferencia' });
-        const links = (graph.links || []);
-        if (!links.some(l => l.from === inst.id || l.to === inst.id))
+        if (inst.family !== 'straight' && dh > 1e-6)
+          issues.push({ level: 'error', instId: inst.id, msg: 'no se permite inclinación dentro de una curva/transferencia/desviador' });
+        if (!(graph.links || []).some(l => l.from === inst.id || l.to === inst.id))
           issues.push({ level: 'warn', instId: inst.id, msg: 'instancia suelta (sin conexiones)' });
       }
       for (const l of (graph.links || [])) {
         const A = graph.instances.find(i => i.id === l.from), B = graph.instances.find(i => i.id === l.to);
         if (!A || !B) { issues.push({ level: 'error', instId: l.from, msg: 'enlace a instancia inexistente' }); continue; }
-        if (dist2(A.nodes.out.p, B.nodes.in.p) > 0.05)
-          issues.push({ level: 'warn', instId: B.id, msg: 'empalme no coincidente (>5 cm): usa snap al conectar' });
+        const ap = A.nodes[l.fromNode || 'out'], bp = B.nodes[l.toNode || 'in'];
+        if (ap && bp && dist2(ap.p, bp.p) > 0.05)
+          issues.push({ level: 'warn', instId: B.id, msg: 'empalme no coincidente (>5 cm): reconecta con snap' });
       }
       return issues;
     },
 
-    // compila el GRAFO a un modelo { meta, segments } para ConveyorSim. Las instancias
-    // sin enlace de entrada se vuelven FUENTE; las sin enlace de salida, SALIDA (sink).
+    // compila el GRAFO a { meta, segments }. Fuente = segmento con grado de entrada 0;
+    // sumidero = segmento con next vacío (tras enrutar enlaces). Robusto para divert/merge.
     graphToModel(graph, opts = {}) {
-      const segments = [];
       const links = graph.links || [];
-      const hasIn = id => links.some(l => l.to === id);
-      const hasOut = id => links.some(l => l.from === id);
+      const segById = new Map();
       for (const inst of graph.instances) {
         const segs = FAMILIES[inst.family].segments(inst.id, inst.pose, inst.cfg);
-        const head = segs[0], tail = segs[segs.length - 1];
-        // encadena segmentos internos (si una familia produjera varios)
-        for (let k = 0; k < segs.length - 1; k++) segs[k].next = [segs[k + 1].id];
-        // enlaces salientes -> next del último segmento
-        const outs = links.filter(l => l.from === inst.id).map(l => l.to);
-        tail.next = (tail.next || []).concat(outs);
-        // fuente / sumidero automáticos
-        if (!hasIn(inst.id)) {
-          const rate = (inst.cfg.rate != null ? inst.cfg.rate : (opts.rate != null ? opts.rate : 1200));
-          head.source = { rate, cv: opts.cv != null ? opts.cv : 0.3, burst: opts.burst != null ? opts.burst : 0.1, max: opts.max };
+        for (const s of segs) { s.next = s.next || []; segById.set(s.id, s); }
+      }
+      // enruta enlaces externos: salida(seg de fromNode).next += entrada(seg de toNode)
+      for (const l of links) {
+        const A = graph.instances.find(i => i.id === l.from), B = graph.instances.find(i => i.id === l.to);
+        if (!A || !B) continue;
+        const fromSeg = FAMILIES[A.family].exitSeg(A.id, l.fromNode || 'out');
+        const toSeg = FAMILIES[B.family].entrySeg(B.id, l.toNode || 'in');
+        const s = segById.get(fromSeg); if (s && !s.next.includes(toSeg)) s.next.push(toSeg);
+      }
+      // grado de entrada por segmento
+      const indeg = new Map(); for (const id of segById.keys()) indeg.set(id, 0);
+      for (const s of segById.values()) for (const nx of s.next) indeg.set(nx, (indeg.get(nx) || 0) + 1);
+      const segments = [];
+      for (const s of segById.values()) {
+        if (indeg.get(s.id) === 0) {   // FUENTE
+          const inst = graph.instances.find(i => FAMILIES[i.family].entrySeg(i.id, 'in') === s.id);
+          const rate = (inst && inst.cfg.rate != null) ? inst.cfg.rate : (opts.rate != null ? opts.rate : 1200);
+          s.source = { rate, cv: opts.cv != null ? opts.cv : 0.3, burst: opts.burst != null ? opts.burst : 0.1, max: opts.max };
         }
-        if (!hasOut(inst.id)) tail.sink = true;
-        for (const s of segs) segments.push(s);
+        if (s.next.length === 0) s.sink = true;   // SUMIDERO
+        segments.push(s);
       }
       return { meta: { name: opts.name || 'builder', boxSize: BOX, rollerDia: ROLLER19, family: 'Hytrol-24' }, segments };
+    },
+
+    // ── persistencia ──
+    serialize(graph) {
+      return JSON.stringify({
+        version: 1,
+        instances: graph.instances.map(i => ({ id: i.id, model: i.model, pose: { x: i.pose.x, z: i.pose.z, rot: i.pose.rot }, cfg: i.cfg })),
+        links: (graph.links || []).map(l => ({ from: l.from, to: l.to, fromNode: l.fromNode || 'out', toNode: l.toNode || 'in' })),
+      }, null, 2);
+    },
+    hydrate(json) {
+      const data = typeof json === 'string' ? JSON.parse(json) : json;
+      const instances = (data.instances || []).map(d => api.place(d.model, d.pose, d.cfg, d.id));
+      for (const d of data.instances || []) {                  // re-sincroniza el contador de ids
+        const num = parseInt(String(d.id).split('_').pop(), 10); if (num > _instSeq) _instSeq = num;
+      }
+      return { instances, links: (data.links || []).map(l => ({ from: l.from, to: l.to, fromNode: l.fromNode || 'out', toNode: l.toNode || 'in' })) };
     },
   };
   return api;
