@@ -4,7 +4,7 @@
   "description": "Motor y render reutilizables para simulación de transportadores (base para un modelador online).",
   "type": "module",
   "scripts": {
-    "test": "node test/harness.mjs",
+    "test": "node test/harness.mjs && node test/catalog.mjs",
     "build": "node build/standalone.mjs",
     "gif": "node build/render-gif.mjs",
     "serve": "http-server . -p 8080"

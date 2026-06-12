@@ -24,14 +24,21 @@ src/
                 procesos (con fatiga), salidas, extracción, enrutado, cuellos.
   layouts.js    Generadores PARAMÉTRICOS de modelos (buildComb, buildDemo) —
                 semilla del modelador: parámetros -> modelo.
+  catalog.js    Biblioteca de conveyors (catálogo Hytrol 24") + createConveyorLibrary():
+                place/connect/validate/graphToModel — arma modelos desde un grafo de nodos.
+  index.js      Entrada única: createSimulator() reúne catálogo + motor + render.
   render.js     Render 3D (Three.js) que consume el estado del motor + HUD + navegación.
 examples/
   index.html    Ejemplo navegable: carga motor+render+layout, panel de control, auto-run.
+  builder.html  Modelador 3D: menú biblioteca de conveyors, piezas configurables
+                (tipo/ancho/largo/altura ingreso-salida/velocidad), nodos conectables, simular.
 test/
   harness.mjs   Validación headless del motor (15 comprobaciones).
+  catalog.mjs   Validación de la biblioteca de conveyors (13 comprobaciones).
 docs/
   principles.md Aprendizajes clave (cero presión, generación, cuellos, render, ...).
   schema.md     Referencia del esquema de layout (el "lenguaje" del modelador).
+  catalog.md    Catálogo Hytrol 24", la función callable y el modelador 3D.
   roadmap.md    Camino hacia el modelador online.
 ```
 
