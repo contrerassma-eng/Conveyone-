@@ -127,6 +127,20 @@ check('params: curva ofrece ángulo y radio', lib.params('190-E24C').some(p => p
 check('params: SBI ofrece inclinación', lib.params('SBI').some(p => p.cfg === 'inclineDeg'));
 check('spec: 190-E24C rodillos cónicos 2.5"→1-11/16"', near(lib.spec('190-E24C').rollerDia, 2.5 * IN) && lib.spec('190-E24C').tapered);
 
+// 7c) una pieza AISLADA no genera cajas (la fuente requiere tener salida)
+const giso = { instances: [lib.place('TA', null, { length: 3 })], links: [] };
+check('graphToModel: pieza aislada no es fuente', !lib.graphToModel(giso).segments.some(s => s.source));
+
+// 7d) ACUMULACIÓN cero presión: al parar el sumidero, el buffer crece y marca _blocked
+const gac = { instances: [], links: [] };
+const af = lib.place('TA', null, { length: 3 }); gac.instances.push(af);
+const ae = lib.place('190-E24', null, { length: 3 }); gac.instances.push(ae); lib.connect(gac, af.id, ae.id);
+const mac = lib.graphToModel(gac, { rate: 40 * 60 }); const eac = new ConveyorSim(mac, { seed: 2 });
+for (let i = 0; i < 1500; i++) eac.step(0.05);
+for (const id of mac.segments.filter(s => s.sink).map(s => s.id)) { const s = eac.segments.get(id); s.sink = false; s.speed = 0; }
+const before = eac.boxes.length; for (let i = 0; i < 1500; i++) eac.step(0.05);
+check('acumulación: parar la salida hace crecer el buffer (cero presión)', eac.boxes.length > before && eac.boxes.some(b => b._blocked));
+
 // 8) GUARDAR / CARGAR (serialize -> hydrate) conserva el grafo y vuelve a compilar
 const json = lib.serialize(gd);
 const g2 = lib.hydrate(json);

@@ -107,7 +107,14 @@ Interfaz navegable (three.js r158, ESM por importmap CDN, igual que `examples/in
   en cada pieza. Con **🔗 Conectar** tocas una salida y luego una entrada → enlace con snap.
   Así armas desvíos (1→2) y empalmes (2→1) tocando los nodos correspondientes.
 - **✓ Validar**: corre las reglas de arriba y las lista.
-- **▶ Simular**: compila el grafo, corre `ConveyorSim` y anima las cajas por la cadena.
+- **▶ Simular**: compila el grafo y corre `ConveyorSim`. Controles del simulador (según
+  referencias de simulación de transportadores — FlexSim, Cisco-Eagle, SmartLoadingHub):
+  - **Tasa** (c/min) seteable en vivo — la llegada de producto.
+  - **Velocidad** de reloj 1×/3×/6×.
+  - **⏸ Salida**: detiene el sumidero → las cajas **se acumulan sin presión** (demuestra el
+    buffer/acumulación de cero presión; las cajas retenidas se pintan en naranja).
+  - HUD con KPIs: **entrada vs salida (c/min)**, entregadas, en sistema, **acumulando**, y
+    **cuello de botella** detectado. (Una pieza aislada no genera producto.)
 - **💾 / 📂 Guardar / Cargar**: exporta/importa el layout como JSON (`lib.serialize` /
   `lib.hydrate`); además guarda el último layout en `localStorage` y lo restaura al abrir.
 - **ENTER VR** (Meta Quest): recorre a escala real la planta que armaste. Stick izquierdo

@@ -184,14 +184,18 @@ export class ConveyorSim {
       let frontLimit = Infinity; // límite que impone la caja de adelante
       for (let i = 0; i < seg.boxes.length; i++) {
         const box = seg.boxes[i];
+        const oldS = box.s;
         // proceso: si la caja está retenida en una estación, no avanza
         if (this._heldByStation(seg, box, dt)) {
+          box._blocked = true;
           frontLimit = box.s - pitch;
           continue;
         }
         const target = Math.min(box.s + seg.speed * dt, seg.length, frontLimit - 0);
         box.s = Math.max(box.s, Math.min(target, frontLimit));
         if (box.s > seg.length) box.s = seg.length;
+        // acumulación / cero presión: avanzó menos de lo comandado (frenada por la de adelante)
+        box._blocked = seg.speed > 0 && (box.s - oldS) < seg.speed * dt * 0.5 && box.s < seg.length - 1e-3;
         frontLimit = box.s - pitch; // la siguiente no puede pasar de aquí
       }
     }

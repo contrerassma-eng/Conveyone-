@@ -30,9 +30,11 @@ const CSS = `
   #insp input { background:#121821; color:#fff; border:1px solid var(--line); border-radius:6px; padding:5px; font-size:11px; text-align:right; }
   #insp .note { font-size:10px; color:#7f8ca3; line-height:1.35; margin-top:6px; }
   #insp .del { width:100%; margin-top:8px; background:#3a1620; color:#ffb4b4; border:1px solid #5a2330; border-radius:8px; padding:7px; cursor:pointer; font-size:11px; }
-  #bar { left:50%; transform:translateX(-50%); bottom:12px; display:flex; gap:6px; padding:7px; }
+  #bar { left:50%; transform:translateX(-50%); bottom:12px; display:flex; gap:6px; padding:7px; align-items:center; flex-wrap:wrap; max-width:96vw; }
   #bar button { background:#1b2330; color:var(--fg); border:1px solid var(--line); border-radius:8px; padding:8px 12px; cursor:pointer; font:600 12px system-ui; }
   #bar button.on { border-color:var(--accent); color:#fff; background:#1e3559; }
+  #bar .ctl { display:flex; align-items:center; gap:4px; font-size:11px; color:#aeb9c6; border-left:1px solid var(--line); padding-left:8px; }
+  #bar .ctl input, #bar .ctl select { background:#121821; color:#fff; border:1px solid var(--line); border-radius:6px; padding:5px; font-size:11px; width:54px; }
   #hud { left:10px; bottom:12px; font:11px/1.5 monospace; color:#cdd6e0; padding:8px 10px; max-width:300px; white-space:pre-wrap; }
   #hint { position:fixed; top:10px; left:50%; transform:translateX(-50%); z-index:25; background:rgba(20,40,80,.9); border:1px solid var(--accent); color:#fff; padding:6px 12px; border-radius:8px; font-size:12px; display:none; }
 `;
@@ -54,6 +56,9 @@ const SCAFFOLD = `
     <button id="bConnect">🔗 Conectar</button>
     <button id="bValidate">✓ Validar</button>
     <button id="bRun">▶ Simular</button>
+    <button id="bStopOut" title="Detener la salida: las cajas se acumulan (cero presión)">⏸ Salida</button>
+    <span class="ctl">Tasa <input id="cRate" type="number" min="1" max="120" step="1" value="30"> c/min</span>
+    <span class="ctl">Veloc. <select id="cSpeed"><option value="1">1×</option><option value="3" selected>3×</option><option value="6">6×</option></select></span>
     <button id="bSave">💾</button><button id="bLoad">📂</button><button id="bClear">🧹</button>
   </div>
   <input id="fileIn" type="file" accept="application/json" style="display:none">
@@ -399,12 +404,24 @@ export function initBuilder() {
     } catch (err) { showHint('JSON inválido: ' + err.message); }
   }
 
+  // ── parámetros de simulación (tasa de llegada y velocidad de reloj) ──
+  let simRate = 30, simSpeed = 3, stopOut = false, sinkSegs = [];
+  const cRate = document.getElementById('cRate'), cSpeed = document.getElementById('cSpeed');
+  cRate.onchange = () => { simRate = Math.max(1, +cRate.value || 30); if (sim) for (const s of sim.segments.values()) if (s.source) s.source.rate = simRate * 60; };
+  cSpeed.onchange = () => { simSpeed = +cSpeed.value || 3; };
+  document.getElementById('bStopOut').onclick = e => { stopOut = !stopOut; e.target.classList.toggle('on', stopOut); applyStopOut(); };
+  function applyStopOut() {   // detener salida = los sumideros dejan de consumir -> acumulación cero presión
+    if (!sim) return;
+    for (const id of sinkSegs) { const s = sim.segments.get(id); if (!s) continue; if (stopOut) { s.sink = false; s.speed = 0; } else { s.sink = true; s.speed = s.raw && s.raw.speed != null ? s.raw.speed : 0.5; } }
+  }
+
   function startSim() {
     if (!graph.instances.length) { showHint('Añade al menos una pieza'); return; }
     const issues = lib.validate(graph);
     if (issues.some(i => i.level === 'error')) { validateHud(true); showHint('Corrige los errores antes de simular'); return; }
-    const model = lib.graphToModel(graph, { rate: 1200, cv: 0.25, burst: 0.1 });
-    sim = new ConveyorSim(model, { seed: 7 }); running = true;
+    const model = lib.graphToModel(graph, { rate: simRate * 60, cv: 0.25, burst: 0.1 });   // tasa en c/min → c/hora
+    sinkSegs = model.segments.filter(s => s.sink).map(s => s.id);
+    sim = new ConveyorSim(model, { seed: 7 }); running = true; applyStopOut();
     document.getElementById('bRun').textContent = '⏹ Detener'; document.getElementById('bRun').classList.add('on');
   }
   function stopSim() {
@@ -415,11 +432,17 @@ export function initBuilder() {
   function validateHud(verbose) {
     const issues = lib.validate(graph);
     const errs = issues.filter(i => i.level === 'error'), warns = issues.filter(i => i.level === 'warn');
-    let t = `piezas ${graph.instances.length} · enlaces ${graph.links.length}\n`;
-    t += errs.length ? `✗ ${errs.length} error(es)` : '✓ sin errores';
-    t += warns.length ? ` · ⚠ ${warns.length} avisos` : '';
+    let t = `piezas ${graph.instances.length} · enlaces ${graph.links.length} · ` + (errs.length ? `✗ ${errs.length} error(es)` : '✓ sin errores') + (warns.length ? ` · ⚠ ${warns.length}` : '');
     if (verbose && issues.length) t += '\n' + issues.map(i => `${i.level === 'error' ? '✗' : '⚠'} ${i.msg}`).join('\n');
-    if (running && sim) { const s = sim.stats; t += `\n▶ gen ${s.generated} · entreg ${s.delivered} · en sistema ${s.inSystem}`; }
+    if (running && sim) {
+      const s = sim.stats, tput = (s.throughput / 60);   // motor da c/hora → mostrar c/min
+      const accum = sim.boxes.filter(b => b._blocked).length;
+      t += `\n▶ entrada ${simRate} c/min · salida ${tput.toFixed(1)} c/min`;
+      t += `\n   entregadas ${s.delivered} · en sistema ${s.inSystem} · acumulando ${accum}`;
+      const bn = (sim.bottlenecks && sim.bottlenecks()) || [];
+      if (bn.length) t += `\n   ⚠ cuello: ${bn.map(b => b.segId || b.id || b).slice(0, 2).join(', ')}`;
+      if (stopOut) t += `\n   ⏸ salida detenida (buffer acumulando)`;
+    }
     document.getElementById('hud').textContent = t;
   }
 
@@ -430,8 +453,9 @@ export function initBuilder() {
     const [bw, bh, bd] = fr.boxSize;
     for (const bx of fr.boxes) {
       seen.add(bx.id); let m = boxPool.get(bx.id);
-      if (!m) { m = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, bd), new THREE.MeshStandardMaterial({ color: 0xffa94d, roughness: 0.7 })); boxRoot.add(m); boxPool.set(bx.id, m); }
-      m.position.set(bx.x, bx.y + bh / 2 + 0.04, bx.z); m.rotation.y = Math.atan2(bx.dx, bx.dz);
+      if (!m) { m = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, bd), new THREE.MeshStandardMaterial({ roughness: 0.7 })); boxRoot.add(m); boxPool.set(bx.id, m); }
+      m.material.color.setHex(bx.held ? 0xff7043 : 0xffc04d);            // retenida vs en marcha
+      m.position.set(bx.x, bx.y + 0.025 + bh / 2, bx.z); m.rotation.y = Math.atan2(bx.dx, bx.dz);  // sobre la superficie (TOR)
     }
     for (const [id, m] of boxPool) if (!seen.has(id)) { boxRoot.remove(m); boxPool.delete(id); }
   }
@@ -491,7 +515,7 @@ export function initBuilder() {
   let last = 0;
   renderer.setAnimationLoop(ts => {
     const dt = Math.min(0.05, (ts - last) / 1000 || 0.016); last = ts;
-    if (running && sim) { for (let k = 0; k < 3; k++) sim.step(dt); drawBoxes(); validateHud(); }
+    if (running && sim) { const n = Math.max(1, Math.round(simSpeed)); for (let k = 0; k < n; k++) sim.step(dt); drawBoxes(); validateHud(); }
     xrUpdate(dt);
     if (!renderer.xr.isPresenting) controls.update();
     renderer.render(scene, camera);

@@ -430,12 +430,14 @@ export function createConveyorLibrary() {
       for (const s of segById.values()) for (const nx of s.next) indeg.set(nx, (indeg.get(nx) || 0) + 1);
       const segments = [];
       for (const s of segById.values()) {
-        if (indeg.get(s.id) === 0) {   // FUENTE
+        // FUENTE = sin entrada PERO con salida (una pieza aislada no genera cajas)
+        if (indeg.get(s.id) === 0 && s.next.length > 0) {
           const inst = graph.instances.find(i => FAMILIES[i.family].entrySeg(i.id, 'in') === s.id);
           const rate = (inst && inst.cfg.rate != null) ? inst.cfg.rate : (opts.rate != null ? opts.rate : 1200);
           s.source = { rate, cv: opts.cv != null ? opts.cv : 0.3, burst: opts.burst != null ? opts.burst : 0.1, max: opts.max };
+          s._isSource = true;
         }
-        if (s.next.length === 0) s.sink = true;   // SUMIDERO
+        if (s.next.length === 0 && indeg.get(s.id) > 0) s.sink = true;   // SUMIDERO (recibe algo)
         segments.push(s);
       }
       return { meta: { name: opts.name || 'builder', boxSize: BOX, rollerDia: ROLLER19, family: 'Hytrol-24' }, segments };
