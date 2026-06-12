@@ -28,30 +28,31 @@ function strip(src) {
     .join('\n');
 }
 
-// ---- layout semilla: la estación Niverplast MEJORADA (se construye con la librería real) ----
+// ---- layout semilla: la estación Niverplast MEJORADA (main line RECTO, sin descuadre) ----
 function buildStationSeed() {
   const lib = createConveyorLibrary();
   const g = { instances: [], links: [] };
-  const add = (id, ov) => { const last = g.instances[g.instances.length - 1]; const i = lib.place(id, null, ov); g.instances.push(i); if (last) lib.connect(g, last.id, i.id); return i; };
-  // FLUJO: curva de llegada → LBP (Intralox S1000, acumula) → Niverplast (guillotina 15 c/min)
-  //        → gravedad OD30/3" con mini-mesas → conveyor final de salida
-  add('190-E24C', { angleDeg: 60, radius: 1.1, cw: true });
-  const lbp = add('LBP', { length: 5 });                                 // acumulación (lo celeste, S1000)
-  add('NIVERPLAST', { meterPerMin: 15 });                                // guillotina-tope, metera 15 c/min
-  const grr = add('GRR', { length: 5 });                                  // gravedad 700 mm + mini-mesas
-  add('TA', { length: 2.5 });                                            // conveyor final (saca las cajas)
-  // alimentación de prueba en la curva (para ver la acumulación en la LBP)
-  lib.place('TA');  // (no usado; la fuente la pone el grafo en la 1ª pieza)
-  // ESTACIÓN MANUAL junto a la gravedad: 2 mesas (una por lado), rack de tapas, 4 operarios 2x lado
-  const n = grr.nodes.in, dir = n.dir, fx = Math.cos(dir), fz = Math.sin(dir), px = Math.sin(dir), pz = -Math.cos(dir);
-  const along = (d) => [n.p[0] + fx * d, n.p[1] + fz * d];
+  const PI2 = Math.PI / 2;
+  // MAIN LINE recto a lo largo de +z (rot = 90°): LBP (Intralox S1000, acumula) →
+  // Niverplast (guillotina 15 c/min) → gravedad OD30/3" + mini-mesas → conveyor final.
+  const lbp = lib.place('LBP', { x: 0, z: 0, rot: PI2 }, { length: 5 }); g.instances.push(lbp);
+  const niv = lib.place('NIVERPLAST', null, { meterPerMin: 15 }); g.instances.push(niv); lib.connect(g, lbp.id, niv.id);
+  const grr = lib.place('GRR', null, { length: 5 }); g.instances.push(grr); lib.connect(g, niv.id, grr.id);
+  const ta = lib.place('TA', null, { length: 2.5 }); g.instances.push(ta); lib.connect(g, grr.id, ta.id);
+  // CURVA de llegada que ALIMENTA la LBP desde un costado SIN doblar el main line
+  // (se mueve la curva para que su salida coincida con la entrada de la LBP).
+  const cv = lib.place('190-E24C', null, { angleDeg: 90, radius: 1.1, cw: true });
+  g.instances.push(cv); lib.connect(g, cv.id, lbp.id, { snapWhich: 'from' });
+  // ESTACIÓN MANUAL junto a la gravedad: 2 mesas (una por lado), rack, 4 operarios 2x lado
+  const nz = grr.nodes.in.p, dir = grr.nodes.in.dir, fx = Math.cos(dir), fz = Math.sin(dir), px = Math.sin(dir), pz = -Math.cos(dir);
+  const along = d => [nz[0] + fx * d, nz[1] + fz * d];
   const side = (p, s) => [p[0] + px * s, p[1] + pz * s];
-  const place = (id, p, rot, ov) => g.instances.push(lib.place(id, { x: p[0], z: p[1], rot: rot != null ? rot : dir }, ov));
-  place('INOXTABLE', side(along(2.5), 1.4), dir, { length: 2, width: 0.8 });        // mesa lado +
-  place('INOXTABLE', side(along(2.5), -1.4), dir, { length: 2, width: 0.8 });       // mesa lado −
-  place('LIDRACK', side(along(2.5), 2.4), dir, { length: 3, width: 0.5, entryHeight: 1.3 }); // rack de tapas
-  place('OPERATOR', side(along(1.4), 0.95), 0); place('OPERATOR', side(along(3.6), 0.95), 0);   // 2 operarios lado +
-  place('OPERATOR', side(along(1.4), -0.95), 0); place('OPERATOR', side(along(3.6), -0.95), 0); // 2 operarios lado −
+  const place = (id, p, ov) => g.instances.push(lib.place(id, { x: p[0], z: p[1], rot: dir }, ov));
+  place('INOXTABLE', side(along(2.5), 1.3), { length: 2, width: 0.8 });
+  place('INOXTABLE', side(along(2.5), -1.3), { length: 2, width: 0.8 });
+  place('LIDRACK', side(along(2.5), 2.2), { length: 3, width: 0.5, entryHeight: 1.3 });
+  place('OPERATOR', side(along(1.5), 0.9)); place('OPERATOR', side(along(3.5), 0.9));
+  place('OPERATOR', side(along(1.5), -0.9)); place('OPERATOR', side(along(3.5), -0.9));
   return JSON.parse(lib.serialize(g));
 }
 
