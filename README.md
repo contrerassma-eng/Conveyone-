@@ -26,12 +26,14 @@ src/
                 semilla del modelador: parámetros -> modelo.
   catalog.js    Biblioteca de conveyors (catálogo Hytrol 24") + createConveyorLibrary():
                 place/connect/validate/graphToModel — arma modelos desde un grafo de nodos.
+  builder-ui.js Modelador 3D reutilizable: initBuilder() construye la UI + escena.
   index.js      Entrada única: createSimulator() reúne catálogo + motor + render.
   render.js     Render 3D (Three.js) que consume el estado del motor + HUD + navegación.
+modelador.html  PÁGINA DEDICADA del modelador (raíz), independiente del simulador
+                principal (index.html). Carga src/builder-ui.js. Es la que se publica aparte.
 examples/
   index.html    Ejemplo navegable: carga motor+render+layout, panel de control, auto-run.
-  builder.html  Modelador 3D: menú biblioteca de conveyors, piezas configurables
-                (tipo/ancho/largo/altura ingreso-salida/velocidad), nodos conectables, simular.
+  builder.html  Cáscara de ejemplo del modelador (misma UI que /modelador.html).
 test/
   harness.mjs   Validación headless del motor (15 comprobaciones).
   catalog.mjs   Validación de la biblioteca de conveyors (13 comprobaciones).
