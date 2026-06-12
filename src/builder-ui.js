@@ -609,9 +609,10 @@ export function initBuilder() {
     renderer.render(scene, camera);
   });
 
-  // restaura el último layout (localStorage) o siembra una recta TA
+  // restaura el último layout (localStorage), o el layout EMBEBIDO (build standalone), o una recta TA
   let seeded = false;
   try { const saved = localStorage.getItem('builder.layout'); if (saved) { loadGraph(saved); seeded = true; } } catch (e) {}
+  if (!seeded && typeof window !== 'undefined' && window.__seedLayout) { try { loadGraph(JSON.stringify(window.__seedLayout)); seeded = true; } catch (e) {} }
   if (!seeded) addPiece('TA');
   showHint('Biblioteca (izq) · selecciona para configurar · 🔗 conecta nodos · ▶ simula · 💾/📂 guarda-carga · ENTER VR (Quest)');
   setTimeout(() => showHint(''), 7000);
