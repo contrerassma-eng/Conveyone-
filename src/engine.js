@@ -88,6 +88,8 @@ export class ConveyorSim {
         sort: s.sort || null,        // enrutado por atributo (clasificador / divert)
         pocketBuffer: !!s.pocketBuffer, // buffer de cero presión gobernado por el Virtual Pocket
         color: s.color || null,      // color asociado al tramo (salida por color)
+        // TOMAS a lo largo del tramo: ingresos (inyectan a `at`) y salidas (retiran a `at`)
+        taps: (s.taps || []).map(t => ({ kind: t.kind, at: t.at, rate: t.rate, cv: t.cv != null ? t.cv : 0.3, frac: t.frac != null ? t.frac : 1, _nextGen: 0 })),
         // estado de fuente
         _nextGen: 0,
         _routeIx: 0,
@@ -100,9 +102,10 @@ export class ConveyorSim {
       };
       this.segments.set(s.id, seg);
     }
-    // primeras fuentes: programa el primer arribo
+    // primeras fuentes: programa el primer arribo (incluye tomas de ingreso)
     for (const seg of this.segments.values()) {
       if (seg.source) seg._nextGen = this._genInterval(seg);
+      for (const tp of seg.taps) if (tp.kind === 'in' && tp.rate) tp._nextGen = 60 / tp.rate;
     }
   }
 
@@ -119,8 +122,35 @@ export class ConveyorSim {
     this.time += dt;
     this._generate(dt);
     this._advance(dt);
+    this._tapOut(dt);
     this._transferAndSink();
     this._updateStats(dt);
+  }
+
+  // hay hueco para inyectar en la posición `at` (ninguna caja dentro de un pitch)
+  _roomAt(seg, at) {
+    for (const b of this.boxes) if (b.segId === seg.id && Math.abs(b.s - at) < seg.pitch) return false;
+    return true;
+  }
+  _spawnAt(seg, at) {
+    const box = { id: ++_boxSeq, segId: seg.id, s: Math.min(at, seg.length), held: 0, bornAt: this.time };
+    this.boxes.push(box); this.stats.generated++;
+  }
+  // TOMAS DE SALIDA: cuando una caja cruza `at`, se retira con probabilidad `frac` (divert)
+  _tapOut(dt) {
+    for (const seg of this.segments.values()) {
+      if (!seg.taps.length) continue;
+      for (const box of this.boxes) {
+        if (box.segId !== seg.id) continue;
+        for (let ti = 0; ti < seg.taps.length; ti++) {
+          const tp = seg.taps[ti]; if (tp.kind !== 'out') continue;
+          if (box.s + 1e-9 >= tp.at) {
+            const key = seg.id + '#' + ti; box._tapped = box._tapped || {};
+            if (!box._tapped[key]) { box._tapped[key] = true; if (this.rng() < tp.frac) { box._remove = true; box._delivered = true; break; } }
+          }
+        }
+      }
+    }
   }
 
   _generate(dt) {
@@ -137,6 +167,17 @@ export class ConveyorSim {
         const burst = seg.source.burst || 0;
         const extra = this._genInterval(seg);
         seg._nextGen += (burst > 0 && this.rng() < burst) ? extra * 0.15 : extra;
+      }
+    }
+    // TOMAS DE INGRESO: inyectan cajas a `at` con tasa (c/min) y dispersión propias
+    for (const seg of this.segments.values()) {
+      for (const tp of seg.taps) {
+        if (tp.kind !== 'in' || !tp.rate) continue;
+        tp._nextGen -= dt; let guard = 0;
+        while (tp._nextGen <= 0 && guard++ < 20) {
+          if (this._roomAt(seg, tp.at)) this._spawnAt(seg, tp.at);
+          tp._nextGen += sampleLognormal(this.rng, 60 / tp.rate, tp.cv);
+        }
       }
     }
   }

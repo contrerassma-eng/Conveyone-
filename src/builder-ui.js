@@ -248,6 +248,29 @@ export function initBuilder() {
     }
   }
 
+  // TOMAS: ingreso (verde, flecha al flujo) / salida (rojo, flecha hacia afuera) con su
+  // ángulo al flujo, lado y distancia desde el inicio.
+  const matTapIn = new THREE.MeshStandardMaterial({ color: 0x2ee56a, emissive: 0x0c5a28, emissiveIntensity: 0.5 });
+  const matTapOut = new THREE.MeshStandardMaterial({ color: 0xff6a4d, emissive: 0x5a1a0c, emissiveIntensity: 0.5 });
+  const coneGeo = new THREE.ConeGeometry(0.07, 0.18, 10);
+  function drawTaps(group, inst) {
+    const c = inst.cfg; if (inst.family !== 'straight' || !c.taps || !c.taps.length) return;
+    const p0 = inst.nodes.in.p, p1 = inst.nodes.out.p, d = hdir(p0, p1);
+    for (const tp of c.taps) {
+      const dist = Math.max(0, Math.min(tp.distance || 0, d.L)), t = d.L ? dist / d.L : 0;
+      const bx = p0[0] + (p1[0] - p0[0]) * t, bz = p0[1] + (p1[1] - p0[1]) * t;
+      const h = c.entryHeight + ((c.exitHeight ?? c.entryHeight) - c.entryHeight) * t + TOR;
+      const sd = tp.side === 'R' ? 1 : -1, a = Math.PI * (tp.angleDeg || 30) / 180;
+      const mx = d.dx * Math.cos(a) + sd * d.px * Math.sin(a), mz = d.dz * Math.cos(a) + sd * d.pz * Math.sin(a); // dir de merge/desvío
+      const mat = tp.kind === 'in' ? matTapIn : matTapOut, S = 0.7, sign = tp.kind === 'in' ? -1 : 1;
+      strut(group, [bx, h - 0.05, bz], [bx + sign * S * mx, h - 0.05, bz + sign * S * mz], 0.18, 0.05, mat);  // mini-spur angulado
+      const ball = new THREE.Mesh(new THREE.SphereGeometry(0.07, 12, 12), mat); ball.position.set(bx, h + 0.08, bz); group.add(ball);
+      const av = tp.kind === 'in' ? [d.dx, d.dz] : [mx, mz];                                                  // flecha
+      const cone = new THREE.Mesh(coneGeo, mat); _ax.set(av[0], 0, av[1]).normalize(); _q.setFromUnitVectors(_Y, _ax); cone.quaternion.copy(_q);
+      cone.position.set(bx + av[0] * 0.13, h + 0.08, bz + av[1] * 0.13); group.add(cone);
+    }
+  }
+
   function rebuild() {
     for (const r of [convRoot, nodeRoot, linkRoot]) while (r.children.length) r.remove(r.children[0]);
     for (const inst of graph.instances) {
@@ -256,6 +279,7 @@ export function initBuilder() {
       drawRun(g, inst, poly, sp, sel, true);          // tramo principal (con soportes)
       const br = instBranchPoly(inst);                // spur de los desviadores (sin soportes extra)
       if (br) drawRun(g, inst, br, sp, sel, false);
+      drawTaps(g, inst);                              // tomas de ingreso/salida
       for (const key of lib.nodeKeys(inst.model)) mkNode(inst, key);
     }
     for (const l of graph.links) {
@@ -289,6 +313,27 @@ export function initBuilder() {
     const sel = document.createElement('select'); sel.style.cssText = 'background:#121821;color:#fff;border:1px solid #2a3645;border-radius:6px;padding:4px;font-size:11px';
     for (const o of options) { const val = Array.isArray(o) ? o[1] : o, lab = Array.isArray(o) ? o[0] : o; const e = document.createElement('option'); e.value = String(val); e.textContent = lab; if (String(val) === String(current)) e.selected = true; sel.appendChild(e); }
     sel.onchange = () => on(sel.value); wrap.appendChild(span); wrap.appendChild(sel); return wrap;
+  }
+  // editor de TOMAS de ingreso/salida (solo en tramos rectos)
+  function tapsSection(c, upd) {
+    if (selected.family !== 'straight') return;
+    c.taps = c.taps || [];
+    const hdr = document.createElement('div'); hdr.style.cssText = 'margin-top:8px;border-top:1px solid #243049;padding-top:6px;font-size:11px;color:#9fc3ff'; hdr.textContent = 'Tomas de ingreso / salida';
+    iFields.appendChild(hdr);
+    const bar = document.createElement('div'); bar.style.cssText = 'display:flex;gap:6px;margin:4px 0';
+    const mk = (label, kind) => { const b = document.createElement('button'); b.textContent = label; b.style.cssText = 'flex:1;background:#1b2330;color:#cdd6e0;border:1px solid #2a3645;border-radius:6px;padding:5px;cursor:pointer;font-size:11px'; b.onclick = () => { const mid = Math.max(0.3, (c.length || 4) / 2); c.taps.push(kind === 'in' ? { kind: 'in', side: 'R', angleDeg: 30, distance: mid, ratePerMin: 15, cv: 0.3 } : { kind: 'out', side: 'L', angleDeg: 30, distance: mid, frac: 1 }); upd(); }; return b; };
+    bar.appendChild(mk('+ Ingreso', 'in')); bar.appendChild(mk('+ Salida', 'out')); iFields.appendChild(bar);
+    c.taps.forEach((tp, i) => {
+      const card = document.createElement('div'); card.style.cssText = 'border:1px solid #243049;border-radius:6px;padding:5px;margin:3px 0;background:#10151c';
+      const top = document.createElement('div'); top.style.cssText = 'display:flex;justify-content:space-between;font-size:11px;color:' + (tp.kind === 'in' ? '#2ee56a' : '#ff8a65'); top.innerHTML = '<b>' + (tp.kind === 'in' ? 'Ingreso' : 'Salida') + ' ' + (i + 1) + '</b>';
+      const del = document.createElement('span'); del.textContent = '✕'; del.style.cssText = 'cursor:pointer;color:#9fb0c8'; del.onclick = () => { c.taps.splice(i, 1); upd(); }; top.appendChild(del); card.appendChild(top);
+      card.appendChild(selectField('Lado', [['Izquierda', 'L'], ['Derecha', 'R']], tp.side, v => { tp.side = v; upd(); }));
+      card.appendChild(selectField('Ángulo al flujo', [30, 45], tp.angleDeg, v => { tp.angleDeg = +v; upd(); }));
+      card.appendChild(field('Distancia inicio (m)', tp.distance, v => { tp.distance = Math.max(0, Math.min(v, c.length || 9)); upd(); }, 0.1));
+      if (tp.kind === 'in') { card.appendChild(field('Tasa (c/min)', tp.ratePerMin, v => { tp.ratePerMin = Math.max(0, v); upd(); }, 1)); card.appendChild(field('Dispersión (cv)', tp.cv, v => { tp.cv = Math.max(0, Math.min(2, v)); upd(); }, 0.05)); }
+      else card.appendChild(field('Desvío (%)', Math.round((tp.frac ?? 1) * 100), v => { tp.frac = Math.max(0, Math.min(1, v / 100)); upd(); }, 5));
+      iFields.appendChild(card);
+    });
   }
   const IN_M = 0.0254;
   // construye los controles de los PARÁMETROS PROPIOS del modelo (lib.params)
@@ -342,6 +387,8 @@ export function initBuilder() {
     iFields.appendChild(field('Pos X (m)', selected.pose.x, v => { selected.pose.x = v; upd(); }, 0.25));
     iFields.appendChild(field('Pos Z (m)', selected.pose.z, v => { selected.pose.z = v; upd(); }, 0.25));
     iFields.appendChild(field('Rotación (°)', Math.round(selected.pose.rot * 180 / Math.PI), v => { selected.pose.rot = v * Math.PI / 180; upd(); }, 15));
+    // 3) tomas de ingreso/salida agregables (distancia, lado, ángulo, tasa, dispersión)
+    tapsSection(c, () => { if (running) startSim(); upd(); });
   }
   function resnap(inst) {
     for (const l of graph.links.filter(l => l.from === inst.id)) {

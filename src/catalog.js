@@ -416,6 +416,15 @@ export function createConveyorLibrary() {
       for (const inst of graph.instances) {
         const segs = FAMILIES[inst.family].segments(inst.id, inst.pose, inst.cfg);
         for (const s of segs) { s.next = s.next || []; segById.set(s.id, s); }
+        // TOMAS de la pieza (ingresos/salidas) → al segmento de entrada, distancia → s
+        if (inst.cfg.taps && inst.cfg.taps.length) {
+          const head = segById.get(FAMILIES[inst.family].entrySeg(inst.id, 'in'));
+          if (head) head.taps = inst.cfg.taps.map(t => ({
+            kind: t.kind, at: Math.max(0, Math.min(t.distance || 0, inst.cfg.length || 9)),
+            rate: t.kind === 'in' ? (t.ratePerMin || 0) : 0, cv: t.cv != null ? t.cv : 0.3,
+            frac: t.frac != null ? t.frac : 1,
+          }));
+        }
       }
       // enruta enlaces externos: salida(seg de fromNode).next += entrada(seg de toNode)
       for (const l of links) {

@@ -115,6 +115,12 @@ Interfaz navegable (three.js r158, ESM por importmap CDN, igual que `examples/in
     buffer/acumulación de cero presión; las cajas retenidas se pintan en naranja).
   - HUD con KPIs: **entrada vs salida (c/min)**, entregadas, en sistema, **acumulando**, y
     **cuello de botella** detectado. (Una pieza aislada no genera producto.)
+- **Tomas de ingreso / salida** (en el inspector de un tramo recto): agrega puntos a lo
+  largo de la pieza con **distancia desde el inicio, lado (Izq/Der) y ángulo al flujo
+  (30°/45°)**. Cada **ingreso** define su **tasa (c/min) y dispersión (cv)** e inyecta cajas
+  ahí (merge); cada **salida** define el **% de desvío** y retira cajas al cruzar ese punto.
+  El motor inyecta/retira a la posición `s` exacta; en 3D se ven como spurs angulados
+  (verde=ingreso con flecha al flujo, rojo=salida con flecha hacia afuera).
 - **💾 / 📂 Guardar / Cargar**: exporta/importa el layout como JSON (`lib.serialize` /
   `lib.hydrate`); además guarda el último layout en `localStorage` y lo restaura al abrir.
 - **ENTER VR** (Meta Quest): recorre a escala real la planta que armaste. Stick izquierdo

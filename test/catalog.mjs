@@ -141,6 +141,18 @@ for (const id of mac.segments.filter(s => s.sink).map(s => s.id)) { const s = ea
 const before = eac.boxes.length; for (let i = 0; i < 1500; i++) eac.step(0.05);
 check('acumulación: parar la salida hace crecer el buffer (cero presión)', eac.boxes.length > before && eac.boxes.some(b => b._blocked));
 
+// 7e) TOMAS de ingreso/salida: distancia desde el inicio, tasa propia, desvío
+const gt = { instances: [], links: [] };
+const ti = lib.place('190-E24', null, { length: 6, taps: [{ kind: 'in', side: 'R', angleDeg: 30, distance: 1.5, ratePerMin: 30, cv: 0.3 }, { kind: 'out', side: 'L', angleDeg: 45, distance: 4, frac: 0.5 }] });
+gt.instances.push(ti);
+const to = lib.place('190-E24', null, { length: 2 }); gt.instances.push(to); lib.connect(gt, ti.id, to.id);
+const mt = lib.graphToModel(gt, { rate: 0 }); const head = mt.segments.find(s => s.id === ti.id); head.source = null;
+check('taps: se adjuntan al segmento con su posición (in@1.5, out@4)', head.taps && head.taps.length === 2 && head.taps[0].at === 1.5 && head.taps[1].at === 4);
+const et = new ConveyorSim(mt, { seed: 4 }); for (let i = 0; i < 2000; i++) et.step(0.05);
+check('taps: la toma de INGRESO inyecta cajas (sin fuente de cabeza)', et.stats.generated > 0);
+check('taps: la toma de SALIDA desvía cajas (entregadas en la toma)', et.stats.delivered > 0);
+check('taps: persisten en serialize/hydrate', lib.hydrate(lib.serialize(gt)).instances[0].cfg.taps.length === 2);
+
 // 8) GUARDAR / CARGAR (serialize -> hydrate) conserva el grafo y vuelve a compilar
 const json = lib.serialize(gd);
 const g2 = lib.hydrate(json);
