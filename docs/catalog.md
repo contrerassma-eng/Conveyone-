@@ -115,6 +115,33 @@ Interfaz navegable (three.js r158, ESM por importmap CDN, igual que `examples/in
   Usa `renderer.setAnimationLoop` y referencia `local-floor` (WebXR exige https — GitHub
   Pages cumple).
 
+## Ficha física del equipo (capa WEB · `docs/web_facts.json`)
+
+Para que el equipo se vea **tal cual** (pitch, OD de rodillo, bastidor, soportes), el
+render usa specs de **ficha técnica Hytrol con procedencia** (URL + fecha + cita), no
+inventadas. `lib.spec(id)` las entrega en metros (+ pulgadas en `.inches`). Origen:
+disciplina del método foto3d — capa `web`, jamás se funde sin cita.
+
+| spec | valor (cut-sheet) | fuente |
+|------|-------------------|--------|
+| Rodillo 190-E24 / E24EZ / E24SS | **Ø1.9" × 16 ga sobre centros de 3"** (Ø48.3 mm, paso 76.2 mm) | [E24.pdf · Bulletin 713](https://cdn.hytrol.com/E24.pdf) |
+| Velocidad 190-E24 | **25–174 fpm** (0.13–0.88 m/s) | E24.pdf |
+| Capacidad | **37 lb/ft · 75 lb por motor/zona** | E24.pdf |
+| Curva 190-E24C/EZC | rodillo **2.5" cónico a 1-11/16" × 16 ga** | E24.pdf |
+| Zonas EZLogic | **18 / 24 / 30 / 36"** | E24.pdf |
+| 190-E24MC | 2"/3" centers · **30–180 fpm** · soportes con ruedas | [190-E24MC focus sheet](https://cdn.hytrol.com/190-E24MC-Product-Focus-Sheet.pdf) |
+| TA (banda) | ancho banda 6–30"; **bed = banda + 4"**; cama deslizante; soportes a ambos extremos del drive | [TA IMM · Bulletin 642](https://cdn.hytrol.com/2012_642_ta.pdf) |
+| Bastidor rodillo vivo | **canal 6" × 4 ga, riel-guía 1-5/8"** *(confianza media)* | [190-NSP · Bulletin 677](https://cdn.hytrol.com/2015_677_190nsp.pdf) |
+| Soportes | piso ajustable: pipe + side channel + leg, nivelable y anclado | [Supports · Bulletin 667](https://cdn.hytrol.com/2014_667_support.pdf) |
+
+**Asumido** (no de cut-sheet, marcado en `web_facts.json`): profundidad de bastidor de las
+bandas, diámetro de polea (~4"), espesor de banda y sección de las patas de soporte.
+
+**Limitación honesta:** no hay capa `measured` (no se corrió fotogrametría COLMAP/OpenMVS
+ni hay fotos del usuario en este repo). El equipo se modela a partir de la **ficha del
+fabricante**, que es la fuente correcta para equipo de catálogo. Si quieres geometría
+medida desde fotos reales, hay que correr el pipeline foto3d (otro repo) con tus fotos.
+
 ## Pruebas
 
 `node test/catalog.mjs` — 24 comprobaciones: todos los modelos se colocan y compilan,

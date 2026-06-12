@@ -1,0 +1,47 @@
+{
+  "_comment": "Capa WEB del método foto3d: datos externos de fabricante con procedencia. NO se funden al modelo sin URL + fecha + cita. accessed = fecha de consulta.",
+  "accessed": "2026-06-12",
+  "sources": {
+    "E24-713": { "title": "E24 24-Volt Conveying System (Bulletin No. 713)", "url": "https://cdn.hytrol.com/E24.pdf", "publisher": "Hytrol Conveyor Co." },
+    "E24MC": { "title": "190-E24MC 24VDC Live Roller Modular Conveyor — Product Focus Sheet", "url": "https://cdn.hytrol.com/190-E24MC-Product-Focus-Sheet.pdf", "publisher": "Hytrol Conveyor Co." },
+    "TA-642": { "title": "TA Medium Duty Slider Bed — Installation & Maintenance Manual (Bulletin 642)", "url": "https://cdn.hytrol.com/2012_642_ta.pdf", "publisher": "Hytrol Conveyor Co." },
+    "SUPPORT-667": { "title": "Conveyor Supports — Installation (Bulletin 667)", "url": "https://cdn.hytrol.com/2014_667_support.pdf", "publisher": "Hytrol Conveyor Co." },
+    "190-NSP-677": { "title": "190-NSP — Installation & Maintenance Manual (Bulletin 677)", "url": "https://cdn.hytrol.com/2015_677_190nsp.pdf", "publisher": "Hytrol Conveyor Co." }
+  },
+  "facts": [
+    { "model": "190-E24", "level": "web", "source": "E24-713",
+      "quote": "1.9\" diameter x 16 ga. rollers on 3\" centers; Section lengths are available in 6\" increments from 2' to 10'; Standard conveying speed of 25-174 FPM; Maximum of 37 lbs. per foot and a maximum capacity per E24 motor of 75 lbs.",
+      "fields": { "rollerDiaIn": 1.9, "rollerGauge": 16, "rollerPitchIn": 3.0, "speedFpm": [25, 174], "capacityLbPerFt": 37, "capacityLbPerMotor": 75, "sectionIncrementIn": 6 } },
+    { "model": "190-E24EZ", "level": "web", "source": "E24-713",
+      "quote": "1.9\" diameter x 16 ga. rollers on 3\" centers; EZLogic zone controllers can be located in 18\", 24\", 30\", or 36\" zones; maximum capacity is 37 lbs. per foot, 75 lbs. per zone, standard conveying speed of 25-174 FPM.",
+      "fields": { "rollerDiaIn": 1.9, "rollerGauge": 16, "rollerPitchIn": 3.0, "zoneIn": [18, 24, 30, 36], "speedFpm": [25, 174], "capacityLbPerFt": 37, "capacityLbPerZone": 75 } },
+    { "model": "190-E24C", "level": "web", "source": "E24-713",
+      "quote": "2.5\" diameters tapered to 1-11/16\" diameter x 16 ga. rollers; 30- and 45-degree curves require (1) 24-volt motor; 60- and 90-degree curves require (2) 24-volt motors.",
+      "fields": { "rollerDiaIn": 2.5, "rollerTaperToIn": 1.6875, "rollerGauge": 16 } },
+    { "model": "190-E24SS", "level": "web", "source": "E24-713",
+      "quote": "1.9\" diameter x 16 ga. rollers on 3\" centers; 30-degree spur ... on 12\"-16\" OAW at 30\" long ... 45-degree spur ... on 12\"-42\" OAW; Section lengths for the 45-degree include 21\", 36\", and 48\".",
+      "fields": { "rollerDiaIn": 1.9, "rollerGauge": 16, "rollerPitchIn": 3.0, "spurDeg": [30, 45], "oawIn": [12, 42] } },
+    { "model": "190-E24MC", "level": "web", "source": "E24MC",
+      "quote": "Available in 2\" or 3\" roller centers; Variable 30-180 FPM; Included casters and inset supports; Max capacity of 70 lbs. per linear foot; 36/48\" BR.",
+      "fields": { "rollerCentersIn": [2, 3], "speedFpm": [30, 180], "capacityLbPerFt": 70, "brIn": [36, 48], "supports": "inset floor supports with casters" } },
+    { "model": "199-CRE24EZ", "level": "web", "source": "E24-713",
+      "quote": "1.9\" diameter x 16 ga. rollers on 4\" or 6\" centers; Standard conveying speed of 28 FPM; Maximum unit load not to exceed 600 lbs. per zone.",
+      "fields": { "rollerDiaIn": 1.9, "rollerGauge": 16, "rollerPitchIn": [4, 6], "speedFpm": [28, 28], "capacityLbPerZone": 600 } },
+    { "model": "TA", "level": "web", "source": "TA-642",
+      "quote": "Belt Width 6\" 8\" 10\" 12\" 14\" 16\" 18\" 20\" 24\" 30\"; Bed Width 10\" 12\" 14\" 16\" 18\" 20\" 22\" 24\" 28\" 34\" (bed = belt + 4\"). Slider bed (belt over steel pan), 4\"/8\" end or center drive, take-up at tail pulley. Floor supports at both ends of drive section and one end of intermediate/tail sections.",
+      "fields": { "beltWidthIn": [6, 8, 10, 12, 14, 16, 18, 20, 24, 30], "bedWidthEqualsBeltPlusIn": 4, "surface": "slider-bed-belt", "driveCenterIn": [4, 8] } },
+    { "model": "FRAME-190", "level": "web", "source": "190-NSP-677", "confidence": "media",
+      "quote": "Tread rollers mounted in 6 in. x 4 ga. formed steel channel frame to form 1-5/8 in. high guard rails. (Descripción de la familia de bastidores de rodillo vivo Hytrol; no confirmada verbatim en el cuerpo del PDF extraído — origen: resultados de catálogo Hytrol 190.)",
+      "fields": { "frameChannelDepthIn": 6, "frameGauge": 4, "guardRailHeightIn": 1.625 } },
+    { "model": "SUPPORTS", "level": "web", "source": "SUPPORT-667",
+      "quote": "Soportes de piso ajustables: SUPPORT PIPE + SIDE CHANNEL + SUPPORT LEG + STATIONARY SUPPORT; 'Frame Weldment (Specify Height)'. Se nivelan a la altura requerida y se anclan al piso (lag). Opción Poly-Tier.",
+      "fields": { "type": "adjustable floor support (pipe + side channel + leg)", "heightSpecified": true } }
+  ],
+  "assumptions": [
+    { "field": "frameChannelDepth", "value": "6 in (0.152 m) para familia de rodillo vivo", "note": "Tomado de FRAME-190 (confianza media). El bastidor exacto de E24 MDR puede diferir; afinar con cut-sheet del modelo." },
+    { "field": "beltPulleyDia", "value": "~4 in (0.10 m)", "note": "ASUMIDO para render de bandas (TA/SBI/LBP). No proviene de cut-sheet." },
+    { "field": "beltThickness", "value": "~5 mm", "note": "ASUMIDO para render de bandas." },
+    { "field": "supportLegSection", "value": "~50 mm tubo/canal", "note": "ASUMIDO para render de soportes. La sección real varía por altura/serie." },
+    { "field": "transfer/divert roller spec", "value": "1.9 in OD x 16 ga on 3 in centers (de E24SS)", "note": "Aplicado a T90/T30/DV90/DV30/MG por pertenecer a la familia E24SS de rodillo motorizado." }
+  ]
+}

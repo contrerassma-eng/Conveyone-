@@ -103,6 +103,20 @@ check('merge: dos fuentes (in/in2 sin enlace previo no aplica; ambas TA son fuen
 check('merge: confluye sin solapes', collideM === 0);
 check('merge: el tronco entrega cajas de ambas líneas', em.stats.delivered > 0);
 
+// 7b) FICHA FÍSICA (capa web): los specs coinciden con docs/web_facts.json (no inventados)
+import { readFileSync } from 'node:fs';
+const wf = JSON.parse(readFileSync(new URL('../docs/web_facts.json', import.meta.url)));
+const fact = id => wf.facts.find(f => f.model === id);
+const IN = 0.0254, near = (a, b) => Math.abs(a - b) < 1e-4;
+const s190 = lib.spec('190-E24');
+check('spec 190-E24: rodillo 1.9" OD (cut-sheet)', near(s190.rollerDia, fact('190-E24').fields.rollerDiaIn * IN) && near(s190.rollerDia, 1.9 * IN));
+check('spec 190-E24: paso 3" centers (cut-sheet)', near(s190.rollerPitch, 3.0 * IN));
+check('spec 190-E24EZ: 1.9"/3" como 190-E24', near(lib.spec('190-E24EZ').rollerPitch, 3.0 * IN));
+check('spec TA: superficie de banda (no rodillos)', lib.spec('TA').surface === 'belt');
+check('spec rollers: bastidor 6" y riel-guía 1-5/8" (familia 190)', near(s190.frameDepth, 6 * IN) && near(s190.railHeight, 1.625 * IN));
+check('spec: toda ficha cita su fuente web', lib.list().every(m => { const sp = lib.spec(m.id); return !sp || !!sp.src; }));
+check('web_facts: cada hecho lleva fuente con URL', wf.facts.every(f => wf.sources[f.source] && wf.sources[f.source].url));
+
 // 8) GUARDAR / CARGAR (serialize -> hydrate) conserva el grafo y vuelve a compilar
 const json = lib.serialize(gd);
 const g2 = lib.hydrate(json);

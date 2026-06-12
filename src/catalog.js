@@ -212,6 +212,45 @@ const CATALOG = [
     note: 'Confluencia de dos líneas (in, in2) a un tronco (out). Sin solape por hueco (R4).' },
 ];
 
+// ───────────────────────── SPEC física por modelo (capa WEB · ver docs/web_facts.json) ──────
+// Valores de ficha técnica Hytrol con procedencia. surface: cómo se ve la superficie de
+// transporte. *In = pulgadas (como el cut-sheet); el render los convierte a metros.
+// 'src' apunta a docs/web_facts.json; las marcas [asumido] están listadas allí también.
+const SPECS = {
+  // — Rodillo motorizado 1.9" OD × 16 ga sobre centros de 3" (E24/190) [E24-713] —
+  'E24CT':     { surface: 'rollers', rollerDiaIn: 1.9, rollerPitchIn: 3.0, gauge: 16, frameDepthIn: 6, railHeightIn: 1.625, speedFpm: [25, 174], src: 'E24-713' },
+  'E34EZCT':   { surface: 'rollers', rollerDiaIn: 1.9, rollerPitchIn: 3.0, gauge: 16, frameDepthIn: 6, railHeightIn: 1.625, speedFpm: [25, 174], zone: true, src: 'E24-713' },
+  '190-E24':   { surface: 'rollers', rollerDiaIn: 1.9, rollerPitchIn: 3.0, gauge: 16, frameDepthIn: 6, railHeightIn: 1.625, speedFpm: [25, 174], src: 'E24-713' },
+  '190-E24EZ': { surface: 'rollers', rollerDiaIn: 1.9, rollerPitchIn: 3.0, gauge: 16, frameDepthIn: 6, railHeightIn: 1.625, speedFpm: [25, 174], zone: true, src: 'E24-713' },
+  // — Transferencias/desvíos: familia E24SS, mismo rodillo 1.9"×3" [E24-713] —
+  'E24SS':     { surface: 'rollers', rollerDiaIn: 1.9, rollerPitchIn: 3.0, gauge: 16, frameDepthIn: 6, railHeightIn: 1.625, speedFpm: [25, 174], src: 'E24-713' },
+  'T90':       { surface: 'rollers', rollerDiaIn: 1.9, rollerPitchIn: 3.0, gauge: 16, frameDepthIn: 6, railHeightIn: 1.625, speedFpm: [25, 174], src: 'E24-713' },
+  'T30':       { surface: 'rollers', rollerDiaIn: 1.9, rollerPitchIn: 3.0, gauge: 16, frameDepthIn: 6, railHeightIn: 1.625, speedFpm: [25, 174], src: 'E24-713' },
+  'DV90':      { surface: 'rollers', rollerDiaIn: 1.9, rollerPitchIn: 3.0, gauge: 16, frameDepthIn: 6, railHeightIn: 1.625, speedFpm: [25, 174], src: 'E24-713' },
+  'DV30':      { surface: 'rollers', rollerDiaIn: 1.9, rollerPitchIn: 3.0, gauge: 16, frameDepthIn: 6, railHeightIn: 1.625, speedFpm: [25, 174], src: 'E24-713' },
+  'MG':        { surface: 'rollers', rollerDiaIn: 1.9, rollerPitchIn: 3.0, gauge: 16, frameDepthIn: 6, railHeightIn: 1.625, speedFpm: [25, 174], src: 'E24-713' },
+  // — Bandas: cama deslizante / modular (sin rodillos en la superficie) [TA-642] —
+  'TA':        { surface: 'belt', frameDepthIn: 5.5, railHeightIn: 0, pulleyDiaIn: 4, beltMm: 5, speedFpm: [30, 120], src: 'TA-642' },
+  'SBI':       { surface: 'belt', frameDepthIn: 5.5, railHeightIn: 0, pulleyDiaIn: 4, beltMm: 5, speedFpm: [30, 120], cleated: true, src: 'TA-642' },
+  'LBP':       { surface: 'belt', frameDepthIn: 5.5, railHeightIn: 0, pulleyDiaIn: 4, beltMm: 8, speedFpm: [30, 120], modular: true, src: 'TA-642' },
+  'LBP-CURVE': { surface: 'belt', frameDepthIn: 4.0, railHeightIn: 0, pulleyDiaIn: 4, beltMm: 8, speedFpm: [30, 120], modular: true, src: 'TA-642' },
+};
+
+function specMetric(id) {
+  const s = SPECS[id]; if (!s) return null;
+  return {
+    surface: s.surface,
+    rollerDia: s.rollerDiaIn != null ? s.rollerDiaIn * IN : null,
+    rollerPitch: s.rollerPitchIn != null ? s.rollerPitchIn * IN : null,
+    frameDepth: (s.frameDepthIn || 5.5) * IN,
+    railHeight: (s.railHeightIn || 0) * IN,
+    pulleyDia: s.pulleyDiaIn != null ? s.pulleyDiaIn * IN : null,
+    belt: s.beltMm != null ? s.beltMm / 1000 : null,
+    gauge: s.gauge || null, zone: !!s.zone, modular: !!s.modular, cleated: !!s.cleated,
+    speedFpm: s.speedFpm || null, inches: s, src: s.src,
+  };
+}
+
 function modelById(id) { const m = CATALOG.find(x => x.id === id); if (!m) throw new Error('modelo desconocido: ' + id); return m; }
 function resolveCfg(model, overrides = {}) {
   const c = Object.assign({}, model.defaults, overrides);
@@ -240,6 +279,9 @@ export function createConveyorLibrary() {
     groups() { const g = {}; for (const m of CATALOG) (g[m.group] = g[m.group] || []).push(m.id); return g; },
     get(id) { return modelById(id); },
     defaults(id) { return resolveCfg(modelById(id)); },
+    // ficha física (capa WEB, ver docs/web_facts.json): superficie, OD/pitch de rodillo,
+    // profundidad de bastidor, riel-guía, polea, etc. en METROS (+ pulgadas en .inches).
+    spec(id) { return specMetric(id); },
     // claves de nodo de un modelo (in/out/out2/in2…), para la UI
     nodeKeys(id) { const m = modelById(id); const n = FAMILIES[m.family].nodes({ x: 0, z: 0, rot: 0 }, resolveCfg(m)); return Object.keys(n).filter(k => k[0] !== '_'); },
 
@@ -355,5 +397,5 @@ export function createConveyorLibrary() {
   return api;
 }
 
-export { CATALOG, FAMILIES, BOX, GAP_MIN };
+export { CATALOG, FAMILIES, SPECS, BOX, GAP_MIN };
 export default createConveyorLibrary;
