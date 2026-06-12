@@ -76,6 +76,7 @@ function El() {
   const e = { value: '30', textContent: '', innerHTML: '', style: {}, children: [], checked: false, classList: { toggle() { }, add() { }, remove() { } },
     appendChild(c) { this.children.push(c); return c; }, querySelector() { return El(); }, querySelectorAll() { return []; },
     addEventListener() { }, setAttribute() { }, click() { }, firstChild: null,
+    getContext() { return null; },   // canvas: sin 2D en headless → makeModularTex devuelve null (seguro)
     get clientWidth() { return 1200; }, get clientHeight() { return 800; } };
   return new Proxy(e, { get(t, k) { if (k in t) return t[k]; if (typeof k === 'string' && /^on/.test(k)) return null; return undefined; }, set(t, k, v) { t[k] = v; return true; } });
 }

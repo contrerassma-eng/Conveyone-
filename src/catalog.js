@@ -124,14 +124,15 @@ const FAMILIES = {
     entrySeg: id => id, exitSeg: id => id,
   },
 
-  // MÁQUINA en línea (p.ej. Niverplast): la caja pasa por un tramo con un PROCESO que la
-  // retiene (corte/volcado) → aguas arriba se acumula (LBP). Render aparte (housing+guillotina).
+  // MÁQUINA en línea (Niverplast): GUILLOTINA-TOPE al ingreso que METERa la entrada a
+  // `meterPerMin` c/min → aguas arriba se acumula en la LBP (cero presión).
   machine: {
     nodes(pose, c) { return FAMILIES.straight.nodes(pose, c); },
     segments(id, pose, c) {
       const n = FAMILIES.straight.nodes(pose, c);
+      const meter = c.meterPerMin || 15, time = 60 / meter;   // 15 c/min → retiene 4 s por caja
       return [{ id, geom: { type: 'straight', from: n.in.p, to: n.out.p }, height: c.entryHeight, speed: c.speed, pitch: c.pitch,
-        process: { at: (c.length || 2) * 0.5, time: c.cutTime || 1.6, operators: 1, cv: 0.2 } }];
+        process: { at: Math.max(0.1, (c.length || 2) * 0.18), time, operators: 1, cv: 0.15 } }];   // tope cerca del ingreso → la cola backea a la LBP
     },
     entrySeg: id => id, exitSeg: id => id,
   },
@@ -199,11 +200,11 @@ const CATALOG = [
     caps: { maxInclineDeg: 0, rollerDia: 2.5 * IN },
     note: 'Curva de rodillo motorizado. Rodillos CÓNICOS 2.5"→1-11/16" dispuestos radialmente.' },
 
-  { id: 'NIVERPLAST', label: 'Niverplast · Corte/volcado de cajas (guillotina al ingreso)', group: 'Estación Niverplast',
+  { id: 'NIVERPLAST', label: 'Niverplast · Guillotina-tope al ingreso (metera 15 c/min)', group: 'Estación Niverplast',
     kind: 'machine', family: 'machine',
-    defaults: { length: 2.0, width: 1.0, speed: 0.4, pitch: BOX[0] + GAP_MIN, entryHeight: 0.8, cutTime: 1.6 },
+    defaults: { length: 2.0, width: 1.0, speed: 0.4, pitch: BOX[0] + GAP_MIN, entryHeight: 0.8, meterPerMin: 15 },
     caps: { maxInclineDeg: 0 },
-    note: 'Máquina Niverplast: la guillotina corta las cajas al ingreso; aguas arriba se acumulan (LBP). Dimensiones APROXIMADAS (descripción del usuario, no cut-sheet).' },
+    note: 'Niverplast: guillotina-tope al ingreso que METERa la entrada (15 c/min por defecto); aguas arriba la LBP acumula. Dimensiones APROXIMADAS (descripción del usuario, no cut-sheet).' },
 
   { id: 'GRR', label: 'Gravedad · Rodillo OD30 paso 3" (700 mm) + mini-mesas 200 mm', group: 'Estación Niverplast',
     kind: 'gravity', family: 'straight',
@@ -220,6 +221,11 @@ const CATALOG = [
     kind: 'prop', family: 'prop',
     defaults: { length: 1.5, width: 0.8, entryHeight: 0.9 },
     caps: {}, note: 'Mesa de acero inoxidable de trabajo. Estático (sin flujo de cajas).' },
+
+  { id: 'OPERATOR', label: 'Operario · persona de trabajo', group: 'Estación Niverplast',
+    kind: 'prop', family: 'prop',
+    defaults: { length: 0.5, width: 0.5, entryHeight: 0 },
+    caps: {}, note: 'Operario (figura) — para representar las personas de la estación. Estático.' },
 
   { id: 'E24SS', label: 'E24SS · Transferencia de rodillo motorizado', group: 'Transferencias',
     kind: 'transfer', family: 'transfer',
@@ -309,7 +315,7 @@ function specMetric(id) {
 function paramsFor(id) {
   const m = modelById(id), sp = SPECS[id] || {}, fam = m.family, out = [];
   if (fam === 'prop') return [{ label: 'Largo (m)', cfg: 'length', unit: 'm', type: 'number', min: 0.3, max: 5, step: 0.1 }, { label: 'Ancho (m)', cfg: 'width', unit: 'm', type: 'number', min: 0.2, max: 3, step: 0.1 }];
-  if (fam === 'machine') { out.push({ label: 'Tiempo de corte (s)', cfg: 'cutTime', unit: 'raw', type: 'number', min: 0.2, max: 10, step: 0.1 }); out.push({ label: 'Largo (m)', cfg: 'length', unit: 'm', type: 'number', min: 0.5, max: 5, step: 0.1 }); return out; }
+  if (fam === 'machine') { out.push({ label: 'Tasa de corte (c/min)', cfg: 'meterPerMin', unit: 'raw', type: 'number', min: 1, max: 60, step: 1 }); out.push({ label: 'Largo (m)', cfg: 'length', unit: 'm', type: 'number', min: 0.5, max: 5, step: 0.1 }); return out; }
   if (sp.surface === 'rollers') {
     out.push({ label: 'Centros de rodillo', cfg: 'rollerPitch', unit: 'in', type: 'select', options: [2, 3] });
     out.push({ label: 'Ancho BR', cfg: 'width', unit: 'in', type: 'select', options: [18, 24, 30, 36] });
@@ -358,6 +364,7 @@ const REFS = {
   'GRR':        { hytrol: 'Gravity Roller', note: 'Rodillo por gravedad OD30 paso 3" (700 mm)', doc: DOC.LR, cat: DOC.LR },
   'LIDRACK':    { hytrol: '—',          note: 'Rack de tapas de 3 niveles con minicarriles', doc: DOC.LR, cat: DOC.LR },
   'INOXTABLE':  { hytrol: '—',          note: 'Mesa de inox de trabajo', doc: DOC.LR, cat: DOC.LR },
+  'OPERATOR':   { hytrol: '—',          note: 'Operario (figura de trabajo)', doc: DOC.LR, cat: DOC.LR },
 };
 
 function modelById(id) { const m = CATALOG.find(x => x.id === id); if (!m) throw new Error('modelo desconocido: ' + id); return m; }

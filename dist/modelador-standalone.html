@@ -1497,7 +1497,7 @@ if (typeof THREE === 'undefined') window.showErr('three.js no cargó');
 else if (!THREE.OrbitControls) window.showErr('OrbitControls no registrado');
 else if (!THREE.VRButton) window.showErr('VRButton no registrado');
 </script>
-<script>window.__seedLayout = {"version":1,"instances":[{"id":"LBPCURVE_1","model":"LBP-CURVE","pose":{"x":0,"z":0,"rot":0},"cfg":{"angleDeg":90,"radius":1.2,"width":0.6095999999999999,"speed":0.27940000000000004,"pitch":0.45,"entryHeight":0.9,"cw":false,"exitHeight":0.9}},{"id":"LBP_2","model":"LBP","pose":{"x":1.2,"z":1.2,"rot":1.5707963267948966},"cfg":{"length":5,"width":0.6095999999999999,"speed":0.3048,"pitch":0.45,"entryHeight":0.9,"exitHeight":0.9,"cw":true}},{"id":"NIVERPLAST_3","model":"NIVERPLAST","pose":{"x":1.2000000000000002,"z":6.2,"rot":1.5707963267948966},"cfg":{"length":2,"width":1,"speed":0.4,"pitch":0.45,"entryHeight":0.8,"cutTime":1.6,"exitHeight":0.8,"cw":true}},{"id":"GRR_4","model":"GRR","pose":{"x":1.2000000000000004,"z":8.2,"rot":1.5707963267948966},"cfg":{"length":4,"width":0.6,"speed":0.3,"pitch":0.45,"entryHeight":0.7,"exitHeight":0.7,"cw":true}},{"id":"LIDRACK_5","model":"LIDRACK","pose":{"x":2.4000000000000004,"z":8.299999999999999,"rot":1.5707963267948966},"cfg":{"length":1.6,"width":0.5,"entryHeight":1.1,"exitHeight":1.1,"cw":true}},{"id":"INOXTABLE_6","model":"INOXTABLE","pose":{"x":2.4000000000000004,"z":9.799999999999999,"rot":1.5707963267948966},"cfg":{"length":1.5,"width":0.8,"entryHeight":0.9,"exitHeight":0.9,"cw":true}}],"links":[{"from":"LBPCURVE_1","to":"LBP_2","fromNode":"out","toNode":"in"},{"from":"LBP_2","to":"NIVERPLAST_3","fromNode":"out","toNode":"in"},{"from":"NIVERPLAST_3","to":"GRR_4","fromNode":"out","toNode":"in"}]};</script>
+<script>window.__seedLayout = {"version":1,"instances":[{"id":"190E24C_1","model":"190-E24C","pose":{"x":0,"z":0,"rot":0},"cfg":{"angleDeg":60,"radius":1.1,"width":0.6095999999999999,"speed":0.3048,"pitch":0.45,"entryHeight":0.9,"cw":true,"exitHeight":0.9}},{"id":"LBP_2","model":"LBP","pose":{"x":0.9526279441628825,"z":-0.55,"rot":-1.0471975511965976},"cfg":{"length":5,"width":0.6095999999999999,"speed":0.3048,"pitch":0.45,"entryHeight":0.9,"exitHeight":0.9,"cw":true}},{"id":"NIVERPLAST_3","model":"NIVERPLAST","pose":{"x":3.452627944162883,"z":-4.880127018922193,"rot":-1.0471975511965976},"cfg":{"length":2,"width":1,"speed":0.4,"pitch":0.45,"entryHeight":0.8,"meterPerMin":15,"exitHeight":0.8,"cw":true}},{"id":"GRR_4","model":"GRR","pose":{"x":4.4526279441628835,"z":-6.61217782649107,"rot":-1.0471975511965976},"cfg":{"length":5,"width":0.6,"speed":0.3,"pitch":0.45,"entryHeight":0.7,"exitHeight":0.7,"cw":true}},{"id":"TA_5","model":"TA","pose":{"x":6.952627944162884,"z":-10.942304845413263,"rot":-1.0471975511965976},"cfg":{"length":2.5,"width":0.6095999999999999,"speed":0.3302,"pitch":0.45,"entryHeight":0.9,"exitHeight":0.9,"cw":true}},{"id":"INOXTABLE_7","model":"INOXTABLE","pose":{"x":4.49019237886467,"z":-9.477241335952165,"rot":-1.0471975511965976},"cfg":{"length":2,"width":0.8,"entryHeight":0.9,"exitHeight":0.9,"cw":true}},{"id":"INOXTABLE_8","model":"INOXTABLE","pose":{"x":6.915063509461097,"z":-8.077241335952166,"rot":-1.0471975511965976},"cfg":{"length":2,"width":0.8,"entryHeight":0.9,"exitHeight":0.9,"cw":true}},{"id":"LIDRACK_9","model":"LIDRACK","pose":{"x":3.624166975080231,"z":-9.977241335952165,"rot":-1.0471975511965976},"cfg":{"length":3,"width":0.5,"entryHeight":1.3,"exitHeight":1.3,"cw":true}},{"id":"OPERATOR_10","model":"OPERATOR","pose":{"x":4.329903810567667,"z":-8.299613391789284,"rot":0},"cfg":{"length":0.5,"width":0.5,"entryHeight":0,"exitHeight":0,"cw":true}},{"id":"OPERATOR_11","model":"OPERATOR","pose":{"x":5.429903810567668,"z":-10.20486928011505,"rot":0},"cfg":{"length":0.5,"width":0.5,"entryHeight":0,"exitHeight":0,"cw":true}},{"id":"OPERATOR_12","model":"OPERATOR","pose":{"x":5.9753520777581,"z":-7.349613391789283,"rot":0},"cfg":{"length":0.5,"width":0.5,"entryHeight":0,"exitHeight":0,"cw":true}},{"id":"OPERATOR_13","model":"OPERATOR","pose":{"x":7.075352077758101,"z":-9.25486928011505,"rot":0},"cfg":{"length":0.5,"width":0.5,"entryHeight":0,"exitHeight":0,"cw":true}}],"links":[{"from":"190E24C_1","to":"LBP_2","fromNode":"out","toNode":"in"},{"from":"LBP_2","to":"NIVERPLAST_3","fromNode":"out","toNode":"in"},{"from":"NIVERPLAST_3","to":"GRR_4","fromNode":"out","toNode":"in"},{"from":"GRR_4","to":"TA_5","fromNode":"out","toNode":"in"}]};</script>
 <script type="module">
 // ===== shims de globales (three UMD r128) =====
 
@@ -2333,14 +2333,15 @@ const FAMILIES = {
     entrySeg: id => id, exitSeg: id => id,
   },
 
-  // MÁQUINA en línea (p.ej. Niverplast): la caja pasa por un tramo con un PROCESO que la
-  // retiene (corte/volcado) → aguas arriba se acumula (LBP). Render aparte (housing+guillotina).
+  // MÁQUINA en línea (Niverplast): GUILLOTINA-TOPE al ingreso que METERa la entrada a
+  // `meterPerMin` c/min → aguas arriba se acumula en la LBP (cero presión).
   machine: {
     nodes(pose, c) { return FAMILIES.straight.nodes(pose, c); },
     segments(id, pose, c) {
       const n = FAMILIES.straight.nodes(pose, c);
+      const meter = c.meterPerMin || 15, time = 60 / meter;   // 15 c/min → retiene 4 s por caja
       return [{ id, geom: { type: 'straight', from: n.in.p, to: n.out.p }, height: c.entryHeight, speed: c.speed, pitch: c.pitch,
-        process: { at: (c.length || 2) * 0.5, time: c.cutTime || 1.6, operators: 1, cv: 0.2 } }];
+        process: { at: Math.max(0.1, (c.length || 2) * 0.18), time, operators: 1, cv: 0.15 } }];   // tope cerca del ingreso → la cola backea a la LBP
     },
     entrySeg: id => id, exitSeg: id => id,
   },
@@ -2408,11 +2409,11 @@ const CATALOG = [
     caps: { maxInclineDeg: 0, rollerDia: 2.5 * IN },
     note: 'Curva de rodillo motorizado. Rodillos CÓNICOS 2.5"→1-11/16" dispuestos radialmente.' },
 
-  { id: 'NIVERPLAST', label: 'Niverplast · Corte/volcado de cajas (guillotina al ingreso)', group: 'Estación Niverplast',
+  { id: 'NIVERPLAST', label: 'Niverplast · Guillotina-tope al ingreso (metera 15 c/min)', group: 'Estación Niverplast',
     kind: 'machine', family: 'machine',
-    defaults: { length: 2.0, width: 1.0, speed: 0.4, pitch: BOX[0] + GAP_MIN, entryHeight: 0.8, cutTime: 1.6 },
+    defaults: { length: 2.0, width: 1.0, speed: 0.4, pitch: BOX[0] + GAP_MIN, entryHeight: 0.8, meterPerMin: 15 },
     caps: { maxInclineDeg: 0 },
-    note: 'Máquina Niverplast: la guillotina corta las cajas al ingreso; aguas arriba se acumulan (LBP). Dimensiones APROXIMADAS (descripción del usuario, no cut-sheet).' },
+    note: 'Niverplast: guillotina-tope al ingreso que METERa la entrada (15 c/min por defecto); aguas arriba la LBP acumula. Dimensiones APROXIMADAS (descripción del usuario, no cut-sheet).' },
 
   { id: 'GRR', label: 'Gravedad · Rodillo OD30 paso 3" (700 mm) + mini-mesas 200 mm', group: 'Estación Niverplast',
     kind: 'gravity', family: 'straight',
@@ -2429,6 +2430,11 @@ const CATALOG = [
     kind: 'prop', family: 'prop',
     defaults: { length: 1.5, width: 0.8, entryHeight: 0.9 },
     caps: {}, note: 'Mesa de acero inoxidable de trabajo. Estático (sin flujo de cajas).' },
+
+  { id: 'OPERATOR', label: 'Operario · persona de trabajo', group: 'Estación Niverplast',
+    kind: 'prop', family: 'prop',
+    defaults: { length: 0.5, width: 0.5, entryHeight: 0 },
+    caps: {}, note: 'Operario (figura) — para representar las personas de la estación. Estático.' },
 
   { id: 'E24SS', label: 'E24SS · Transferencia de rodillo motorizado', group: 'Transferencias',
     kind: 'transfer', family: 'transfer',
@@ -2518,7 +2524,7 @@ function specMetric(id) {
 function paramsFor(id) {
   const m = modelById(id), sp = SPECS[id] || {}, fam = m.family, out = [];
   if (fam === 'prop') return [{ label: 'Largo (m)', cfg: 'length', unit: 'm', type: 'number', min: 0.3, max: 5, step: 0.1 }, { label: 'Ancho (m)', cfg: 'width', unit: 'm', type: 'number', min: 0.2, max: 3, step: 0.1 }];
-  if (fam === 'machine') { out.push({ label: 'Tiempo de corte (s)', cfg: 'cutTime', unit: 'raw', type: 'number', min: 0.2, max: 10, step: 0.1 }); out.push({ label: 'Largo (m)', cfg: 'length', unit: 'm', type: 'number', min: 0.5, max: 5, step: 0.1 }); return out; }
+  if (fam === 'machine') { out.push({ label: 'Tasa de corte (c/min)', cfg: 'meterPerMin', unit: 'raw', type: 'number', min: 1, max: 60, step: 1 }); out.push({ label: 'Largo (m)', cfg: 'length', unit: 'm', type: 'number', min: 0.5, max: 5, step: 0.1 }); return out; }
   if (sp.surface === 'rollers') {
     out.push({ label: 'Centros de rodillo', cfg: 'rollerPitch', unit: 'in', type: 'select', options: [2, 3] });
     out.push({ label: 'Ancho BR', cfg: 'width', unit: 'in', type: 'select', options: [18, 24, 30, 36] });
@@ -2567,6 +2573,7 @@ const REFS = {
   'GRR':        { hytrol: 'Gravity Roller', note: 'Rodillo por gravedad OD30 paso 3" (700 mm)', doc: DOC.LR, cat: DOC.LR },
   'LIDRACK':    { hytrol: '—',          note: 'Rack de tapas de 3 niveles con minicarriles', doc: DOC.LR, cat: DOC.LR },
   'INOXTABLE':  { hytrol: '—',          note: 'Mesa de inox de trabajo', doc: DOC.LR, cat: DOC.LR },
+  'OPERATOR':   { hytrol: '—',          note: 'Operario (figura de trabajo)', doc: DOC.LR, cat: DOC.LR },
 };
 
 function modelById(id) { const m = CATALOG.find(x => x.id === id); if (!m) throw new Error('modelo desconocido: ' + id); return m; }
@@ -2871,6 +2878,23 @@ function initBuilder() {
   const matRoller = new THREE.MeshStandardMaterial({ color: 0xccd0d4, metalness: 0.7, roughness: 0.28 });
   const matAxle = new THREE.MeshStandardMaterial({ color: 0x40464d, metalness: 0.6, roughness: 0.4 });
   const matBelt = new THREE.MeshStandardMaterial({ color: 0x20252b, roughness: 0.9, metalness: 0.04 });
+  // Banda MODULAR plástica estilo Intralox Serie 1000 (flat top): textura de módulos en
+  // ladrillo generada por canvas (procedimental, sin assets). En headless se omite.
+  function makeModularTex() {
+    const cv = document.createElement('canvas'); cv.width = cv.height = 128;
+    const ctx = cv.getContext && cv.getContext('2d'); if (!ctx) return null;
+    ctx.fillStyle = '#c9d2da'; ctx.fillRect(0, 0, 128, 128);          // acetal claro (S1000)
+    ctx.strokeStyle = '#7e8893'; ctx.lineWidth = 2;
+    const rows = 4, cols = 8, rh = 128 / rows, cw = 128 / cols;
+    for (let r = 0; r < rows; r++) {
+      const off = (r % 2) * (cw / 2);
+      ctx.strokeRect(-cw, r * rh, 128 + 2 * cw, rh);
+      for (let c = -1; c <= cols + 1; c++) { ctx.beginPath(); ctx.moveTo(c * cw + off, r * rh + 2); ctx.lineTo(c * cw + off, (r + 1) * rh - 2); ctx.stroke(); }
+    }
+    const t = new THREE.CanvasTexture(cv); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(8, 2); return t;
+  }
+  const _modTex = makeModularTex();
+  const matBeltModular = new THREE.MeshStandardMaterial({ map: _modTex || null, color: _modTex ? 0xffffff : 0xb9c2cb, roughness: 0.55, metalness: 0.05 });
   const matLeg = new THREE.MeshStandardMaterial({ color: 0x969ca2, metalness: 0.4, roughness: 0.55 });
   const matMotor = new THREE.MeshStandardMaterial({ color: 0x2b2f36, metalness: 0.3, roughness: 0.6 });
   const matSel = new THREE.MeshStandardMaterial({ color: 0x2e6fd6, metalness: 0.4, roughness: 0.5, emissive: 0x12345a, emissiveIntensity: 0.45 });
@@ -2924,7 +2948,7 @@ function initBuilder() {
     for (let i = 0; i < poly.length - 1; i++) {
       const hA = h0fn(i) + TOR, hB = h0fn(i + 1) + TOR;
       const A = [poly[i][0], hA, poly[i][1]], B = [poly[i + 1][0], hB, poly[i + 1][1]];
-      strut(group, [A[0], A[1] - belt / 2, A[2]], [B[0], B[1] - belt / 2, B[2]], width - 0.04, belt, sel ? matSel : matBelt);   // carga
+      strut(group, [A[0], A[1] - belt / 2, A[2]], [B[0], B[1] - belt / 2, B[2]], width - 0.04, belt, sel ? matSel : (sp.modular ? matBeltModular : matBelt));   // carga (modular = Intralox S1000)
       strut(group, [A[0], A[1] - belt - 0.006, A[2]], [B[0], B[1] - belt - 0.006, B[2]], width - 0.05, 0.01, matFrame);          // pan
       strut(group, [A[0], A[1] - pulley - belt, A[2]], [B[0], B[1] - pulley - belt, B[2]], width - 0.04, belt, matBelt);         // retorno
     }
@@ -3014,9 +3038,17 @@ function initBuilder() {
     box(g, 0.06, 0.75, 0.06, p0[0], h + 1.0, p0[1], rotY, matMachine);                         // guía de la guillotina
     addSupport(g, p0, rotY, h, c.width || 1, 0.14); addSupport(g, p1, rotY, h, c.width || 1, 0.14);
   }
-  // ELEMENTO ESTÁTICO: mesa de inox / rack de tapas (3 niveles con minicarriles).
+  const matSkin = new THREE.MeshStandardMaterial({ color: 0xd7a98a, roughness: 0.7 });
+  const matVest = new THREE.MeshStandardMaterial({ color: 0xffd23a, roughness: 0.6, emissive: 0x4a3a00, emissiveIntensity: 0.2 });
+  // ELEMENTO ESTÁTICO: mesa de inox / rack de tapas (3 niveles con minicarriles) / operario.
   function drawProp(g, inst, sel) {
     const c = inst.cfg, x = inst.pose.x, z = inst.pose.z, r = inst.pose.rot, L = c.length || 1.5, W = c.width || 0.8, h = c.entryHeight || 0.9;
+    if (inst.model === 'OPERATOR') {                                                            // figura de persona
+      const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.22, 0.55, 12), sel ? matSel : matVest); cap.position.set(x, 0.95, z); g.add(cap);   // torso (chaleco)
+      for (const sd of [-1, 1]) { const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.7, 8), matMotor); const q = lp(x, z, r, sd * 0.09, 0); leg.position.set(q[0], 0.35, q[1]); g.add(leg); }   // piernas
+      const head = new THREE.Mesh(new THREE.SphereGeometry(0.12, 14, 14), matSkin); head.position.set(x, 1.32, z); g.add(head); g.add(new THREE.Mesh(new THREE.SphereGeometry(0.135, 12, 12), matVest).translateX(0)); g.children[g.children.length - 1].position.set(x, 1.42, z);   // casco
+      return;
+    }
     if (inst.model === 'INOXTABLE') {
       box(g, W, 0.03, L, x, h, z, r, sel ? matSel : matInox);                                  // tablero
       for (const a of [-1, 1]) for (const b of [-1, 1]) { const q = lp(x, z, r, a * (W / 2 - 0.04), b * (L / 2 - 0.04)); box(g, 0.04, h, 0.04, q[0], h / 2, q[1], r, matInox); }
@@ -3050,7 +3082,7 @@ function initBuilder() {
         if (br) drawRun(g, inst, br, sp, sel, false);
         drawTaps(g, inst);                              // tomas de ingreso/salida
       }
-      for (const key of lib.nodeKeys(inst.model)) mkNode(inst, key);
+      if (inst.family !== 'prop') for (const key of lib.nodeKeys(inst.model)) mkNode(inst, key);  // los props no exponen nodos
     }
     for (const l of graph.links) {
       const A = byId(l.from), B = byId(l.to); if (!A || !B) continue;

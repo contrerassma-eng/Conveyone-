@@ -166,6 +166,20 @@ const est = new ConveyorSim(mst, { seed: 5 }); for (let i = 0; i < 3000; i++) es
 check('estación: se acumulan cajas en el LBP antes de Niverplast', est.boxes.filter(b => b.segId === lbp.id).length > 1);
 check('estación: la guillotina/máquina deja pasar y la línea entrega', est.stats.delivered > 0);
 
+// 7f) GUILLOTINA Niverplast: metera la entrada a 15 c/min y la LBP acumula aguas arriba
+const gn = { instances: [], links: [] };
+const lbpN = lib.place('LBP', null, { length: 5 }); gn.instances.push(lbpN);
+const nivM = lib.place('NIVERPLAST', null, { meterPerMin: 15 }); gn.instances.push(nivM); lib.connect(gn, lbpN.id, nivM.id);
+const grrN = lib.place('GRR', null, { length: 3 }); gn.instances.push(grrN); lib.connect(gn, nivM.id, grrN.id);
+const mn = lib.graphToModel(gn, { rate: 40 * 60 });   // alimenta 40 c/min (más que el techo de la guillotina)
+const en = new ConveyorSim(mn, { seed: 6 });
+for (let i = 0; i < 6000; i++) en.step(0.05);   // 300 s
+const tputN = en.stats.throughput / 60, accumN = en.boxes.filter(b => b._blocked).length;
+check('niverplast: la guillotina metera ~15 c/min (no 40)', tputN > 8 && tputN < 22);
+check('niverplast: la LBP acumula aguas arriba (cero presión)', en.boxes.filter(b => b.segId === lbpN.id).length >= 3 && accumN > 0);
+check('niverplast: param tasa de corte (c/min)', lib.params('NIVERPLAST').some(p => p.cfg === 'meterPerMin'));
+check('catálogo: OPERATOR como prop', lib.get('OPERATOR').family === 'prop');
+
 // 8) GUARDAR / CARGAR (serialize -> hydrate) conserva el grafo y vuelve a compilar
 const json = lib.serialize(gd);
 const g2 = lib.hydrate(json);

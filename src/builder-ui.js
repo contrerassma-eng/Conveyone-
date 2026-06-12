@@ -142,6 +142,23 @@ export function initBuilder() {
   const matRoller = new THREE.MeshStandardMaterial({ color: 0xccd0d4, metalness: 0.7, roughness: 0.28 });
   const matAxle = new THREE.MeshStandardMaterial({ color: 0x40464d, metalness: 0.6, roughness: 0.4 });
   const matBelt = new THREE.MeshStandardMaterial({ color: 0x20252b, roughness: 0.9, metalness: 0.04 });
+  // Banda MODULAR plástica estilo Intralox Serie 1000 (flat top): textura de módulos en
+  // ladrillo generada por canvas (procedimental, sin assets). En headless se omite.
+  function makeModularTex() {
+    const cv = document.createElement('canvas'); cv.width = cv.height = 128;
+    const ctx = cv.getContext && cv.getContext('2d'); if (!ctx) return null;
+    ctx.fillStyle = '#c9d2da'; ctx.fillRect(0, 0, 128, 128);          // acetal claro (S1000)
+    ctx.strokeStyle = '#7e8893'; ctx.lineWidth = 2;
+    const rows = 4, cols = 8, rh = 128 / rows, cw = 128 / cols;
+    for (let r = 0; r < rows; r++) {
+      const off = (r % 2) * (cw / 2);
+      ctx.strokeRect(-cw, r * rh, 128 + 2 * cw, rh);
+      for (let c = -1; c <= cols + 1; c++) { ctx.beginPath(); ctx.moveTo(c * cw + off, r * rh + 2); ctx.lineTo(c * cw + off, (r + 1) * rh - 2); ctx.stroke(); }
+    }
+    const t = new THREE.CanvasTexture(cv); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(8, 2); return t;
+  }
+  const _modTex = makeModularTex();
+  const matBeltModular = new THREE.MeshStandardMaterial({ map: _modTex || null, color: _modTex ? 0xffffff : 0xb9c2cb, roughness: 0.55, metalness: 0.05 });
   const matLeg = new THREE.MeshStandardMaterial({ color: 0x969ca2, metalness: 0.4, roughness: 0.55 });
   const matMotor = new THREE.MeshStandardMaterial({ color: 0x2b2f36, metalness: 0.3, roughness: 0.6 });
   const matSel = new THREE.MeshStandardMaterial({ color: 0x2e6fd6, metalness: 0.4, roughness: 0.5, emissive: 0x12345a, emissiveIntensity: 0.45 });
@@ -195,7 +212,7 @@ export function initBuilder() {
     for (let i = 0; i < poly.length - 1; i++) {
       const hA = h0fn(i) + TOR, hB = h0fn(i + 1) + TOR;
       const A = [poly[i][0], hA, poly[i][1]], B = [poly[i + 1][0], hB, poly[i + 1][1]];
-      strut(group, [A[0], A[1] - belt / 2, A[2]], [B[0], B[1] - belt / 2, B[2]], width - 0.04, belt, sel ? matSel : matBelt);   // carga
+      strut(group, [A[0], A[1] - belt / 2, A[2]], [B[0], B[1] - belt / 2, B[2]], width - 0.04, belt, sel ? matSel : (sp.modular ? matBeltModular : matBelt));   // carga (modular = Intralox S1000)
       strut(group, [A[0], A[1] - belt - 0.006, A[2]], [B[0], B[1] - belt - 0.006, B[2]], width - 0.05, 0.01, matFrame);          // pan
       strut(group, [A[0], A[1] - pulley - belt, A[2]], [B[0], B[1] - pulley - belt, B[2]], width - 0.04, belt, matBelt);         // retorno
     }
@@ -285,9 +302,17 @@ export function initBuilder() {
     box(g, 0.06, 0.75, 0.06, p0[0], h + 1.0, p0[1], rotY, matMachine);                         // guía de la guillotina
     addSupport(g, p0, rotY, h, c.width || 1, 0.14); addSupport(g, p1, rotY, h, c.width || 1, 0.14);
   }
-  // ELEMENTO ESTÁTICO: mesa de inox / rack de tapas (3 niveles con minicarriles).
+  const matSkin = new THREE.MeshStandardMaterial({ color: 0xd7a98a, roughness: 0.7 });
+  const matVest = new THREE.MeshStandardMaterial({ color: 0xffd23a, roughness: 0.6, emissive: 0x4a3a00, emissiveIntensity: 0.2 });
+  // ELEMENTO ESTÁTICO: mesa de inox / rack de tapas (3 niveles con minicarriles) / operario.
   function drawProp(g, inst, sel) {
     const c = inst.cfg, x = inst.pose.x, z = inst.pose.z, r = inst.pose.rot, L = c.length || 1.5, W = c.width || 0.8, h = c.entryHeight || 0.9;
+    if (inst.model === 'OPERATOR') {                                                            // figura de persona
+      const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.22, 0.55, 12), sel ? matSel : matVest); cap.position.set(x, 0.95, z); g.add(cap);   // torso (chaleco)
+      for (const sd of [-1, 1]) { const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.7, 8), matMotor); const q = lp(x, z, r, sd * 0.09, 0); leg.position.set(q[0], 0.35, q[1]); g.add(leg); }   // piernas
+      const head = new THREE.Mesh(new THREE.SphereGeometry(0.12, 14, 14), matSkin); head.position.set(x, 1.32, z); g.add(head); g.add(new THREE.Mesh(new THREE.SphereGeometry(0.135, 12, 12), matVest).translateX(0)); g.children[g.children.length - 1].position.set(x, 1.42, z);   // casco
+      return;
+    }
     if (inst.model === 'INOXTABLE') {
       box(g, W, 0.03, L, x, h, z, r, sel ? matSel : matInox);                                  // tablero
       for (const a of [-1, 1]) for (const b of [-1, 1]) { const q = lp(x, z, r, a * (W / 2 - 0.04), b * (L / 2 - 0.04)); box(g, 0.04, h, 0.04, q[0], h / 2, q[1], r, matInox); }
@@ -321,7 +346,7 @@ export function initBuilder() {
         if (br) drawRun(g, inst, br, sp, sel, false);
         drawTaps(g, inst);                              // tomas de ingreso/salida
       }
-      for (const key of lib.nodeKeys(inst.model)) mkNode(inst, key);
+      if (inst.family !== 'prop') for (const key of lib.nodeKeys(inst.model)) mkNode(inst, key);  // los props no exponen nodos
     }
     for (const l of graph.links) {
       const A = byId(l.from), B = byId(l.to); if (!A || !B) continue;

@@ -28,20 +28,30 @@ function strip(src) {
     .join('\n');
 }
 
-// ---- layout semilla: la estación Niverplast de ejemplo (se construye con la librería real) ----
+// ---- layout semilla: la estación Niverplast MEJORADA (se construye con la librería real) ----
 function buildStationSeed() {
   const lib = createConveyorLibrary();
   const g = { instances: [], links: [] };
   const add = (id, ov) => { const last = g.instances[g.instances.length - 1]; const i = lib.place(id, null, ov); g.instances.push(i); if (last) lib.connect(g, last.id, i.id); return i; };
-  add('LBP-CURVE', { angleDeg: 90, radius: 1.2, cw: false });   // curva celeste de llegada
-  add('LBP', { length: 5 });                                     // acumulación (lo celeste)
-  add('NIVERPLAST', {});                                          // guillotina al ingreso
-  const grr = add('GRR', { length: 4 });                          // gravedad 700 mm + mini-mesas
-  // elementos estáticos junto a la gravedad (lado derecho del flujo final)
-  const n = grr.nodes.in, dir = n.dir;
-  const px = Math.cos(dir), pz = Math.sin(dir);
-  g.instances.push(lib.place('LIDRACK', { x: n.p[0] + px * 1.5 + 1.2, z: n.p[1] + pz * 1.5 - 1.4, rot: dir }));
-  g.instances.push(lib.place('INOXTABLE', { x: n.p[0] + px * 3.0 + 1.2, z: n.p[1] + pz * 3.0 - 1.4, rot: dir }));
+  // FLUJO: curva de llegada → LBP (Intralox S1000, acumula) → Niverplast (guillotina 15 c/min)
+  //        → gravedad OD30/3" con mini-mesas → conveyor final de salida
+  add('190-E24C', { angleDeg: 60, radius: 1.1, cw: true });
+  const lbp = add('LBP', { length: 5 });                                 // acumulación (lo celeste, S1000)
+  add('NIVERPLAST', { meterPerMin: 15 });                                // guillotina-tope, metera 15 c/min
+  const grr = add('GRR', { length: 5 });                                  // gravedad 700 mm + mini-mesas
+  add('TA', { length: 2.5 });                                            // conveyor final (saca las cajas)
+  // alimentación de prueba en la curva (para ver la acumulación en la LBP)
+  lib.place('TA');  // (no usado; la fuente la pone el grafo en la 1ª pieza)
+  // ESTACIÓN MANUAL junto a la gravedad: 2 mesas (una por lado), rack de tapas, 4 operarios 2x lado
+  const n = grr.nodes.in, dir = n.dir, fx = Math.cos(dir), fz = Math.sin(dir), px = Math.sin(dir), pz = -Math.cos(dir);
+  const along = (d) => [n.p[0] + fx * d, n.p[1] + fz * d];
+  const side = (p, s) => [p[0] + px * s, p[1] + pz * s];
+  const place = (id, p, rot, ov) => g.instances.push(lib.place(id, { x: p[0], z: p[1], rot: rot != null ? rot : dir }, ov));
+  place('INOXTABLE', side(along(2.5), 1.4), dir, { length: 2, width: 0.8 });        // mesa lado +
+  place('INOXTABLE', side(along(2.5), -1.4), dir, { length: 2, width: 0.8 });       // mesa lado −
+  place('LIDRACK', side(along(2.5), 2.4), dir, { length: 3, width: 0.5, entryHeight: 1.3 }); // rack de tapas
+  place('OPERATOR', side(along(1.4), 0.95), 0); place('OPERATOR', side(along(3.6), 0.95), 0);   // 2 operarios lado +
+  place('OPERATOR', side(along(1.4), -0.95), 0); place('OPERATOR', side(along(3.6), -0.95), 0); // 2 operarios lado −
   return JSON.parse(lib.serialize(g));
 }
 
@@ -104,5 +114,7 @@ ${merged}
 
 mkdirSync(join(root, 'dist'), { recursive: true });
 writeFileSync(join(root, 'dist/modelador-standalone.html'), html);
+// también deja el layout suelto para cargar con 📂 en el modelador online
+writeFileSync(join(root, 'dist/estacion-niverplast.layout.json'), JSON.stringify(buildStationSeed(), null, 2));
 console.log('dist/modelador-standalone.html generado:', (html.length / 1024).toFixed(0), 'KB ·',
   buildStationSeed().instances.length, 'piezas en el layout semilla');
