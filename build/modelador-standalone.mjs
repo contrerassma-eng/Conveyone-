@@ -69,14 +69,30 @@ const html = `<!doctype html>
 <style>html,body{margin:0;height:100%;background:#0e1116}</style>
 </head>
 <body>
+<script>/* diagnóstico: cualquier error se muestra (no más pantallas negras mudas) */
+window.__errs = [];
+window.showErr = function (m) {
+  window.__errs.push(m);
+  var d = document.getElementById('err');
+  if (!d) { d = document.createElement('div'); d.id = 'err'; d.style.cssText = 'position:fixed;left:8px;bottom:8px;max-width:92%;z-index:99;background:#7a1020;color:#fff;font:12px/1.4 monospace;padding:9px 11px;border-radius:8px;white-space:pre-wrap'; document.body.appendChild(d); }
+  d.textContent = '⚠ ' + window.__errs.join('\\n— ');
+};
+window.addEventListener('error', function (e) { window.showErr((e.message || 'error') + (e.filename ? '' : '') + (e.lineno ? ' @' + e.lineno : '')); }, true);
+</script>
 <script>/* three.js r128 (UMD, incrustado — funciona offline/file://) */
 ${read('vendor/three.min.js')}
 </script>
-<script>
-${read('vendor/OrbitControls.global.js')}
+<script>/* OrbitControls (variante global, sin export) + registro en THREE.* */
+${strip(read('vendor/OrbitControls.global.js'))}
+THREE.OrbitControls = OrbitControls;
 </script>
 <script>
 ${read('vendor/VRButton.js')}
+</script>
+<script>
+if (typeof THREE === 'undefined') window.showErr('three.js no cargó');
+else if (!THREE.OrbitControls) window.showErr('OrbitControls no registrado');
+else if (!THREE.VRButton) window.showErr('VRButton no registrado');
 </script>
 <script>window.__seedLayout = ${seed};</script>
 <script type="module">

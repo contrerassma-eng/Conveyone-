@@ -14,6 +14,19 @@ if (!existsSync(file)) { console.error('falta dist/modelador-standalone.html (co
 const html = readFileSync(file, 'utf8');
 const mod = html.split('<script type="module">')[1].split('</script>')[0];
 
+// ── chequeos ESTÁTICOS del HTML (la clase de bug que tumbó el primer build) ──
+// 1) ningún <script> CLÁSICO puede contener import/export (SyntaxError silencioso)
+const classicScripts = html.split(/<script(?![^>]*type="module")[^>]*>/).slice(1).map(s => s.split('</script>')[0]);
+for (const [i, s] of classicScripts.entries()) {
+  if (/^\s*(import|export)\b/m.test(s)) { console.error(`✗ script clásico #${i} contiene import/export (SyntaxError en navegador)`); process.exit(1); }
+}
+// 2) los globales que el módulo consume deben quedar REGISTRADOS por los scripts clásicos
+if (!html.includes('THREE.OrbitControls = OrbitControls')) { console.error('✗ falta el registro THREE.OrbitControls'); process.exit(1); }
+if (!html.includes('THREE.VRButton = VRButton')) { console.error('✗ falta el registro THREE.VRButton'); process.exit(1); }
+// 3) overlay de diagnóstico presente (errores visibles, no pantalla negra muda)
+if (!html.includes('window.showErr')) { console.error('✗ falta el overlay de diagnóstico'); process.exit(1); }
+console.log('✓ HTML estático OK (sin export en scripts clásicos; OrbitControls/VRButton registrados; overlay presente)');
+
 // ---------- stub de THREE (rico: vectores/quaternions/instancing encadenables) ----------
 function V3(x = 0, y = 0, z = 0) {
   return { x, y, z,
