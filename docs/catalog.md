@@ -60,6 +60,14 @@ nodo de entrada coincida con el de salida de la anterior.
 | `DV90` | desviador (1→2) | celda con salida recta + desvío 90° | 0° | reparte por hueco |
 | `DV30` | desviador (1→2) | celda con salida recta + spur 30° | 0° | alta tasa |
 | `MG` | merge (2→1) | confluencia de dos líneas a un tronco | 0° | sin solape (R4) |
+| `NIVERPLAST` | máquina | corte/volcado de cajas; **guillotina al ingreso**; LBP se acumula antes | — | dims aproximadas (no cut-sheet) |
+| `GRR` | gravedad | rodillo **OD 30 mm, paso 3", 700 mm** + **mini-mesas 200 mm** a los lados | ≤7° | declarado por el usuario |
+| `LIDRACK` | estático | rack de **3 niveles** de bandejas con **minicarriles** (abastece tapas) | — | sin flujo |
+| `INOXTABLE` | estático | mesa de inox de trabajo (tomar contenido / tapar) | — | sin flujo |
+
+La **estación Niverplast** se arma: LBP (acumulación, lo celeste) → `NIVERPLAST` (proceso que
+retiene → el LBP se acumula aguas arriba) → `GRR` (gravedad con mini-mesas) + `LIDRACK` e
+`INOXTABLE` colocados al lado como elementos estáticos.
 
 Las **familias cinemáticas** (`src/catalog.js → FAMILIES`) son lo que el motor consume:
 

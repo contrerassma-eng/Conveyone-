@@ -123,6 +123,24 @@ const FAMILIES = {
     },
     entrySeg: id => id, exitSeg: id => id,
   },
+
+  // MÁQUINA en línea (p.ej. Niverplast): la caja pasa por un tramo con un PROCESO que la
+  // retiene (corte/volcado) → aguas arriba se acumula (LBP). Render aparte (housing+guillotina).
+  machine: {
+    nodes(pose, c) { return FAMILIES.straight.nodes(pose, c); },
+    segments(id, pose, c) {
+      const n = FAMILIES.straight.nodes(pose, c);
+      return [{ id, geom: { type: 'straight', from: n.in.p, to: n.out.p }, height: c.entryHeight, speed: c.speed, pitch: c.pitch,
+        process: { at: (c.length || 2) * 0.5, time: c.cutTime || 1.6, operators: 1, cv: 0.2 } }];
+    },
+    entrySeg: id => id, exitSeg: id => id,
+  },
+  // ELEMENTO ESTÁTICO (rack, mesa): sin flujo. Un nodo ancla para colocar/seleccionar.
+  prop: {
+    nodes(pose) { return { in: { p: [pose.x, pose.z], dir: pose.rot }, out: { p: [pose.x, pose.z], dir: pose.rot } }; },
+    segments() { return []; },
+    entrySeg: id => id, exitSeg: id => id,
+  },
 };
 
 // ───────────────────────── CATÁLOGO (modelos comerciales 24") ─────────────────────────
@@ -180,6 +198,28 @@ const CATALOG = [
     defaults: { angleDeg: 90, radius: 1.1, width: W24, speed: 60 * FPM, pitch: BOX[0] + GAP_MIN, entryHeight: 0.9, cw: false },
     caps: { maxInclineDeg: 0, rollerDia: 2.5 * IN },
     note: 'Curva de rodillo motorizado. Rodillos CÓNICOS 2.5"→1-11/16" dispuestos radialmente.' },
+
+  { id: 'NIVERPLAST', label: 'Niverplast · Corte/volcado de cajas (guillotina al ingreso)', group: 'Estación Niverplast',
+    kind: 'machine', family: 'machine',
+    defaults: { length: 2.0, width: 1.0, speed: 0.4, pitch: BOX[0] + GAP_MIN, entryHeight: 0.8, cutTime: 1.6 },
+    caps: { maxInclineDeg: 0 },
+    note: 'Máquina Niverplast: la guillotina corta las cajas al ingreso; aguas arriba se acumulan (LBP). Dimensiones APROXIMADAS (descripción del usuario, no cut-sheet).' },
+
+  { id: 'GRR', label: 'Gravedad · Rodillo OD30 paso 3" (700 mm) + mini-mesas 200 mm', group: 'Estación Niverplast',
+    kind: 'gravity', family: 'straight',
+    defaults: { length: 4.0, width: 0.6, speed: 0.3, pitch: BOX[0] + GAP_MIN, entryHeight: 0.7 },
+    caps: { maxInclineDeg: 7, rollerDia: 0.030 },
+    note: 'Transportador por gravedad: rodillo OD 30 mm a paso 3", altura 700 mm, con mini-mesas de 200 mm a cada lado (tomar contenido / tapar).' },
+
+  { id: 'LIDRACK', label: 'Rack de tapas · 3 niveles de bandejas con minicarriles', group: 'Estación Niverplast',
+    kind: 'prop', family: 'prop',
+    defaults: { length: 1.6, width: 0.5, entryHeight: 1.1 },
+    caps: {}, note: 'Estantería de 3 niveles con minicarriles que abastecen tapas de cajas por gravedad. Estático (sin flujo de cajas).' },
+
+  { id: 'INOXTABLE', label: 'Mesa de inox · tomar contenido y tapar', group: 'Estación Niverplast',
+    kind: 'prop', family: 'prop',
+    defaults: { length: 1.5, width: 0.8, entryHeight: 0.9 },
+    caps: {}, note: 'Mesa de acero inoxidable de trabajo. Estático (sin flujo de cajas).' },
 
   { id: 'E24SS', label: 'E24SS · Transferencia de rodillo motorizado', group: 'Transferencias',
     kind: 'transfer', family: 'transfer',
@@ -241,6 +281,8 @@ const SPECS = {
   'LBP':       { surface: 'belt', frameDepthIn: 5.5, railHeightIn: 0, pulleyDiaIn: 4, beltMm: 8, speedFpm: [30, 120], modular: true, src: 'TA-642' },
   'LBP-CURVE': { surface: 'belt', frameDepthIn: 4.0, railHeightIn: 0, pulleyDiaIn: 4, beltMm: 8, speedFpm: [30, 120], modular: true, src: 'TA-642' },
   '190-E24C':  { surface: 'rollers', rollerDiaIn: 2.5, rollerTaperToIn: 1.6875, rollerPitchIn: 3.0, gauge: 16, frameDepthIn: 6, railHeightIn: 1.625, speedFpm: [25, 174], tapered: true, src: 'E24-713' },
+  // Gravedad: rodillo OD 30 mm a paso 3", altura 700 mm, mini-mesas 200 mm (declarado por el usuario)
+  'GRR':       { surface: 'rollers', rollerDiaIn: 30 / 25.4, rollerPitchIn: 3.0, gauge: 16, frameDepthIn: 5, railHeightIn: 0, sideTable: 0.2, gravity: true, speedFpm: [0, 60], src: 'USER' },
 };
 
 function specMetric(id) {
@@ -256,6 +298,7 @@ function specMetric(id) {
     pulleyDia: s.pulleyDiaIn != null ? s.pulleyDiaIn * IN : null,
     belt: s.beltMm != null ? s.beltMm / 1000 : null,
     gauge: s.gauge || null, zone: !!s.zone, modular: !!s.modular, cleated: !!s.cleated,
+    sideTable: s.sideTable || 0, gravity: !!s.gravity,
     speedFpm: s.speedFpm || null, inches: s, src: s.src,
   };
 }
@@ -265,6 +308,8 @@ function specMetric(id) {
 // 'incline' = ajusta exitHeight por el ángulo, 'm'/'raw'/'bool' directos).
 function paramsFor(id) {
   const m = modelById(id), sp = SPECS[id] || {}, fam = m.family, out = [];
+  if (fam === 'prop') return [{ label: 'Largo (m)', cfg: 'length', unit: 'm', type: 'number', min: 0.3, max: 5, step: 0.1 }, { label: 'Ancho (m)', cfg: 'width', unit: 'm', type: 'number', min: 0.2, max: 3, step: 0.1 }];
+  if (fam === 'machine') { out.push({ label: 'Tiempo de corte (s)', cfg: 'cutTime', unit: 'raw', type: 'number', min: 0.2, max: 10, step: 0.1 }); out.push({ label: 'Largo (m)', cfg: 'length', unit: 'm', type: 'number', min: 0.5, max: 5, step: 0.1 }); return out; }
   if (sp.surface === 'rollers') {
     out.push({ label: 'Centros de rodillo', cfg: 'rollerPitch', unit: 'in', type: 'select', options: [2, 3] });
     out.push({ label: 'Ancho BR', cfg: 'width', unit: 'in', type: 'select', options: [18, 24, 30, 36] });
@@ -309,6 +354,10 @@ const REFS = {
   'LBP':       { hytrol: 'TA/LBP',     note: 'Banda modular (LBP) — genérica', doc: DOC.TA, cat: DOC.BELT },
   'LBP-CURVE': { hytrol: 'SBC',        note: 'Curva de banda (cama deslizante)', doc: DOC.TA, cat: DOC.BELT },
   '190-E24C':  { hytrol: '190-E24C',   note: 'Curva de rodillo vivo 24V (cónicos)', doc: DOC.E24, cat: DOC.LR },
+  'NIVERPLAST': { hytrol: 'Niverplast', note: 'Corte/volcado de cajas (guillotina al ingreso)', doc: 'https://niverplast.com/packaging-machines', cat: 'https://niverplast.com/' },
+  'GRR':        { hytrol: 'Gravity Roller', note: 'Rodillo por gravedad OD30 paso 3" (700 mm)', doc: DOC.LR, cat: DOC.LR },
+  'LIDRACK':    { hytrol: '—',          note: 'Rack de tapas de 3 niveles con minicarriles', doc: DOC.LR, cat: DOC.LR },
+  'INOXTABLE':  { hytrol: '—',          note: 'Mesa de inox de trabajo', doc: DOC.LR, cat: DOC.LR },
 };
 
 function modelById(id) { const m = CATALOG.find(x => x.id === id); if (!m) throw new Error('modelo desconocido: ' + id); return m; }

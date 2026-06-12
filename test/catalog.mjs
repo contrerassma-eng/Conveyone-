@@ -18,7 +18,7 @@ for (const m of lib.list()) {
   try {
     const inst = lib.place(m.id, { x: 0, z: 0, rot: 0 });
     const segs = lib.graphToModel({ instances: [inst], links: [] }).segments;
-    if (!segs.length || !segs[0].geom) allCompile = false;
+    if (m.family !== 'prop' && (!segs.length || !segs[0].geom)) allCompile = false;   // los 'prop' no tienen flujo
     if (!inst.nodes || !inst.nodes.in || !inst.nodes.out) allNodes = false;
     // el motor debe poder compilar el modelo de una sola pieza
     new ConveyorSim({ meta: { boxSize: lib.BOX }, segments: segs }, { seed: 1 });
@@ -152,6 +152,19 @@ const et = new ConveyorSim(mt, { seed: 4 }); for (let i = 0; i < 2000; i++) et.s
 check('taps: la toma de INGRESO inyecta cajas (sin fuente de cabeza)', et.stats.generated > 0);
 check('taps: la toma de SALIDA desvía cajas (entregadas en la toma)', et.stats.delivered > 0);
 check('taps: persisten en serialize/hydrate', lib.hydrate(lib.serialize(gt)).instances[0].cfg.taps.length === 2);
+
+// 7f) ESTACIÓN Niverplast: LBP(acumula) -> NIVERPLAST(guillotina/proceso) -> GRR(gravedad)
+const gst = { instances: [], links: [] };
+const addst = (id, ov) => { const last = gst.instances[gst.instances.length - 1]; const i = lib.place(id, null, ov); gst.instances.push(i); if (last) lib.connect(gst, last.id, i.id); return i; };
+const lbp = addst('LBP', { length: 5 }); const niv = addst('NIVERPLAST'); const grr = addst('GRR', { length: 4 });
+gst.instances.push(lib.place('LIDRACK', { x: 1, z: 3 })); gst.instances.push(lib.place('INOXTABLE', { x: 3, z: 3 }));
+const mst = lib.graphToModel(gst, { rate: 30 * 60 });
+check('estación: props (rack/mesa) no generan segmento de flujo', !mst.segments.some(s => /LIDRACK|INOXTABLE/.test(s.id)));
+check('estación: Niverplast es un proceso (throttle → acumulación LBP)', !!mst.segments.find(s => s.id === niv.id).process);
+check('GRR: rodillo OD 30 mm, paso 3" (76 mm), mini-mesa 200 mm', near(lib.spec('GRR').rollerDia, 0.030) && near(lib.spec('GRR').rollerPitch, 3 * IN) && near(lib.spec('GRR').sideTable, 0.2));
+const est = new ConveyorSim(mst, { seed: 5 }); for (let i = 0; i < 3000; i++) est.step(0.05);
+check('estación: se acumulan cajas en el LBP antes de Niverplast', est.boxes.filter(b => b.segId === lbp.id).length > 1);
+check('estación: la guillotina/máquina deja pasar y la línea entrega', est.stats.delivered > 0);
 
 // 8) GUARDAR / CARGAR (serialize -> hydrate) conserva el grafo y vuelve a compilar
 const json = lib.serialize(gd);

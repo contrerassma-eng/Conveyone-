@@ -271,15 +271,56 @@ export function initBuilder() {
     }
   }
 
+  // MÁQUINA en línea (Niverplast): housing + guillotina al ingreso + banda de paso.
+  const matMachine = new THREE.MeshStandardMaterial({ color: 0x55606b, metalness: 0.5, roughness: 0.5 });
+  const matBlade = new THREE.MeshStandardMaterial({ color: 0xe6edf3, metalness: 0.85, roughness: 0.2 });
+  const matInox = new THREE.MeshStandardMaterial({ color: 0xd6dde3, metalness: 0.8, roughness: 0.25 });
+  const lp = (x, z, r, lx, lz) => [x + lx * Math.cos(r) + lz * Math.sin(r), z - lx * Math.sin(r) + lz * Math.cos(r)];
+  function drawMachine(g, inst, sel) {
+    const c = inst.cfg, p0 = inst.nodes.in.p, p1 = inst.nodes.out.p, d = hdir(p0, p1), h = c.entryHeight;
+    const cx = (p0[0] + p1[0]) / 2, cz = (p0[1] + p1[1]) / 2, rotY = Math.atan2(d.dx, d.dz), W = (c.width || 1) + 0.2;
+    box(g, c.width || 1, 0.04, d.L, cx, h + TOR, cz, rotY, matBelt);                          // banda de paso
+    box(g, W, 1.2, d.L * 0.78, cx, h + 0.6, cz, rotY, sel ? matSel : matMachine);             // housing
+    box(g, W + 0.05, 0.55, 0.03, p0[0] + d.dx * 0.12, h + 0.5, p0[1] + d.dz * 0.12, rotY, matBlade);  // GUILLOTINA al ingreso
+    box(g, 0.06, 0.75, 0.06, p0[0], h + 1.0, p0[1], rotY, matMachine);                         // guía de la guillotina
+    addSupport(g, p0, rotY, h, c.width || 1, 0.14); addSupport(g, p1, rotY, h, c.width || 1, 0.14);
+  }
+  // ELEMENTO ESTÁTICO: mesa de inox / rack de tapas (3 niveles con minicarriles).
+  function drawProp(g, inst, sel) {
+    const c = inst.cfg, x = inst.pose.x, z = inst.pose.z, r = inst.pose.rot, L = c.length || 1.5, W = c.width || 0.8, h = c.entryHeight || 0.9;
+    if (inst.model === 'INOXTABLE') {
+      box(g, W, 0.03, L, x, h, z, r, sel ? matSel : matInox);                                  // tablero
+      for (const a of [-1, 1]) for (const b of [-1, 1]) { const q = lp(x, z, r, a * (W / 2 - 0.04), b * (L / 2 - 0.04)); box(g, 0.04, h, 0.04, q[0], h / 2, q[1], r, matInox); }
+    } else {                                                                                   // LIDRACK
+      for (const a of [-1, 1]) for (const b of [-1, 1]) { const q = lp(x, z, r, a * (W / 2 - 0.03), b * (L / 2 - 0.03)); box(g, 0.035, h + 0.6, 0.035, q[0], (h + 0.6) / 2, q[1], r, matFrame); }
+      for (let lv = 0; lv < 3; lv++) { const yy = h - 0.25 + lv * 0.3;
+        box(g, W, 0.02, L, x, yy, z, r, sel ? matSel : matInox);                               // bandeja
+        for (const k of [-1, 0, 1]) box(g, 0.015, 0.04, L, x + Math.cos(r) * k * W * 0.28, yy + 0.03, z - Math.sin(r) * k * W * 0.28, r, matRail); // minicarriles
+      }
+    }
+  }
+  function addSideTables(group, poly, hAt, width, tw) {     // mini-mesas a ambos lados (gravedad)
+    for (const sd of [-1, 1]) for (let i = 0; i < poly.length - 1; i++) {
+      const d = hdir(poly[i], poly[i + 1]), ox = d.px * sd * (width / 2 + tw / 2), oz = d.pz * sd * (width / 2 + tw / 2);
+      strut(group, [poly[i][0] + ox, hAt(i) + TOR - 0.01, poly[i][1] + oz], [poly[i + 1][0] + ox, hAt(i + 1) + TOR - 0.01, poly[i + 1][1] + oz], tw, 0.02, matInox);
+    }
+  }
+
   function rebuild() {
     for (const r of [convRoot, nodeRoot, linkRoot]) while (r.children.length) r.remove(r.children[0]);
     for (const inst of graph.instances) {
       const g = new THREE.Group(); g.userData.instId = inst.id; convRoot.add(g);
-      const poly = instPolyline(inst), sel = selected && selected.id === inst.id, sp = lib.spec(inst.model);
-      drawRun(g, inst, poly, sp, sel, true);          // tramo principal (con soportes)
-      const br = instBranchPoly(inst);                // spur de los desviadores (sin soportes extra)
-      if (br) drawRun(g, inst, br, sp, sel, false);
-      drawTaps(g, inst);                              // tomas de ingreso/salida
+      const sel = selected && selected.id === inst.id, sp = lib.spec(inst.model);
+      if (inst.family === 'machine') drawMachine(g, inst, sel);
+      else if (inst.family === 'prop') drawProp(g, inst, sel);
+      else {
+        const poly = instPolyline(inst);
+        drawRun(g, inst, poly, sp, sel, true);          // tramo principal (con soportes)
+        if (sp && sp.sideTable) addSideTables(g, poly, i => heightsAlong(inst, i, poly.length - 1), inst.cfg.width, sp.sideTable);
+        const br = instBranchPoly(inst);                // spur de los desviadores (sin soportes extra)
+        if (br) drawRun(g, inst, br, sp, sel, false);
+        drawTaps(g, inst);                              // tomas de ingreso/salida
+      }
       for (const key of lib.nodeKeys(inst.model)) mkNode(inst, key);
     }
     for (const l of graph.links) {
