@@ -175,6 +175,12 @@ const CATALOG = [
     caps: { maxInclineDeg: 0, rollerDia: ROLLER19, modular: true },
     note: 'Curva de banda modular. Sin acumulación ni inclinación dentro de la curva.' },
 
+  { id: '190-E24C', label: '190-E24C · Curva de rodillo vivo 24V (cónicos)', group: 'Curvas',
+    kind: 'roller', family: 'curve',
+    defaults: { angleDeg: 90, radius: 1.1, width: W24, speed: 60 * FPM, pitch: BOX[0] + GAP_MIN, entryHeight: 0.9, cw: false },
+    caps: { maxInclineDeg: 0, rollerDia: 2.5 * IN },
+    note: 'Curva de rodillo motorizado. Rodillos CÓNICOS 2.5"→1-11/16" dispuestos radialmente.' },
+
   { id: 'E24SS', label: 'E24SS · Transferencia de rodillo motorizado', group: 'Transferencias',
     kind: 'transfer', family: 'transfer',
     defaults: { length: 1.2, angleDeg: 90, width: W24, speed: 70 * FPM, pitch: BOX[0] + GAP_MIN, entryHeight: 0.9, cw: true },
@@ -234,6 +240,7 @@ const SPECS = {
   'SBI':       { surface: 'belt', frameDepthIn: 5.5, railHeightIn: 0, pulleyDiaIn: 4, beltMm: 5, speedFpm: [30, 120], cleated: true, src: 'TA-642' },
   'LBP':       { surface: 'belt', frameDepthIn: 5.5, railHeightIn: 0, pulleyDiaIn: 4, beltMm: 8, speedFpm: [30, 120], modular: true, src: 'TA-642' },
   'LBP-CURVE': { surface: 'belt', frameDepthIn: 4.0, railHeightIn: 0, pulleyDiaIn: 4, beltMm: 8, speedFpm: [30, 120], modular: true, src: 'TA-642' },
+  '190-E24C':  { surface: 'rollers', rollerDiaIn: 2.5, rollerTaperToIn: 1.6875, rollerPitchIn: 3.0, gauge: 16, frameDepthIn: 6, railHeightIn: 1.625, speedFpm: [25, 174], tapered: true, src: 'E24-713' },
 };
 
 function specMetric(id) {
@@ -241,6 +248,8 @@ function specMetric(id) {
   return {
     surface: s.surface,
     rollerDia: s.rollerDiaIn != null ? s.rollerDiaIn * IN : null,
+    rollerTaper: s.rollerTaperToIn != null ? s.rollerTaperToIn * IN : null,
+    tapered: !!s.tapered,
     rollerPitch: s.rollerPitchIn != null ? s.rollerPitchIn * IN : null,
     frameDepth: (s.frameDepthIn || 5.5) * IN,
     railHeight: (s.railHeightIn || 0) * IN,
@@ -249,6 +258,30 @@ function specMetric(id) {
     gauge: s.gauge || null, zone: !!s.zone, modular: !!s.modular, cleated: !!s.cleated,
     speedFpm: s.speedFpm || null, inches: s, src: s.src,
   };
+}
+
+// Parámetros PROPIOS de cada modelo (opciones de cut-sheet) para setear en la UI.
+// Cada control referencia una clave de cfg + conversión de unidad ('in'→metros, 'fpm'→m/s,
+// 'incline' = ajusta exitHeight por el ángulo, 'm'/'raw'/'bool' directos).
+function paramsFor(id) {
+  const m = modelById(id), sp = SPECS[id] || {}, fam = m.family, out = [];
+  if (sp.surface === 'rollers') {
+    out.push({ label: 'Centros de rodillo', cfg: 'rollerPitch', unit: 'in', type: 'select', options: [2, 3] });
+    out.push({ label: 'Ancho BR', cfg: 'width', unit: 'in', type: 'select', options: [18, 24, 30, 36] });
+    if (sp.zone) out.push({ label: 'Zona EZLogic', cfg: 'zoneIn', unit: 'raw', type: 'select', options: [18, 24, 30, 36] });
+  } else {
+    out.push({ label: 'Ancho de banda', cfg: 'width', unit: 'in', type: 'select', options: [12, 18, 24, 30] });
+    out.push({ label: 'Polea / drive', cfg: 'pulleyDia', unit: 'in', type: 'select', options: [4, 8] });
+  }
+  if (sp.speedFpm) out.push({ label: 'Velocidad', cfg: 'speed', unit: 'fpm', type: 'number', min: sp.speedFpm[0], max: sp.speedFpm[1], step: 5 });
+  if (fam === 'curve') {
+    out.push({ label: 'Ángulo de curva', cfg: 'angleDeg', unit: 'raw', type: 'select', options: [30, 45, 60, 90] });
+    out.push({ label: 'Radio', cfg: 'radius', unit: 'm', type: 'number', min: 0.4, max: 2.0, step: 0.1 });
+    out.push({ label: 'Sentido', cfg: 'cw', unit: 'bool', type: 'select', options: [['Horario', true], ['Antihorario', false]] });
+  }
+  if (fam === 'transfer' || fam === 'divert') out.push({ label: 'Ángulo de desvío', cfg: 'angleDeg', unit: 'raw', type: 'select', options: [30, 45, 90] });
+  if (m.caps && m.caps.maxInclineDeg > 0) out.push({ label: 'Inclinación', cfg: 'inclineDeg', unit: 'incline', type: 'number', min: 0, max: m.caps.maxInclineDeg, step: 1 });
+  return out;
 }
 
 // ───── REFERENCIA al catálogo Hytrol real (designación oficial + ficha/manual) ─────
@@ -275,6 +308,7 @@ const REFS = {
   'SBI':       { hytrol: 'SBI',        note: 'Banda cama deslizante INCLINADA', doc: DOC.TA, cat: DOC.BELT },
   'LBP':       { hytrol: 'TA/LBP',     note: 'Banda modular (LBP) — genérica', doc: DOC.TA, cat: DOC.BELT },
   'LBP-CURVE': { hytrol: 'SBC',        note: 'Curva de banda (cama deslizante)', doc: DOC.TA, cat: DOC.BELT },
+  '190-E24C':  { hytrol: '190-E24C',   note: 'Curva de rodillo vivo 24V (cónicos)', doc: DOC.E24, cat: DOC.LR },
 };
 
 function modelById(id) { const m = CATALOG.find(x => x.id === id); if (!m) throw new Error('modelo desconocido: ' + id); return m; }
@@ -308,6 +342,8 @@ export function createConveyorLibrary() {
     // ficha física (capa WEB, ver docs/web_facts.json): superficie, OD/pitch de rodillo,
     // profundidad de bastidor, riel-guía, polea, etc. en METROS (+ pulgadas en .inches).
     spec(id) { return specMetric(id); },
+    // parámetros propios del modelo (opciones de cut-sheet) para la UI
+    params(id) { return paramsFor(id); },
     // referencia al catálogo Hytrol real: designación oficial + ficha/manual citado
     ref(id) { return REFS[id] || null; },
     // claves de nodo de un modelo (in/out/out2/in2…), para la UI

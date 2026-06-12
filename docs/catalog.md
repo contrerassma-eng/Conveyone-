@@ -147,6 +147,13 @@ con muñón** en cada extremo (InstancedMesh), bandas con **cama deslizante + co
 y de retorno envolviendo poleas de extremo + paquete motriz** (motor + guarda de cadena), y
 **soportes de piso tipo H** (patas de canal + placas + travesaño + rodilla diagonal).
 
+**Parámetros propios por modelo** (`lib.params(id)`): el inspector ofrece las opciones de
+cut-sheet de cada modelo — centros de rodillo (2"/3"), ancho BR, zona EZLogic, ancho de
+banda, polea/drive (4"/8"), ángulo y radio de curva, ángulo de desvío, inclinación (SBI).
+Todo se dibuja **inclinado en 3D**: al cambiar la altura de salida el tramo sube de verdad
+(struts orientados A→B, no cajas planas a altura media). Las curvas se muestrean cada ~5°
+y `190-E24C` usa **rodillos cónicos** dispuestos radialmente.
+
 **Asumido** (no de cut-sheet, marcado en `web_facts.json`): profundidad de bastidor de las
 bandas, diámetro de polea (~4"), espesor de banda y sección de las patas de soporte.
 

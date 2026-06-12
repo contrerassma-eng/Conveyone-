@@ -119,7 +119,7 @@ export function initBuilder() {
   function instPolyline(inst) {
     const n = inst.nodes, c = inst.cfg;
     if (inst.family === 'curve') {
-      const pts = []; const N = 16;
+      const pts = [], sweep = Math.abs(n._a1 - n._a0), N = Math.max(12, Math.round(sweep / (Math.PI / 36))); // ~5° por tramo (curva suave)
       for (let i = 0; i <= N; i++) { const a = n._a0 + (n._a1 - n._a0) * i / N; pts.push([n._center[0] + c.radius * Math.cos(a), n._center[1] + c.radius * Math.sin(a)]); }
       return pts;
     }
@@ -140,96 +140,106 @@ export function initBuilder() {
   const matLeg = new THREE.MeshStandardMaterial({ color: 0x969ca2, metalness: 0.4, roughness: 0.55 });
   const matMotor = new THREE.MeshStandardMaterial({ color: 0x2b2f36, metalness: 0.3, roughness: 0.6 });
   const matSel = new THREE.MeshStandardMaterial({ color: 0x2e6fd6, metalness: 0.4, roughness: 0.5, emissive: 0x12345a, emissiveIntensity: 0.45 });
-  const rollerGeo = new THREE.CylinderGeometry(0.5, 0.5, 1, 18);   // se escala por instancia (OD/largo reales)
-  const axleGeo = new THREE.CylinderGeometry(0.5, 0.5, 1, 6);      // muñón hexagonal del rodillo
-  const _Y = new THREE.Vector3(0, 1, 0), _q = new THREE.Quaternion(), _ax = new THREE.Vector3(), _dummy = new THREE.Object3D();
-  const TOR = 0.025;   // tapa visual (la altura de la pieza = top of roller/belt)
+  const rollerGeo = new THREE.CylinderGeometry(0.5, 0.5, 1, 18);
+  const axleGeo = new THREE.CylinderGeometry(0.5, 0.5, 1, 6);
+  const _Y = new THREE.Vector3(0, 1, 0), _Z = new THREE.Vector3(0, 0, 1), _q = new THREE.Quaternion(), _ax = new THREE.Vector3(), _Dv = new THREE.Vector3(), _dummy = new THREE.Object3D();
+  const TOR = 0.025;   // top of roller/belt (la altura de la pieza = superficie de transporte)
 
-  function segMeta(p0, p1) { const dx = p1[0] - p0[0], dz = p1[1] - p0[1], L = Math.hypot(dx, dz) || 1e-3; return { dx: dx / L, dz: dz / L, L, rotY: Math.atan2(dx, dz), mx: (p0[0] + p1[0]) / 2, mz: (p0[1] + p1[1]) / 2, ox: Math.cos(Math.atan2(dx, dz)), oz: -Math.sin(Math.atan2(dx, dz)) }; }
+  function segMeta(p0, p1) { const dx = p1[0] - p0[0], dz = p1[1] - p0[1], L = Math.hypot(dx, dz) || 1e-3; return { dx: dx / L, dz: dz / L, L, rotY: Math.atan2(dx, dz), mx: (p0[0] + p1[0]) / 2, mz: (p0[1] + p1[1]) / 2 }; }
+  function hdir(p0, p1) { const dx = p1[0] - p0[0], dz = p1[1] - p0[1], L = Math.hypot(dx, dz) || 1e-3; return { dx: dx / L, dz: dz / L, L, px: dz / L, pz: -dx / L }; }
   function box(group, w, h, d, x, y, z, rotY, mat) { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); m.position.set(x, y, z); m.rotation.y = rotY; group.add(m); return m; }
+  // caja ORIENTADA en 3D de A a B (sección tw×th). Si A.y≠B.y se INCLINA → el modelo SÍ sube.
+  function strut(group, A, B, tw, th, mat) {
+    _Dv.set(B[0] - A[0], B[1] - A[1], B[2] - A[2]); const L = _Dv.length() || 1e-3; _Dv.multiplyScalar(1 / L);
+    const m = new THREE.Mesh(new THREE.BoxGeometry(tw, th, L), mat);
+    _q.setFromUnitVectors(_Z, _Dv); m.quaternion.copy(_q);
+    m.position.set((A[0] + B[0]) / 2, (A[1] + B[1]) / 2, (A[2] + B[2]) / 2); group.add(m); return m;
+  }
 
-  // BASTIDOR de canal formado en C (alma + ala superior + ala inferior) a cada lado + riel-guía.
-  // Vista lateral: alma vertical de `depth`; alas hacia adentro; guard rail por encima del TOR.
+  // BASTIDOR de canal formado en C (alma + alas) + riel-guía, INCLINADO con el tramo.
   function addFrame(group, p0, p1, h0, h1, width, depth, railH, sel) {
-    const s = segMeta(p0, p1), midH = (h0 + h1) / 2, fm = sel ? matSel : matFrame, rm = sel ? matSel : matRail;
-    const flange = 0.035, web = 0.004;
+    const d = hdir(p0, p1), fm = sel ? matSel : matFrame, rm = sel ? matSel : matRail, web = 0.005, flange = 0.035;
     for (const sd of [-1, 1]) {
-      const cx = s.mx + s.ox * sd * width / 2, cz = s.mz + s.oz * sd * width / 2, inn = -sd; // ala hacia adentro
-      box(group, web, depth, s.L, cx, midH + TOR - depth / 2, cz, s.rotY, fm);                                   // alma
-      box(group, flange, web * 2, s.L, cx + s.ox * inn * flange / 2, midH + TOR - 0.002, cz + s.oz * inn * flange / 2, s.rotY, fm); // ala superior
-      box(group, flange, web * 2, s.L, cx + s.ox * inn * flange / 2, midH + TOR - depth + 0.002, cz + s.oz * inn * flange / 2, s.rotY, fm); // ala inferior
-      if (railH > 1e-4) box(group, web * 1.6, railH, s.L, cx, midH + TOR + railH / 2, cz, s.rotY, rm);            // riel-guía
+      const ox = d.px * sd * width / 2, oz = d.pz * sd * width / 2;
+      const Ax = p0[0] + ox, Az = p0[1] + oz, Bx = p1[0] + ox, Bz = p1[1] + oz, sA = h0 + TOR, sB = h1 + TOR;
+      strut(group, [Ax, sA - depth / 2, Az], [Bx, sB - depth / 2, Bz], web, depth, fm);                              // alma
+      const ix = -d.px * sd * flange / 2, iz = -d.pz * sd * flange / 2;
+      strut(group, [Ax + ix, sA - 0.004, Az + iz], [Bx + ix, sB - 0.004, Bz + iz], flange, 0.008, fm);               // ala superior
+      strut(group, [Ax + ix, sA - depth + 0.004, Az + iz], [Bx + ix, sB - depth + 0.004, Bz + iz], flange, 0.008, fm); // ala inferior
+      if (railH > 1e-4) strut(group, [Ax, sA + railH / 2, Az], [Bx, sB + railH / 2, Bz], web * 1.6, railH, rm);       // riel-guía
     }
   }
-  // RODILLOS reales (OD/paso) con muñón en cada extremo; eje horizontal cruzado.
-  function addRollers(group, p0, p1, h0, h1, width, dia, pitch) {
-    const s = segMeta(p0, p1), n = Math.max(1, Math.floor(s.L / pitch)), len = Math.max(0.1, width - 0.075);
-    const roll = new THREE.InstancedMesh(rollerGeo, matRoller, n), axl = new THREE.InstancedMesh(axleGeo, matAxle, n);
-    _ax.set(s.dz, 0, -s.dx).normalize(); _q.setFromUnitVectors(_Y, _ax);
+  // RODILLOS reales (OD/paso) con muñón; cónicos en curvas (radio variable). Eje horizontal.
+  function addRollers(group, p0, p1, h0, h1, width, dia, pitch, sp) {
+    const d = hdir(p0, p1), n = Math.max(1, Math.round(d.L / pitch)), len = Math.max(0.1, width - 0.075);
+    const tapered = !!(sp && sp.tapered), geo = tapered ? new THREE.CylinderGeometry((sp.rollerTaper || dia * 0.7) / 2, dia / 2, 1, 14) : rollerGeo;
+    const roll = new THREE.InstancedMesh(geo, matRoller, n), axl = new THREE.InstancedMesh(axleGeo, matAxle, n);
+    _ax.set(d.dz, 0, -d.dx).normalize(); _q.setFromUnitVectors(_Y, _ax);
     for (let k = 0; k < n; k++) {
-      const t = (k + 0.5) * pitch / s.L, x = p0[0] + (p1[0] - p0[0]) * t, z = p0[1] + (p1[1] - p0[1]) * t, y = (h0 + (h1 - h0) * t) + TOR - dia / 2;
+      const t = (k + 0.5) / n, x = p0[0] + (p1[0] - p0[0]) * t, z = p0[1] + (p1[1] - p0[1]) * t, y = (h0 + (h1 - h0) * t) + TOR - dia / 2;
       _dummy.position.set(x, y, z); _dummy.quaternion.copy(_q);
-      _dummy.scale.set(dia, len, dia); _dummy.updateMatrix(); roll.setMatrixAt(k, _dummy.matrix);
+      _dummy.scale.set(tapered ? 1 : dia, len, tapered ? 1 : dia); _dummy.updateMatrix(); roll.setMatrixAt(k, _dummy.matrix);
       _dummy.scale.set(0.011, width + 0.02, 0.011); _dummy.updateMatrix(); axl.setMatrixAt(k, _dummy.matrix);
     }
     roll.instanceMatrix.needsUpdate = axl.instanceMatrix.needsUpdate = true;
     roll.userData.instId = axl.userData.instId = group.userData.instId; group.add(roll); group.add(axl);
   }
-  // BANDA: cama deslizante (pan) + correa de carga y de retorno envolviendo poleas de extremo.
-  function addBelt(group, poly, sp, width, sel, h0fn) {
-    const belt = sp.belt || 0.006, pulley = sp.pulleyDia || 0.10;
+  // BANDA: correa de carga + pan + retorno (todas inclinadas) envolviendo poleas de extremo.
+  function addBelt(group, poly, sp, width, sel, h0fn, pulley) {
+    const belt = sp.belt || 0.006;
     for (let i = 0; i < poly.length - 1; i++) {
-      const s = segMeta(poly[i], poly[i + 1]), hA = h0fn(i), hB = h0fn(i + 1), midH = (hA + hB) / 2;
-      box(group, width - 0.04, belt, s.L, s.mx, midH + TOR - belt / 2, s.mz, s.rotY, sel ? matSel : matBelt);    // correa de carga
-      box(group, width - 0.05, 0.01, s.L, s.mx, midH + TOR - belt - 0.012, s.mz, s.rotY, matFrame);              // pan deslizante
-      box(group, width - 0.04, belt, s.L, s.mx, midH + TOR - pulley - belt, s.mz, s.rotY, matBelt);              // retorno
+      const hA = h0fn(i) + TOR, hB = h0fn(i + 1) + TOR;
+      const A = [poly[i][0], hA, poly[i][1]], B = [poly[i + 1][0], hB, poly[i + 1][1]];
+      strut(group, [A[0], A[1] - belt / 2, A[2]], [B[0], B[1] - belt / 2, B[2]], width - 0.04, belt, sel ? matSel : matBelt);   // carga
+      strut(group, [A[0], A[1] - belt - 0.006, A[2]], [B[0], B[1] - belt - 0.006, B[2]], width - 0.05, 0.01, matFrame);          // pan
+      strut(group, [A[0], A[1] - pulley - belt, A[2]], [B[0], B[1] - pulley - belt, B[2]], width - 0.04, belt, matBelt);         // retorno
     }
-    // poleas de extremo (eje cruzado) — la correa envuelve
     for (const e of [0, poly.length - 1]) {
-      const p = poly[e], h = h0fn(e), s = segMeta(poly[Math.max(0, e - 1)], poly[Math.min(poly.length - 1, e + 1)]);
-      _ax.set(s.dz, 0, -s.dx).normalize(); _q.setFromUnitVectors(_Y, _ax);
+      const p = poly[e], h = h0fn(e) + TOR, a = Math.max(0, e - 1), b = Math.min(poly.length - 1, e + 1), d = hdir(poly[a], poly[b]);
+      _ax.set(d.dz, 0, -d.dx).normalize(); _q.setFromUnitVectors(_Y, _ax);
       const pl = new THREE.Mesh(new THREE.CylinderGeometry(pulley / 2, pulley / 2, width - 0.05, 16), matRoller);
-      pl.position.set(p[0], h + TOR - pulley / 2, p[1]); pl.quaternion.copy(_q); group.add(pl);
+      pl.position.set(p[0], h - pulley / 2, p[1]); pl.quaternion.copy(_q); group.add(pl);
     }
-    return pulley;
   }
-  // PAQUETE de accionamiento (motor + reductor + guarda de cadena) junto a la polea motriz.
+  // PAQUETE de accionamiento (motor + guarda de cadena) junto a la polea motriz.
   function addDrive(group, p, rotY, h, width, pulley) {
     const off = width / 2 + 0.12;
-    box(group, 0.16, 0.16, 0.28, p[0] + Math.cos(rotY) * off, h - pulley / 2, p[1] - Math.sin(rotY) * off, rotY, matMotor); // motor
-    box(group, 0.06, pulley + 0.06, 0.10, p[0] + Math.cos(rotY) * (width / 2 + 0.02), h - pulley / 2, p[1] - Math.sin(rotY) * (width / 2 + 0.02), rotY, matFrame); // guarda de cadena
+    box(group, 0.16, 0.16, 0.28, p[0] + Math.cos(rotY) * off, h - pulley / 2, p[1] - Math.sin(rotY) * off, rotY, matMotor);
+    box(group, 0.06, pulley + 0.06, 0.10, p[0] + Math.cos(rotY) * (width / 2 + 0.02), h - pulley / 2, p[1] - Math.sin(rotY) * (width / 2 + 0.02), rotY, matFrame);
   }
-  // SOPORTE de piso tipo H (patas de canal + travesaño + placas de piso + rodilla diagonal).
+  // SOPORTE de piso tipo H (patas + travesaño + placas + rodilla diagonal).
   function addSupport(group, p, rotY, height, width, depth) {
     const top = Math.max(0.1, height - depth + TOR), ox = Math.cos(rotY), oz = -Math.sin(rotY);
     for (const sd of [-1, 1]) {
       const lx = p[0] + ox * sd * width / 2, lz = p[1] + oz * sd * width / 2;
-      box(group, 0.045, top, 0.045, lx, top / 2, lz, rotY, matLeg);                 // pata
-      box(group, 0.12, 0.014, 0.12, lx, 0.007, lz, rotY, matLeg);                   // placa de piso
+      box(group, 0.045, top, 0.045, lx, top / 2, lz, rotY, matLeg);
+      box(group, 0.12, 0.014, 0.12, lx, 0.007, lz, rotY, matLeg);
     }
-    box(group, 0.045, 0.05, width, p[0], top - 0.03, p[1], rotY, matLeg);           // travesaño superior
-    // rodilla diagonal (estabiliza el soporte en el sentido del flujo)
-    const brace = box(group, 0.03, 0.03, top * 0.7, p[0] - ox * 0.0 + (oz) * 0, top * 0.4, p[1], rotY, matLeg);
+    box(group, 0.045, 0.05, width, p[0], top - 0.03, p[1], rotY, matLeg);
+    const brace = box(group, 0.03, 0.03, top * 0.7, p[0], top * 0.4, p[1], rotY, matLeg);
     brace.position.set(p[0] + Math.sin(rotY) * 0.18, top * 0.4, p[1] + Math.cos(rotY) * 0.18); brace.rotation.set(0.5, rotY, 0);
   }
 
   function drawRun(g, inst, poly, sp, sel, supports) {
-    const w = inst.cfg.width, dia = sp && sp.rollerDia ? sp.rollerDia : 0.0483, pitch = sp && sp.rollerPitch ? sp.rollerPitch : 0.0762;
+    const c = inst.cfg, w = c.width;
+    const dia = sp && sp.rollerDia ? sp.rollerDia : 0.0483;
+    const pitch = c.rollerPitch || (sp && sp.rollerPitch) || 0.0762;
+    const pulley = c.pulleyDia || (sp && sp.pulleyDia) || 0.10;
     const depth = sp ? sp.frameDepth : 0.14, railH = sp ? sp.railHeight : 0.04, useRollers = !sp || sp.surface === 'rollers';
     const hAt = i => heightsAlong(inst, i, poly.length - 1);
     for (let i = 0; i < poly.length - 1; i++) {
       addFrame(g, poly[i], poly[i + 1], hAt(i), hAt(i + 1), w, depth, railH, sel);
-      if (useRollers) addRollers(g, poly[i], poly[i + 1], hAt(i), hAt(i + 1), w, dia, pitch);
+      if (useRollers) addRollers(g, poly[i], poly[i + 1], hAt(i), hAt(i + 1), w, dia, pitch, sp);
     }
     if (!useRollers) {
-      const pulley = addBelt(g, poly, sp, w, sel, hAt);
-      const r1 = segMeta(poly[poly.length - 2], poly[poly.length - 1]).rotY;     // motriz en el extremo de salida
-      addDrive(g, poly[poly.length - 1], r1, hAt(poly.length - 1), w, pulley);
+      addBelt(g, poly, sp, w, sel, hAt, pulley);
+      const r1 = segMeta(poly[poly.length - 2], poly[poly.length - 1]).rotY;
+      addDrive(g, poly[poly.length - 1], r1, hAt(poly.length - 1) + TOR, w, pulley);
     }
     if (supports) {
       const r0 = segMeta(poly[0], poly[1]).rotY, r1 = segMeta(poly[poly.length - 2], poly[poly.length - 1]).rotY;
-      addSupport(g, poly[0], r0, inst.cfg.entryHeight, w, depth);
-      addSupport(g, poly[poly.length - 1], r1, inst.cfg.exitHeight ?? inst.cfg.entryHeight, w, depth);
+      addSupport(g, poly[0], r0, c.entryHeight, w, depth);
+      addSupport(g, poly[poly.length - 1], r1, c.exitHeight ?? c.entryHeight, w, depth);
     }
   }
 
@@ -269,6 +279,34 @@ export function initBuilder() {
     const inp = document.createElement('input'); inp.type = 'number'; inp.value = val; inp.step = step; inp.min = min;
     inp.onchange = () => on(parseFloat(inp.value)); wrap.appendChild(span); wrap.appendChild(inp); return wrap;
   }
+  function selectField(label, options, current, on) {   // options: [val] o [[label,val]]
+    const wrap = document.createElement('label'); const span = document.createElement('span'); span.textContent = label;
+    const sel = document.createElement('select'); sel.style.cssText = 'background:#121821;color:#fff;border:1px solid #2a3645;border-radius:6px;padding:4px;font-size:11px';
+    for (const o of options) { const val = Array.isArray(o) ? o[1] : o, lab = Array.isArray(o) ? o[0] : o; const e = document.createElement('option'); e.value = String(val); e.textContent = lab; if (String(val) === String(current)) e.selected = true; sel.appendChild(e); }
+    sel.onchange = () => on(sel.value); wrap.appendChild(span); wrap.appendChild(sel); return wrap;
+  }
+  const IN_M = 0.0254;
+  // construye los controles de los PARÁMETROS PROPIOS del modelo (lib.params)
+  function paramFields(c, sp, upd) {
+    for (const p of lib.params(selected.model)) {
+      const get = () => {
+        if (p.unit === 'in') return Math.round(((c[p.cfg] != null ? c[p.cfg] : (sp ? sp[p.cfg] : 0)) || 0) / IN_M);
+        if (p.unit === 'fpm') return Math.round((c.speed || 0) / FPM);
+        if (p.unit === 'incline') return Math.round(Math.atan2((c.exitHeight ?? c.entryHeight) - c.entryHeight, c.length || 1) * 180 / Math.PI);
+        return c[p.cfg];
+      };
+      const set = v => {
+        if (p.unit === 'in') c[p.cfg] = parseFloat(v) * IN_M;
+        else if (p.unit === 'fpm') c.speed = parseFloat(v) * FPM;
+        else if (p.unit === 'incline') c.exitHeight = c.entryHeight + (c.length || 1) * Math.tan(parseFloat(v) * Math.PI / 180);
+        else if (p.unit === 'bool') c[p.cfg] = (v === 'true');
+        else c[p.cfg] = (p.type === 'number') ? parseFloat(v) : (isNaN(+v) ? v : +v);
+        upd();
+      };
+      if (p.type === 'select') iFields.appendChild(selectField(p.label, p.options, get(), set));
+      else iFields.appendChild(field(p.label + (p.unit === 'fpm' ? ' (fpm)' : ''), get(), set, p.step || 1, p.min || 0));
+    }
+  }
   function renderInspector() {
     if (!selected) { insp.style.display = 'none'; return; }
     insp.style.display = 'block';
@@ -289,15 +327,13 @@ export function initBuilder() {
     iFields.innerHTML = '';
     const upd = () => { lib.refresh(selected); resnap(selected); rebuild(); };
     const fam = selected.family;
+    // 1) parámetros PROPIOS del modelo (centros de rodillo, ancho BR, drive, ángulo, radio…)
+    paramFields(c, sp, upd);
+    // 2) parámetros comunes de tramo
     if (fam === 'straight' || fam === 'transfer' || fam === 'divert' || fam === 'merge')
       iFields.appendChild(field('Largo (m)', c.length, v => { c.length = Math.max(0.3, v); upd(); }));
-    if (fam === 'curve') iFields.appendChild(field('Radio (m)', c.radius, v => { c.radius = Math.max(0.4, v); upd(); }));
-    if (fam === 'curve' || fam === 'transfer' || fam === 'divert' || fam === 'merge')
-      iFields.appendChild(field('Ángulo (°)', c.angleDeg, v => { c.angleDeg = v; upd(); }, 5));
-    iFields.appendChild(field('Ancho (m)', c.width, v => { c.width = Math.max(0.2, v); upd(); }));
     iFields.appendChild(field('Altura ingreso (m)', c.entryHeight, v => { c.entryHeight = v; upd(); }, 0.05));
     iFields.appendChild(field('Altura salida (m)', c.exitHeight ?? c.entryHeight, v => { c.exitHeight = v; upd(); }, 0.05));
-    iFields.appendChild(field('Velocidad (fpm)', Math.round(c.speed / FPM), v => { c.speed = v * FPM; }, 5));
     iFields.appendChild(field('Pos X (m)', selected.pose.x, v => { selected.pose.x = v; upd(); }, 0.25));
     iFields.appendChild(field('Pos Z (m)', selected.pose.z, v => { selected.pose.z = v; upd(); }, 0.25));
     iFields.appendChild(field('Rotación (°)', Math.round(selected.pose.rot * 180 / Math.PI), v => { selected.pose.rot = v * Math.PI / 180; upd(); }, 15));

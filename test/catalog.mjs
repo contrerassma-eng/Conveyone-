@@ -120,6 +120,12 @@ check('web_facts: cada hecho lleva fuente con URL', wf.facts.every(f => wf.sourc
 check('catálogo: todo modelo mapea a designación Hytrol real + doc', lib.list().every(m => { const r = lib.ref(m.id); return r && r.hytrol && /^https?:/.test(r.doc) && /^https?:/.test(r.cat); }));
 check('catálogo: SBI = Inclined Slider Bed (modelo real)', lib.ref('SBI').hytrol === 'SBI');
 check('catálogo: E24SS = 190-E24SS spur (Bulletin 713)', lib.ref('E24SS').hytrol === '190-E24SS');
+// parámetros PROPIOS por modelo
+check('params: rodillo ofrece centros de rodillo (2"/3")', lib.params('190-E24').some(p => p.cfg === 'rollerPitch' && p.options.join(',') === '2,3'));
+check('params: banda ofrece ancho y polea/drive', lib.params('TA').some(p => p.cfg === 'width') && lib.params('TA').some(p => p.cfg === 'pulleyDia'));
+check('params: curva ofrece ángulo y radio', lib.params('190-E24C').some(p => p.cfg === 'angleDeg') && lib.params('190-E24C').some(p => p.cfg === 'radius'));
+check('params: SBI ofrece inclinación', lib.params('SBI').some(p => p.cfg === 'inclineDeg'));
+check('spec: 190-E24C rodillos cónicos 2.5"→1-11/16"', near(lib.spec('190-E24C').rollerDia, 2.5 * IN) && lib.spec('190-E24C').tapered);
 
 // 8) GUARDAR / CARGAR (serialize -> hydrate) conserva el grafo y vuelve a compilar
 const json = lib.serialize(gd);
