@@ -288,19 +288,26 @@ export function initBuilder() {
     }
   }
 
-  // MÁQUINA en línea (Niverplast): housing + guillotina al ingreso + banda de paso.
+  // MÁQUINA en línea (Niverplast): cinta interna + GUILLOTINA visible en el hueco del
+  // ingreso (entre la banda modular y la cinta Niverplast) + housing retraído.
   const matMachine = new THREE.MeshStandardMaterial({ color: 0x55606b, metalness: 0.5, roughness: 0.5 });
-  const matBlade = new THREE.MeshStandardMaterial({ color: 0xe6edf3, metalness: 0.85, roughness: 0.2 });
+  const matBlade = new THREE.MeshStandardMaterial({ color: 0xc6ccd2, metalness: 0.9, roughness: 0.18 });
+  const matHaz = new THREE.MeshStandardMaterial({ color: 0xf4c11e, metalness: 0.3, roughness: 0.6, emissive: 0x3a2c00, emissiveIntensity: 0.25 });
   const matInox = new THREE.MeshStandardMaterial({ color: 0xd6dde3, metalness: 0.8, roughness: 0.25 });
   const lp = (x, z, r, lx, lz) => [x + lx * Math.cos(r) + lz * Math.sin(r), z - lx * Math.sin(r) + lz * Math.cos(r)];
   function drawMachine(g, inst, sel) {
-    const c = inst.cfg, p0 = inst.nodes.in.p, p1 = inst.nodes.out.p, d = hdir(p0, p1), h = c.entryHeight;
-    const cx = (p0[0] + p1[0]) / 2, cz = (p0[1] + p1[1]) / 2, rotY = Math.atan2(d.dx, d.dz), W = (c.width || 1) + 0.2;
-    box(g, c.width || 1, 0.04, d.L, cx, h + TOR, cz, rotY, matBelt);                          // banda de paso
-    box(g, W, 1.2, d.L * 0.78, cx, h + 0.6, cz, rotY, sel ? matSel : matMachine);             // housing
-    box(g, W + 0.05, 0.55, 0.03, p0[0] + d.dx * 0.12, h + 0.5, p0[1] + d.dz * 0.12, rotY, matBlade);  // GUILLOTINA al ingreso
-    box(g, 0.06, 0.75, 0.06, p0[0], h + 1.0, p0[1], rotY, matMachine);                         // guía de la guillotina
-    addSupport(g, p0, rotY, h, c.width || 1, 0.14); addSupport(g, p1, rotY, h, c.width || 1, 0.14);
+    const c = inst.cfg, p0 = inst.nodes.in.p, p1 = inst.nodes.out.p, d = hdir(p0, p1), h = c.entryHeight, W = c.width || 1;
+    const gap = 0.35;                                                                          // hueco de ingreso (donde va la guillotina)
+    const inGap = [p0[0] + d.dx * gap / 2, p0[1] + d.dz * gap / 2];
+    const bx = p0[0] + d.dx * (gap + (d.L - gap) / 2), bz = p0[1] + d.dz * (gap + (d.L - gap) / 2), rotY = Math.atan2(d.dx, d.dz);
+    box(g, W, 0.04, d.L - gap, bx, h + TOR, bz, rotY, matBelt);                                 // cinta Niverplast (después del hueco)
+    box(g, W + 0.22, 1.15, d.L - gap, bx, h + 0.62, bz, rotY, sel ? matSel : matMachine);       // housing (retraído, deja ver la guillotina)
+    // PÓRTICO de la guillotina en el hueco de ingreso: dos columnas + travesaño + cuchilla
+    for (const sd of [-1, 1]) { const q = lp(inGap[0], inGap[1], rotY, sd * (W / 2 + 0.05), 0); box(g, 0.07, h + 0.95, 0.09, q[0], (h + 0.95) / 2, q[1], rotY, matMachine); }
+    box(g, W + 0.22, 0.12, 0.12, inGap[0], h + 0.95, inGap[1], rotY, matMachine);               // travesaño superior
+    box(g, W + 0.05, 0.42, 0.025, inGap[0], h + 0.5, inGap[1], rotY, matBlade);                 // CUCHILLA (placa, baja desde el travesaño)
+    box(g, W + 0.07, 0.06, 0.05, inGap[0], h + 0.74, inGap[1], rotY, matHaz);                   // banda hazard amarilla sobre la cuchilla
+    addSupport(g, p0, rotY, h, W, 0.14); addSupport(g, p1, rotY, h, W, 0.14);
   }
   const matSkin = new THREE.MeshStandardMaterial({ color: 0xd7a98a, roughness: 0.7 });
   const matVest = new THREE.MeshStandardMaterial({ color: 0xffd23a, roughness: 0.6, emissive: 0x4a3a00, emissiveIntensity: 0.2 });
@@ -566,7 +573,8 @@ export function initBuilder() {
     const [bw, bh, bd] = fr.boxSize;
     for (const bx of fr.boxes) {
       seen.add(bx.id); let m = boxPool.get(bx.id);
-      if (!m) { m = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, bd), new THREE.MeshStandardMaterial({ roughness: 0.7 })); boxRoot.add(m); boxPool.set(bx.id, m); }
+      // la caja viaja con su lado LARGO en el sentido del flujo (largo a lo largo, ancho cruzado)
+      if (!m) { m = new THREE.Mesh(new THREE.BoxGeometry(bd, bh, bw), new THREE.MeshStandardMaterial({ roughness: 0.7 })); boxRoot.add(m); boxPool.set(bx.id, m); }
       m.material.color.setHex(bx.held ? 0xff7043 : 0xffc04d);            // retenida vs en marcha
       m.position.set(bx.x, bx.y + 0.025 + bh / 2, bx.z); m.rotation.y = Math.atan2(bx.dx, bx.dz);  // sobre la superficie (TOR)
     }
@@ -629,6 +637,7 @@ export function initBuilder() {
   renderer.setAnimationLoop(ts => {
     const dt = Math.min(0.05, (ts - last) / 1000 || 0.016); last = ts;
     if (running && sim) { const n = Math.max(1, Math.round(simSpeed)); for (let k = 0; k < n; k++) sim.step(dt); drawBoxes(); validateHud(); }
+    if (_modTex) _modTex.offset.y -= dt * 0.35 * (running ? simSpeed : 1);   // la cinta modular SIGUE corriendo (mínima presión: desliza bajo las cajas)
     xrUpdate(dt);
     if (!renderer.xr.isPresenting) controls.update();
     renderer.render(scene, camera);

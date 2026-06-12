@@ -184,13 +184,13 @@ const CATALOG = [
 
   { id: 'LBP', label: 'LBP · Banda modular plástica (baja contrapresión)', group: 'Banda',
     kind: 'belt', family: 'straight',
-    defaults: { length: 6.0, width: W24, speed: 60 * FPM, pitch: BOX[0] + GAP_MIN, entryHeight: 0.9 },
+    defaults: { length: 6.0, width: W24, speed: 60 * FPM, pitch: BOX[0], entryHeight: 0.9 },
     caps: { maxInclineDeg: 15, rollerDia: ROLLER19, modular: true },
     note: 'Banda modular plástica (LBP). Admite curvas e inclinación moderada.' },
 
   { id: 'LBP-CURVE', label: 'LBP · Curva de banda modular 90°', group: 'Banda',
     kind: 'belt', family: 'curve',
-    defaults: { angleDeg: 90, radius: 1.0, width: W24, speed: 55 * FPM, pitch: BOX[0] + GAP_MIN, entryHeight: 0.9, cw: false },
+    defaults: { angleDeg: 90, radius: 1.0, width: W24, speed: 55 * FPM, pitch: BOX[0], entryHeight: 0.9, cw: false },
     caps: { maxInclineDeg: 0, rollerDia: ROLLER19, modular: true },
     note: 'Curva de banda modular. Sin acumulación ni inclinación dentro de la curva.' },
 
@@ -208,7 +208,7 @@ const CATALOG = [
 
   { id: 'GRR', label: 'Gravedad · Rodillo OD30 paso 3" (700 mm) + mini-mesas 200 mm', group: 'Estación Niverplast',
     kind: 'gravity', family: 'straight',
-    defaults: { length: 4.0, width: 0.6, speed: 0.3, pitch: BOX[0] + GAP_MIN, entryHeight: 0.7 },
+    defaults: { length: 4.0, width: 0.6, speed: 0.3, pitch: BOX[0], entryHeight: 0.7 },
     caps: { maxInclineDeg: 7, rollerDia: 0.030 },
     note: 'Transportador por gravedad: rodillo OD 30 mm a paso 3", altura 700 mm, con mini-mesas de 200 mm a cada lado (tomar contenido / tapar).' },
 
@@ -442,8 +442,8 @@ export function createConveyorLibrary() {
       const issues = [];
       for (const inst of graph.instances) {
         const m = modelById(inst.model), c = inst.cfg;
-        if (c.pitch < BOX[0] + GAP_MIN - 1e-6)
-          issues.push({ level: 'error', instId: inst.id, msg: `pitch ${c.pitch.toFixed(2)} m < caja ${BOX[0]} + ${GAP_MIN} (cajas se solaparían)` });
+        if (c.pitch != null && c.pitch < BOX[0] - 1e-6)   // mínima presión = se tocan (pitch = largo de caja); menos = solape
+          issues.push({ level: 'error', instId: inst.id, msg: `pitch ${c.pitch.toFixed(2)} m < largo de caja ${BOX[0]} (cajas se solaparían)` });
         const dh = Math.abs((c.exitHeight ?? c.entryHeight) - c.entryHeight);
         const L = (inst.family === 'straight') ? c.length : 0;
         const incl = L > 0 ? Math.atan2(dh, L) * 180 / Math.PI : (dh > 1e-6 ? 999 : 0);

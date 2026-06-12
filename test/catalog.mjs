@@ -179,6 +179,11 @@ check('niverplast: la guillotina metera ~15 c/min (no 40)', tputN > 8 && tputN <
 check('niverplast: la LBP acumula aguas arriba (cero presión)', en.boxes.filter(b => b.segId === lbpN.id).length >= 3 && accumN > 0);
 check('niverplast: param tasa de corte (c/min)', lib.params('NIVERPLAST').some(p => p.cfg === 'meterPerMin'));
 check('catálogo: OPERATOR como prop', lib.get('OPERATOR').family === 'prop');
+// mínima presión: las bandas modulares/gravedad acumulan TOCÁNDOSE (paso = largo de caja)
+const onL = en.boxes.filter(b => b.segId === lbpN.id).map(b => b.s).sort((a, b) => b - a);
+let minGap = 99; for (let i = 1; i < onL.length; i++) minGap = Math.min(minGap, onL[i - 1] - onL[i]);
+check('mínima presión: LBP acumula con cajas tocándose (~0.40 m)', onL.length >= 3 && Math.abs(minGap - lib.BOX[0]) < 0.02);
+check('validador: pitch = largo de caja (tocándose) NO es error', !lib.validate({ instances: [lib.place('LBP', null, { length: 3 })], links: [] }).some(i => i.level === 'error'));
 
 // 8) GUARDAR / CARGAR (serialize -> hydrate) conserva el grafo y vuelve a compilar
 const json = lib.serialize(gd);

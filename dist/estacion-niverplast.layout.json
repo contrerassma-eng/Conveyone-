@@ -32,7 +32,7 @@
         "length": 5,
         "width": 0.6095999999999999,
         "speed": 0.3048,
-        "pitch": 0.45,
+        "pitch": 0.4,
         "entryHeight": 0.9,
         "exitHeight": 0.9,
         "cw": true
@@ -69,7 +69,7 @@
         "length": 5,
         "width": 0.6,
         "speed": 0.3,
-        "pitch": 0.45,
+        "pitch": 0.4,
         "entryHeight": 0.7,
         "exitHeight": 0.7,
         "cw": true
