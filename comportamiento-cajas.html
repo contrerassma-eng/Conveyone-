@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <meta name="theme-color" content="#0e1116" />
+  <title>Comportamiento de la caja · choques, cuellos y derrape en curva</title>
+  <meta name="description" content="Simulador 2D del COMPORTAMIENTO de la caja: empuje del transportador, colisiones, acumulación con contacto, culebreo y pérdida de trayectoria en curva. Cerebro de velocidades por equipo." />
+  <style>
+    :root { --bg:#0e1116; --fg:#cdd6e0; --muted:#8b97a6; --panel:rgba(20,26,34,.95); --line:#2a3645; --accent:#f9a825; }
+    * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+    html,body { margin:0; height:100%; background:var(--bg); overflow:hidden; }
+    body { font:13px system-ui,sans-serif; color:var(--fg); }
+    #wrap { position:fixed; inset:0; }
+    canvas { display:block; width:100%; height:100%; touch-action:none; }
+
+    #fab { position:fixed; top:10px; right:10px; z-index:30; width:44px; height:44px;
+      border-radius:12px; border:1px solid var(--line); background:var(--panel); color:var(--fg);
+      font-size:20px; cursor:pointer; }
+    #fab:active { background:#243044; }
+
+    #panel { position:fixed; z-index:20; top:10px; right:64px; width:288px; max-height:calc(100% - 20px);
+      overflow-y:auto; background:var(--panel); border:1px solid var(--line); border-radius:12px;
+      padding:12px 14px; display:grid; gap:9px; transition:transform .2s ease,opacity .2s ease; }
+    #panel.hidden { transform:translateX(130%); opacity:0; pointer-events:none; }
+    @media (max-width:720px){ #panel{ left:8px; right:8px; width:auto; top:auto; bottom:8px; max-height:52vh; } }
+
+    h1 { font-size:14px; margin:0; }
+    h2 { font-size:11px; margin:6px 0 0; color:var(--accent); text-transform:uppercase; letter-spacing:.05em; }
+    .sub { color:var(--muted); font-size:11px; margin:-4px 0 2px; line-height:1.35; }
+    label { display:grid; gap:3px; font-size:12px; color:#aeb9c6; }
+    label .v { color:var(--fg); font-weight:600; }
+    input[type=range]{ width:100%; height:26px; }
+    .row { display:flex; gap:8px; flex-wrap:wrap; }
+    .row button { flex:1; min-width:64px; background:#1b2330; color:var(--fg); border:1px solid var(--line);
+      border-radius:8px; padding:9px 6px; cursor:pointer; font:11px monospace; }
+    .row button:active { background:#243044; }
+    hr { border:none; border-top:1px solid var(--line); margin:4px 0; }
+    .legend { font-size:11px; color:var(--muted); line-height:1.5; }
+    .dot { display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:5px; vertical-align:middle; }
+    #hud { position:fixed; left:10px; top:10px; z-index:10; font:12px/1.5 monospace; color:var(--fg);
+      background:rgba(13,17,23,.72); padding:8px 11px; border-radius:8px; white-space:pre; pointer-events:none; }
+    #err { position:fixed; left:8px; right:8px; top:8px; z-index:40; display:none; font:12px monospace;
+      color:#ffb3b3; background:rgba(40,10,10,.92); border:1px solid #b71c1c; border-radius:8px; padding:10px; white-space:pre-wrap; }
+  </style>
+</head>
+<body>
+  <div id="wrap"><canvas id="c"></canvas></div>
+  <div id="hud"></div>
+  <div id="err"></div>
+  <button id="fab" title="Mostrar / ocultar controles">⚙</button>
+
+  <div id="panel">
+    <h1>Comportamiento de la caja</h1>
+    <div class="sub">Motor físico: el transportador <b>empuja</b>, las cajas <b>chocan</b> y, en curva, pueden <b>perder la trayectoria</b> si el empuje supera la guía.</div>
+
+    <h2>Cerebro de velocidades (m/s)</h2>
+    <div class="sub">Una por equipo. Baja la de una vía aguas abajo para crear el cuello y ver el choque.</div>
+    <div id="speeds" style="display:grid; gap:7px"></div>
+
+    <h2>Física</h2>
+    <label>Resistencia de guías/rieles <span class="v" id="railV"></span>
+      <input id="rail" type="range" min="0.5" max="6" step="0.1" />
+    </label>
+    <div class="sub">Es la centrípeta máx. que aguanta el riel. Si v²/R la supera, la caja se <b>sale de la curva</b>. Bájala (o sube la velocidad de una curva) para verlo.</div>
+    <label>Carga · cajas/hora <span class="v" id="rateV"></span>
+      <input id="rate" type="range" min="400" max="5000" step="100" />
+    </label>
+    <label>Desvío a 30° · fracción <span class="v" id="divV"></span>
+      <input id="div" type="range" min="0" max="1" step="0.05" />
+    </label>
+
+    <h2>Escenarios</h2>
+    <div class="sub">Cada botón arma una demo completa (velocidades + carga + guía).</div>
+    <div class="row">
+      <button data-preset="nominal">Nominal (fluye)</button>
+      <button data-preset="frenar">Cuello / choque</button>
+    </div>
+    <div class="row">
+      <button data-preset="empuje">Derrape por empuje</button>
+      <button data-preset="guia">Guía débil</button>
+    </div>
+
+    <h2>Simulación</h2>
+    <label>Velocidad de reproducción ×<span class="v" id="simV"></span>
+      <input id="sim" type="range" min="0.25" max="3" step="0.25" />
+    </label>
+    <div class="row">
+      <button id="toggle">Pausa</button>
+      <button id="reset">Reset</button>
+      <button id="fit">Encuadrar</button>
+    </div>
+
+    <hr>
+    <div class="legend">
+      <span class="dot" style="background:#c8a073"></span>en banda &nbsp;
+      <span class="dot" style="background:#fb8c00"></span>contacto/cuello<br>
+      <span class="dot" style="background:#1e88e5"></span>desviada (30°) &nbsp;
+      <span class="dot" style="background:#e53935"></span>derrapada (perdió la curva)
+    </div>
+  </div>
+
+  <script>
+    function showErr(m){ var e=document.getElementById('err'); e.style.display='block';
+      e.textContent='Error:\n'+m+'\n\nSi lo abriste como file://, ábrelo desde una URL http(s): los módulos ES se bloquean en file://.'; }
+    addEventListener('error', e=>showErr((e.message||e.error||'')+(e.filename?'\n'+e.filename:'')));
+    addEventListener('unhandledrejection', e=>showErr((e.reason&&e.reason.message)||String(e.reason)));
+  </script>
+
+  <script type="module">
+    import { BoxFlowSim, DEFAULTS } from './src/box-physics.js';
+    import { buildBehaviorLine } from './src/box-layouts.js';
+
+    const $ = id => document.getElementById(id);
+    const canvas = $('c'), ctx = canvas.getContext('2d');
+
+    // --- estado de UI ---
+    let rate = 1600, divertFrac = 0.45, railMax = DEFAULTS.railMax, simMul = 1, running = true;
+    let sim, view = null, dragging = false, lastPt = null;
+
+    const KIND = { source:'#2e7d32', sink:'#8e24aa', divert:'#b08900', curve:'#5b6675', belt:'#4a5360' };
+    const STATE_COLOR = { ok:'#c8a073', contact:'#fb8c00', divert:'#1e88e5', derail:'#e53935' };
+
+    function build() {
+      const model = buildBehaviorLine({ rate, divertFrac });
+      sim = new BoxFlowSim(model, { seed: 1, cfg: { railMax } });
+      sim.run(6); // warmup: abrir ya con cajas en movimiento
+      buildSpeedSliders();
+      fitView();
+    }
+
+    // --- cerebro de velocidades: un slider por transportador ---
+    function buildSpeedSliders() {
+      const box = $('speeds'); box.innerHTML = '';
+      for (const c of sim.conveyors) {
+        const lab = document.createElement('label');
+        const name = ({entrada:'Entrada',curva1:'Curva 60° (1)',presion:'Presión + desvío',salida30:'Salida 30°',curva2:'Curva 60° (2)',salida:'Salida'})[c.id] || c.id;
+        lab.innerHTML = `${name} <span class="v" id="sp_${c.id}">${c.speed.toFixed(2)}</span>`;
+        const r = document.createElement('input');
+        r.type='range'; r.min='0'; r.max='2'; r.step='0.05'; r.value=c.speed;
+        r.addEventListener('input', () => { sim.setSpeed(c.id, +r.value); $('sp_'+c.id).textContent=(+r.value).toFixed(2); });
+        lab.appendChild(r); box.appendChild(lab);
+      }
+    }
+
+    // --- vista (encuadre + pan/zoom) ---
+    function fitView() {
+      const b = sim.bounds();
+      const W = canvas.clientWidth, H = canvas.clientHeight;
+      const pad = 0.9;
+      const scale = Math.min(W / (b.w || 1), H / (b.h || 1)) * pad;
+      view = { scale, cx: b.cx, cy: b.cy, ox: W/2, oy: H/2 };
+    }
+    const toScreen = (x,y) => [ view.ox + (x - view.cx) * view.scale, view.oy - (y - view.cy) * view.scale ];
+
+    function resize() {
+      const dpr = Math.min(window.devicePixelRatio||1, 2);
+      const W = canvas.clientWidth, H = canvas.clientHeight;
+      canvas.width = W*dpr; canvas.height = H*dpr; ctx.setTransform(dpr,0,0,dpr,0,0);
+    }
+
+    // --- dibujo ---
+    function drawPoly(pts, close) {
+      ctx.beginPath();
+      for (let i=0;i<pts.length;i++){ const [sx,sy]=toScreen(pts[i][0],pts[i][1]); i?ctx.lineTo(sx,sy):ctx.moveTo(sx,sy); }
+      if (close) ctx.closePath();
+    }
+
+    function render() {
+      const f = sim.frame();
+      const W = canvas.clientWidth, H = canvas.clientHeight;
+      ctx.clearRect(0,0,W,H);
+
+      // transportadores como banda (relleno) + rieles (bordes) + eje
+      for (const c of f.conveyors) {
+        const band = c.left.concat(c.right.slice().reverse());
+        drawPoly(band, true);
+        ctx.fillStyle = '#1a212c'; ctx.fill();
+        ctx.lineWidth = 2; ctx.strokeStyle = KIND[c.kind] || KIND.belt;
+        drawPoly(c.left,false); ctx.stroke();
+        drawPoly(c.right,false); ctx.stroke();
+        // eje + flecha de sentido
+        ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(120,135,155,.35)'; ctx.setLineDash([5,5]);
+        drawPoly(c.center,false); ctx.stroke(); ctx.setLineDash([]);
+        // etiqueta de velocidad en el centro de la vía
+        const mid = c.center[Math.floor(c.center.length/2)];
+        const [mx,my] = toScreen(mid[0],mid[1]);
+        ctx.fillStyle = c.speed < c.baseSpeed - 0.01 ? '#fb8c00' : 'rgba(205,214,224,.85)';
+        ctx.font = '11px monospace'; ctx.textAlign='center';
+        ctx.fillText(`${c.speed.toFixed(2)} m/s`, mx, my - 6);
+      }
+
+      // cajas (rectángulo orientado al vector de avance)
+      const [bw,,bd] = f.boxSize;
+      for (const b of f.boxes) {
+        const [sx,sy] = toScreen(b.x, b.y);
+        ctx.save(); ctx.translate(sx,sy); ctx.rotate(-b.angle);
+        const w = bw*view.scale, h = bd*view.scale;
+        ctx.fillStyle = STATE_COLOR[b.state] || STATE_COLOR.ok;
+        ctx.strokeStyle = 'rgba(0,0,0,.45)'; ctx.lineWidth=1;
+        ctx.fillRect(-w/2,-h/2,w,h); ctx.strokeRect(-w/2,-h/2,w,h);
+        ctx.restore();
+      }
+
+      // HUD
+      const s = f.stats;
+      $('hud').textContent =
+        `t=${f.time.toFixed(1)}s   en sistema ${s.inSystem}\n` +
+        `generadas ${s.generated}   entregadas ${s.delivered}\n` +
+        `desviadas 30° ${s.diverted}   en contacto ${s.contacts}\n` +
+        `DERRAPES (perdieron curva) ${s.derailed}`;
+    }
+
+    function loop(ts){
+      requestAnimationFrame(loop);
+      if (!view) return;
+      if (running){
+        // avanza simMul/60 s de simulación por cuadro, en sub-pasos <= 1/120 s (estable)
+        const target = simMul / 60;
+        const sub = Math.max(1, Math.ceil(target / (1/120)));
+        const h = target / sub;
+        for (let k=0;k<sub;k++) sim.step(h);
+      }
+      render();
+    }
+
+    // --- controles ---
+    function syncLabels(){
+      $('railV').textContent = railMax.toFixed(1); $('rail').value = railMax;
+      $('rateV').textContent = rate; $('rate').value = rate;
+      $('divV').textContent = divertFrac.toFixed(2); $('div').value = divertFrac;
+      $('simV').textContent = simMul.toFixed(2); $('sim').value = simMul;
+    }
+    $('rail').addEventListener('input', e=>{ railMax=+e.target.value; $('railV').textContent=railMax.toFixed(1); sim.setConfig({railMax}); });
+    $('rate').addEventListener('input', e=>{ rate=+e.target.value; $('rateV').textContent=rate; build(); });
+    $('div').addEventListener('input', e=>{ divertFrac=+e.target.value; $('divV').textContent=divertFrac.toFixed(2); build(); });
+    $('sim').addEventListener('input', e=>{ simMul=+e.target.value; $('simV').textContent=simMul.toFixed(2); });
+    $('toggle').addEventListener('click', ()=>{ running=!running; $('toggle').textContent=running?'Pausa':'Reanudar'; });
+    $('reset').addEventListener('click', ()=>{ build(); });
+    $('fit').addEventListener('click', fitView);
+
+    // Escenarios completos: cada uno fija carga + guía + velocidades y reconstruye.
+    const SCENARIOS = {
+      nominal:   { rate:1600, railMax:3,   divertFrac:0.45, speeds:{} },
+      frenar:    { rate:2600, railMax:3,   divertFrac:0.30, speeds:{ entrada:0.9, curva2:0.15 } },
+      empuje:    { rate:4000, railMax:3,   divertFrac:0.30, speeds:{ entrada:2.0, curva1:0.35 } },
+      guia:      { rate:1800, railMax:0.8, divertFrac:0.30, speeds:{ entrada:1.1, curva1:1.1, presion:1.1, curva2:1.1, salida:1.1 } },
+    };
+    document.querySelectorAll('[data-preset]').forEach(btn=>btn.addEventListener('click', ()=>{
+      const scn = SCENARIOS[btn.dataset.preset]; if (!scn) return;
+      rate = scn.rate; railMax = scn.railMax; divertFrac = scn.divertFrac;
+      build();                                   // reconstruye con la nueva carga/guía
+      for (const [id,v] of Object.entries(scn.speeds)) sim.setSpeed(id, v);
+      buildSpeedSliders(); syncLabels();
+    }));
+
+    // panel
+    $('fab').addEventListener('click', ()=>$('panel').classList.toggle('hidden'));
+
+    // pan + zoom
+    canvas.addEventListener('wheel', e=>{ e.preventDefault(); if(!view) return;
+      const f = e.deltaY < 0 ? 1.1 : 1/1.1; view.scale *= f; }, {passive:false});
+    canvas.addEventListener('pointerdown', e=>{ dragging=true; lastPt=[e.clientX,e.clientY]; });
+    addEventListener('pointermove', e=>{ if(!dragging||!view) return;
+      view.ox += e.clientX-lastPt[0]; view.oy += e.clientY-lastPt[1]; lastPt=[e.clientX,e.clientY]; });
+    addEventListener('pointerup', ()=>{ dragging=false; });
+    addEventListener('resize', ()=>{ resize(); });
+
+    // arranque
+    try {
+      resize(); syncLabels(); build();
+      requestAnimationFrame(loop);
+    } catch (err) { showErr((err&&err.stack)||String(err)); }
+  </script>
+</body>
+</html>
