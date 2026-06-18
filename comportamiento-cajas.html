@@ -151,18 +151,21 @@
     }
 
     // --- vista (encuadre + pan/zoom) ---
+    const VW = () => canvas.clientWidth  || window.innerWidth  || 360;
+    const VH = () => canvas.clientHeight || window.innerHeight || 640;
     function fitView() {
       const b = sim.bounds();
-      const W = canvas.clientWidth, H = canvas.clientHeight;
+      const W = VW(), H = VH();
       const pad = 0.9;
-      const scale = Math.min(W / (b.w || 1), H / (b.h || 1)) * pad;
+      let scale = Math.min(W / (b.w || 1), H / (b.h || 1)) * pad;
+      if (!isFinite(scale) || scale <= 0) scale = 40;   // fallback si el tamaño aún no está listo
       view = { scale, cx: b.cx, cy: b.cy, ox: W/2, oy: H/2 };
     }
     const toScreen = (x,y) => [ view.ox + (x - view.cx) * view.scale, view.oy - (y - view.cy) * view.scale ];
 
     function resize() {
       const dpr = Math.min(window.devicePixelRatio||1, 2);
-      const W = canvas.clientWidth, H = canvas.clientHeight;
+      const W = VW(), H = VH();
       canvas.width = W*dpr; canvas.height = H*dpr; ctx.setTransform(dpr,0,0,dpr,0,0);
     }
 
@@ -175,8 +178,7 @@
 
     function render() {
       const f = sim.frame();
-      const W = canvas.clientWidth, H = canvas.clientHeight;
-      ctx.clearRect(0,0,W,H);
+      ctx.clearRect(0,0,VW(),VH());
 
       // transportadores como banda (relleno) + rieles (bordes) + eje
       for (const c of f.conveyors) {
@@ -310,6 +312,9 @@
     try {
       resize(); syncLabels(); build();
       requestAnimationFrame(loop);
+      // re-encuadra cuando el layout del móvil ya está estable (barra de direcciones, etc.)
+      setTimeout(() => { resize(); fitView(); }, 150);
+      addEventListener('load', () => { resize(); fitView(); });
     } catch (err) { showErr((err&&err.stack)||String(err)); }
   </script>
 </body>

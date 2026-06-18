@@ -44,11 +44,17 @@ const template = read('comportamiento-cajas.html');
 const importBlock = /\s*import \{ BoxFlowSim, DEFAULTS \} from '\.\/src\/box-physics\.js';\n\s*import \{ buildBehaviorLine \} from '\.\/src\/box-layouts\.js';/;
 if (!importBlock.test(template)) throw new Error('no encontré el bloque de imports en comportamiento-cajas.html');
 
-const html = template
+let html = template
   .replace(importBlock, '\n' + merged + '\n')
   .replace('<title>Comportamiento de la caja', '<title>Comportamiento de la caja (autocontenido)');
 
+// CLAVE para máxima compatibilidad (visores internos de WhatsApp/correo, file:// en
+// móvil): ya no hay imports, así que el script va como <script> CLÁSICO en vez de
+// type="module". Muchos webviews ignoran los módulos ES y dejan la página en blanco.
+html = html.replace('<script type="module">', '<script>');
+
 if (/from '\.\/src\//.test(html)) throw new Error('quedó algún import a ./src/ en el HTML');
+if (/type="module"/.test(html)) throw new Error('quedó un type="module" en el standalone');
 
 mkdirSync(join(root, 'dist'), { recursive: true });
 writeFileSync(join(root, 'dist/comportamiento-cajas-standalone.html'), html);
