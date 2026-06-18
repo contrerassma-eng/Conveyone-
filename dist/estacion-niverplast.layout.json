@@ -1,0 +1,235 @@
+{
+  "version": 1,
+  "instances": [
+    {
+      "id": "LBP_13",
+      "model": "LBP",
+      "pose": {
+        "x": 0,
+        "z": 0,
+        "rot": 1.5707963267948966
+      },
+      "cfg": {
+        "length": 5,
+        "width": 0.6095999999999999,
+        "speed": 0.3048,
+        "pitch": 0.4,
+        "entryHeight": 0.9,
+        "exitHeight": 0.9,
+        "cw": true
+      }
+    },
+    {
+      "id": "NIVERPLAST_14",
+      "model": "NIVERPLAST",
+      "pose": {
+        "x": 3.061616997868383e-16,
+        "z": 5,
+        "rot": 1.5707963267948966
+      },
+      "cfg": {
+        "length": 2,
+        "width": 1,
+        "speed": 0.4,
+        "pitch": 0.45,
+        "entryHeight": 0.8,
+        "meterPerMin": 15,
+        "exitHeight": 0.8,
+        "cw": true
+      }
+    },
+    {
+      "id": "GRR_15",
+      "model": "GRR",
+      "pose": {
+        "x": 4.286263797015736e-16,
+        "z": 7,
+        "rot": 1.5707963267948966
+      },
+      "cfg": {
+        "length": 5,
+        "width": 0.6,
+        "speed": 0.3,
+        "pitch": 0.4,
+        "entryHeight": 0.7,
+        "exitHeight": 0.7,
+        "cw": true
+      }
+    },
+    {
+      "id": "TA_16",
+      "model": "TA",
+      "pose": {
+        "x": 7.347880794884119e-16,
+        "z": 12,
+        "rot": 1.5707963267948966
+      },
+      "cfg": {
+        "length": 2.5,
+        "width": 0.6095999999999999,
+        "speed": 0.3302,
+        "pitch": 0.45,
+        "entryHeight": 0.9,
+        "exitHeight": 0.9,
+        "cw": true
+      }
+    },
+    {
+      "id": "190E24C_17",
+      "model": "190-E24C",
+      "pose": {
+        "x": 1.0999999999999999,
+        "z": -1.0999999999999999,
+        "rot": 3.141592653589793
+      },
+      "cfg": {
+        "angleDeg": 90,
+        "radius": 1.1,
+        "width": 0.6095999999999999,
+        "speed": 0.3048,
+        "pitch": 0.45,
+        "entryHeight": 0.9,
+        "cw": true,
+        "exitHeight": 0.9
+      }
+    },
+    {
+      "id": "INOXTABLE_18",
+      "model": "INOXTABLE",
+      "pose": {
+        "x": 1.3000000000000007,
+        "z": 9.5,
+        "rot": 1.5707963267948966
+      },
+      "cfg": {
+        "length": 2,
+        "width": 0.8,
+        "entryHeight": 0.9,
+        "exitHeight": 0.9,
+        "cw": true
+      }
+    },
+    {
+      "id": "INOXTABLE_19",
+      "model": "INOXTABLE",
+      "pose": {
+        "x": -1.2999999999999994,
+        "z": 9.5,
+        "rot": 1.5707963267948966
+      },
+      "cfg": {
+        "length": 2,
+        "width": 0.8,
+        "entryHeight": 0.9,
+        "exitHeight": 0.9,
+        "cw": true
+      }
+    },
+    {
+      "id": "LIDRACK_20",
+      "model": "LIDRACK",
+      "pose": {
+        "x": 2.2000000000000006,
+        "z": 9.5,
+        "rot": 1.5707963267948966
+      },
+      "cfg": {
+        "length": 3,
+        "width": 0.5,
+        "entryHeight": 1.3,
+        "exitHeight": 1.3,
+        "cw": true
+      }
+    },
+    {
+      "id": "OPERATOR_21",
+      "model": "OPERATOR",
+      "pose": {
+        "x": 0.9000000000000006,
+        "z": 8.5,
+        "rot": 1.5707963267948966
+      },
+      "cfg": {
+        "length": 0.5,
+        "width": 0.5,
+        "entryHeight": 0,
+        "exitHeight": 0,
+        "cw": true
+      }
+    },
+    {
+      "id": "OPERATOR_22",
+      "model": "OPERATOR",
+      "pose": {
+        "x": 0.9000000000000007,
+        "z": 10.5,
+        "rot": 1.5707963267948966
+      },
+      "cfg": {
+        "length": 0.5,
+        "width": 0.5,
+        "entryHeight": 0,
+        "exitHeight": 0,
+        "cw": true
+      }
+    },
+    {
+      "id": "OPERATOR_23",
+      "model": "OPERATOR",
+      "pose": {
+        "x": -0.8999999999999995,
+        "z": 8.5,
+        "rot": 1.5707963267948966
+      },
+      "cfg": {
+        "length": 0.5,
+        "width": 0.5,
+        "entryHeight": 0,
+        "exitHeight": 0,
+        "cw": true
+      }
+    },
+    {
+      "id": "OPERATOR_24",
+      "model": "OPERATOR",
+      "pose": {
+        "x": -0.8999999999999994,
+        "z": 10.5,
+        "rot": 1.5707963267948966
+      },
+      "cfg": {
+        "length": 0.5,
+        "width": 0.5,
+        "entryHeight": 0,
+        "exitHeight": 0,
+        "cw": true
+      }
+    }
+  ],
+  "links": [
+    {
+      "from": "LBP_13",
+      "to": "NIVERPLAST_14",
+      "fromNode": "out",
+      "toNode": "in"
+    },
+    {
+      "from": "NIVERPLAST_14",
+      "to": "GRR_15",
+      "fromNode": "out",
+      "toNode": "in"
+    },
+    {
+      "from": "GRR_15",
+      "to": "TA_16",
+      "fromNode": "out",
+      "toNode": "in"
+    },
+    {
+      "from": "190E24C_17",
+      "to": "LBP_13",
+      "fromNode": "out",
+      "toNode": "in"
+    }
+  ]
+}

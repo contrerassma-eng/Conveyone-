@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <meta name="theme-color" content="#0e1116" />
+  <title>Modelador de transportadores · Hytrol 24"</title>
+  <style>html,body{margin:0;height:100%;background:#0e1116}</style>
+  <!-- Cáscara de ejemplo; el modelador dedicado vive en /modelador.html (raíz). Misma UI. -->
+  <script type="importmap">
+  { "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.158.0/examples/jsm/"
+  } }
+  </script>
+  <script type="module">
+    import { initBuilder } from '../src/builder-ui.js';
+    initBuilder();
+  </script>
+</head>
+<body></body>
+</html>

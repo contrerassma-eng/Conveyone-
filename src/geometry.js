@@ -100,12 +100,26 @@ function locate(segs, t) {
 
 function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
 
+// ---------- Elevador (camino vertical) ----------
+// Footprint fijo en el plano (`at`), pero recorre en ALTURA de h0 a h1. La longitud
+// del camino es el recorrido vertical; la altura la interpola el motor (heightFrom/To).
+function lift(geom) {
+  const at = geom.at || [0, 0];
+  const length = Math.max(1e-6, Math.abs((geom.h1 != null ? geom.h1 : 1) - (geom.h0 != null ? geom.h0 : 0)));
+  return {
+    type: 'lift', length, h0: geom.h0, h1: geom.h1, at,
+    pointAt() { return [at[0], at[1]]; },
+    dirAt() { return [1, 0]; },
+  };
+}
+
 // Fábrica: a partir de un descriptor `geom` produce el camino compilado.
 export function makePath(geom) {
   switch (geom.type) {
     case 'straight': return straight(geom);
     case 'arc': return arc(geom);
     case 'polyline': return polyline(geom);
+    case 'lift': return lift(geom);
     default: throw new Error(`geometry: tipo desconocido '${geom.type}'`);
   }
 }

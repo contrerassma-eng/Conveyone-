@@ -2,39 +2,96 @@
 <html lang="es">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Conveyor Sim — ejemplo navegable</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <meta name="theme-color" content="#0e1116" />
+  <title>Conveyor Sim</title>
   <style>
-    html, body { margin: 0; height: 100%; background: #0e1116; overflow: hidden; }
-    #app { position: absolute; inset: 0; }
+    :root { --bg: #0e1116; --fg: #cdd6e0; --panel: rgba(20,26,34,.94); --line: #2a3645; }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { margin: 0; height: 100%; background: var(--bg); overflow: hidden; }
+    body { font: 13px system-ui, sans-serif; color: var(--fg); }
+    #app { position: fixed; inset: 0; }
+
+    /* botón flotante para mostrar/ocultar controles */
+    #fab {
+      position: fixed; top: env(safe-area-inset-top, 10px); right: 10px; z-index: 30;
+      width: 44px; height: 44px; border-radius: 12px; border: 1px solid var(--line);
+      background: var(--panel); color: var(--fg); font-size: 20px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+    }
+    #fab:active { background: #243044; }
+
+    /* panel: hoja inferior en móvil, tarjeta lateral en escritorio */
     #panel {
-      position: absolute; top: 8px; right: 8px; z-index: 10;
-      font: 12px system-ui, sans-serif; color: #cdd6e0;
-      background: rgba(14,17,22,.85); padding: 10px 12px; border-radius: 8px;
-      display: grid; gap: 6px; width: 210px;
+      position: fixed; z-index: 20; background: var(--panel);
+      border: 1px solid var(--line); display: grid; gap: 10px;
+      transition: transform .22s ease, opacity .22s ease;
     }
-    #panel label { display: grid; gap: 2px; }
-    #panel .row { display: flex; gap: 6px; }
-    #panel button {
-      flex: 1; background: #1b2330; color: #cdd6e0; border: 1px solid #2a3645;
-      border-radius: 5px; padding: 5px; cursor: pointer; font: 11px monospace;
+    @media (max-width: 720px) {
+      #panel {
+        left: 0; right: 0; bottom: 0; border-radius: 16px 16px 0 0;
+        padding: 12px 16px calc(14px + env(safe-area-inset-bottom, 0));
+        max-height: 48vh; overflow-y: auto;
+      }
+      #panel.hidden { transform: translateY(110%); opacity: 0; pointer-events: none; }
     }
-    #panel button:hover { background: #243044; }
-    #panel h1 { font-size: 13px; margin: 0 0 2px; }
+    @media (min-width: 721px) {
+      #panel { top: 64px; right: 10px; width: 250px; border-radius: 12px; padding: 14px; }
+      #panel.hidden { transform: translateX(120%); opacity: 0; pointer-events: none; }
+    }
+
+    #panel h1 { font-size: 14px; margin: 0; display: flex; justify-content: space-between; align-items: center; }
+    #panel label { display: grid; gap: 4px; font-size: 12px; color: #aeb9c6; }
+    #panel select, #panel input[type=range] { width: 100%; }
+    #panel select {
+      background: #121821; color: var(--fg); border: 1px solid var(--line);
+      border-radius: 8px; padding: 9px; font-size: 13px;
+    }
+    input[type=range] { height: 28px; }
+    .row { display: flex; gap: 8px; }
+    .row button {
+      flex: 1; background: #1b2330; color: var(--fg); border: 1px solid var(--line);
+      border-radius: 8px; padding: 11px 6px; cursor: pointer; font: 12px monospace;
+    }
+    .row button:active { background: #243044; }
+    /* HUD compacto en móvil */
+    @media (max-width: 720px) { #app :is(div) { font-size: 11px !important; } }
   </style>
 </head>
 <body>
   <div id="app"></div>
+  <div id="err" style="position:fixed;left:8px;top:8px;right:8px;z-index:40;display:none;
+       font:12px monospace;color:#ffb3b3;background:rgba(40,10,10,.92);border:1px solid #b71c1c;
+       border-radius:8px;padding:10px;white-space:pre-wrap"></div>
+  <button id="fab" title="Mostrar / ocultar controles">⚙</button>
+
   <div id="panel">
-    <h1>Conveyor Sim</h1>
-    <label>Carriles (peine): <b id="lanesV">7</b>
-      <input id="lanes" type="range" min="1" max="12" value="7" step="1" />
+    <h1>Conveyor Sim · v6 <span id="closeP" style="cursor:pointer;opacity:.7">✕</span></h1>
+    <label>Layout
+      <select id="layout">
+        <option value="buffered">Sistema 4500 + Kímarox + buffers</option>
+        <option value="sorter">Sorter 4500 (simple)</option>
+        <option value="comb">Peine AC301</option>
+      </select>
+    </label>
+    <label id="outputsWrap">Salidas: <b id="outputsV">6</b>
+      <input id="outputs" type="range" min="1" max="8" value="6" step="1" />
+    </label>
+    <label>Receta del Virtual Pocket
+      <select id="recipe">
+        <option value="chain">Cadena · 3 por color, en ciclo</option>
+        <option value="together">Todo junto · un lote</option>
+        <option value="fifo">FIFO · sin receta</option>
+      </select>
     </label>
     <label>Velocidad ×<b id="speedV">1.0</b>
       <input id="speed" type="range" min="0.2" max="3" value="1" step="0.1" />
     </label>
-    <label>Fatiga (carga) <b id="rateV">1.0</b>
+    <label>Carga ×<b id="rateV">1.0</b>
       <input id="rate" type="range" min="0.3" max="2" value="1" step="0.1" />
+    </label>
+    <label id="lanesWrap" style="display:none">Carriles (peine): <b id="lanesV">7</b>
+      <input id="lanes" type="range" min="1" max="12" value="7" step="1" />
     </label>
     <div class="row">
       <button data-view="iso">ISO</button>
@@ -47,42 +104,88 @@
     </div>
   </div>
 
-  <!-- Three.js local (npm install three@0.158) -->
+  <!-- diagnóstico: muestra cualquier error en pantalla (útil en móvil) -->
+  <script>
+    function showErr(msg) {
+      var e = document.getElementById('err');
+      e.style.display = 'block';
+      e.textContent = 'Error al cargar la simulación:\n' + msg +
+        '\n\nSi abriste el archivo localmente (file://), el navegador móvil bloquea los módulos. Ábrelo desde una URL https.';
+    }
+    addEventListener('error', e => showErr((e.message || e.error || '') + (e.filename ? '\n' + e.filename : '')));
+    addEventListener('unhandledrejection', e => showErr((e.reason && e.reason.message) || String(e.reason)));
+
+    // Mostrar/ocultar controles — conectado aquí (script clásico) para que funcione
+    // SIEMPRE, aunque el módulo 3D fallara. El panel arranca OCULTO: primero se ve el 3D.
+    (function () {
+      var panel = document.getElementById('panel');
+      var fab = document.getElementById('fab');
+      var closeP = document.getElementById('closeP');
+      panel.classList.add('hidden');
+      function toggle() { panel.classList.toggle('hidden'); }
+      function hide() { panel.classList.add('hidden'); }
+      if (fab) fab.addEventListener('click', toggle);
+      if (closeP) closeP.addEventListener('click', hide);
+    })();
+  </script>
+  <!-- Three.js desde CDN: no requiere npm install -->
   <script type="importmap">
-  { "imports": { "three": "../node_modules/three/build/three.module.js" } }
+  { "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.158.0/examples/jsm/"
+  } }
   </script>
   <script type="module">
     import { ConveyorSim } from '../src/engine.js';
     import { mountSim } from '../src/render.js';
-    import { buildComb } from '../src/layouts.js';
+    import { buildComb, buildSorter4500, buildBufferedSorter } from '../src/layouts.js';
 
     const app = document.getElementById('app');
     let sim, api, running = true;
-    let lanes = 7, speedMul = 1, rateMul = 1;
+    let lanes = 7, outputs = 6, speedMul = 1, rateMul = 1, layout = 'buffered', recipe = 'chain';
+    const UI_PALETTE = ['red', 'blue', 'green', 'yellow', 'orange', 'purple', 'cyan', 'pink'];
 
+    function recipeSpec(colors) {
+      if (recipe === 'together') return { loop: true, steps: [{ color: colors, qty: colors.length * 2 }] };
+      if (recipe === 'fifo') return { loop: true, steps: [] };
+      return { loop: true, steps: colors.map(c => ({ color: c, qty: 3 })) };
+    }
     function build() {
       if (api) api.stop();
       app.innerHTML = '';
-      sim = new ConveyorSim(buildComb({ lanes, rate: 600 * lanes * rateMul }), { seed: 1 });
+      const isComb = layout === 'comb';
+      $('lanesWrap').style.display = isComb ? 'grid' : 'none';
+      $('outputsWrap').style.display = isComb ? 'none' : 'grid';
+      const colors = UI_PALETTE.slice(0, outputs);
+      let model;
+      if (layout === 'buffered') model = buildBufferedSorter({ outputs, rate: 600 * outputs * rateMul, pocket: recipeSpec(colors) });
+      else if (layout === 'sorter') model = buildSorter4500({ rate: 3600 * rateMul, pocket: recipeSpec(['red','blue','green','yellow','orange','purple']) });
+      else model = buildComb({ lanes, rate: 600 * lanes * rateMul });
+      sim = new ConveyorSim(model, { seed: 1 });
       api = mountSim(sim, { container: app, warmup: 8 });
-      api.setSpeed(speedMul).start();
+      api.setSpeed(speedMul).view(layout === 'buffered' ? 'iso' : 'top').start();
       running = true;
-      document.getElementById('toggle').textContent = 'Pausa';
+      $('toggle').textContent = 'Pausa';
     }
 
-    const bind = (id, fn) => document.getElementById(id).addEventListener('input', fn);
-    bind('lanes', e => { lanes = +e.target.value; lanesV.textContent = lanes; build(); });
-    bind('speed', e => { speedMul = +e.target.value; speedV.textContent = speedMul.toFixed(1); api.setSpeed(speedMul); });
-    bind('rate', e => { rateMul = +e.target.value; rateV.textContent = rateMul.toFixed(1); build(); });
-    document.querySelectorAll('[data-view]').forEach(b =>
-      b.addEventListener('click', () => api.view(b.dataset.view)));
-    document.getElementById('toggle').addEventListener('click', () => {
+    const $ = id => document.getElementById(id);
+    const onInput = (id, fn) => $(id).addEventListener('input', fn);
+    const onChange = (id, fn) => $(id).addEventListener('change', fn);
+    onChange('layout', e => { layout = e.target.value; build(); });
+    onChange('recipe', e => { recipe = e.target.value; build(); });
+    onInput('outputs', e => { outputs = +e.target.value; $('outputsV').textContent = outputs; build(); });
+    onInput('lanes', e => { lanes = +e.target.value; $('lanesV').textContent = lanes; build(); });
+    onInput('speed', e => { speedMul = +e.target.value; $('speedV').textContent = speedMul.toFixed(1); api.setSpeed(speedMul); });
+    onInput('rate', e => { rateMul = +e.target.value; $('rateV').textContent = rateMul.toFixed(1); build(); });
+    document.querySelectorAll('[data-view]').forEach(b => b.addEventListener('click', () => api.view(b.dataset.view)));
+    $('toggle').addEventListener('click', () => {
       running = !running; running ? api.start() : api.stop();
-      document.getElementById('toggle').textContent = running ? 'Pausa' : 'Reanudar';
+      $('toggle').textContent = running ? 'Pausa' : 'Reanudar';
     });
-    document.getElementById('reset').addEventListener('click', build);
+    $('reset').addEventListener('click', build);
 
-    build();
+    // (el botón mostrar/ocultar se conecta en el script base, arriba)
+    try { build(); } catch (err) { showErr((err && err.stack) || String(err)); }
   </script>
 </body>
 </html>

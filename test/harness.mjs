@@ -115,5 +115,90 @@ check('determinismo: misma semilla -> mismo resultado', s1.stats.generated === s
 const fr = sim.frame();
 check('frame: expone cajas, tramos y stats', Array.isArray(fr.boxes) && Array.isArray(fr.segments) && !!fr.stats);
 
+// ---------- clasificador Intralox 4500 + Virtual Pocket ----------
+import { buildSorter4500 } from '../src/layouts.js';
+
+// capacidades configuradas
+let sorter = new ConveyorSim(buildSorter4500(), { seed: 3 });
+let mainCap = 0;
+for (const s of sorter.segments.values()) if (/^main/.test(s.id)) mainCap += Math.floor(s.length / s.pitch);
+check('sorter: capacidad de línea principal = 60', mainCap === 60);
+const bufCaps = sorter.frame().buffers.map(b => b.cap);
+check('sorter: cada buffer tiene capacidad 20', bufCaps.length === 6 && bufCaps.every(c => c === 20));
+
+sorter.run(180);
+const sf = sorter.frame();
+
+// clasificación por color: cada buffer solo contiene su color
+let pureLanes = true;
+for (const seg of sorter.segments.values()) {
+  if (!seg.pocketBuffer) continue;
+  for (const b of sorter.boxes) if (b.segId === seg.id && b.color !== seg.color) pureLanes = false;
+}
+check('sorter: cada salida acumula solo su color', pureLanes);
+check('sorter: las fuentes asignan color a las cajas', sorter.boxes.every(b => b.segId === 'infeed' || b.color != null));
+
+// buffer de cero presión: nunca excede su capacidad (+1 = caja en el extremo saliendo)
+const overCap = sf.buffers.some(b => b.count > b.cap + 1);
+check('sorter: el buffer respeta la capacidad (cero presión)', !overCap);
+
+// virtual pocket: libera y reparte por la receta cíclica (3 por color)
+check('virtual pocket: libera cajas a la salida', sf.stats.released > 0);
+const counts = Object.values(sf.pocket.byColor);
+const spread = Math.max(...counts) - Math.min(...counts);
+check('virtual pocket: receta cíclica reparte parejo entre colores', counts.length === 6 && spread <= 3);
+
+// receta "todo junto": un solo lote de cualquier color
+const together = new ConveyorSim(buildSorter4500({ pocket: { loop: true, steps: [{ color: ['red', 'blue', 'green', 'yellow', 'orange', 'purple'], qty: 12 }] } }), { seed: 5 });
+together.run(120);
+check('virtual pocket: receta "todo junto" libera en lote', together.frame().stats.released > 0);
+
+// receta que ignora un color -> ese buffer se llena y rebosa al rechazo
+const partial = new ConveyorSim(buildSorter4500({ pocket: { loop: true, steps: [{ color: 'red', qty: 5 }] } }), { seed: 9 });
+partial.run(300);
+check('sorter: color no demandado se acumula y rebosa (rejected>0)', partial.frame().stats.rejected > 0);
+
+// ---------- sistema con buffers verticales + elevadores (Kímarox) ----------
+import { buildBufferedSorter } from '../src/layouts.js';
+
+// geometría vertical: un elevador (lift) cambia la altura
+const vlift = makePath({ type: 'lift', at: [0, 0], h0: 0.9, h1: 3.0 });
+check('elevador: longitud = recorrido vertical', approx(vlift.length, 2.1, 1e-6));
+
+let bs = new ConveyorSim(buildBufferedSorter({ outputs: 6 }), { seed: 4 });
+// niveles de buffer: 4 por salida con capacidad 15
+const lvlCaps = bs.frame().buffers; // incluye los _zp; filtremos los niveles
+let lvl0 = null;
+for (const seg of bs.segments.values()) if (seg.id === 'o0_lvl0') lvl0 = Math.round(seg.length / seg.pitch);
+check('buffer vertical: cada nivel tiene capacidad 15', lvl0 === 15);
+let nLevels = 0;
+for (const seg of bs.segments.values()) if (/^o0_lvl\d+$/.test(seg.id)) nLevels++;
+check('buffer vertical: 4 niveles por salida', nLevels === 4);
+let nElev = 0;
+for (const seg of bs.segments.values()) if (seg.elevator) nElev++;
+check('elevadores: subida y descenso por salida (2 × 6)', nElev === 12);
+
+bs.run(300);
+const bf = bs.frame();
+// las cajas alcanzan alturas de los niveles (transporte vertical real)
+const maxY = Math.max(...bf.boxes.map(b => b.y), 0);
+check('transporte vertical: las cajas suben por encima de 0.9 m', maxY > 1.1);
+// un elevador nunca tiene más de una caja
+let elevMax = 0;
+for (const seg of bs.segments.values()) if (seg.elevator) {
+  const c = bs.boxes.filter(b => b.segId === seg.id).length;
+  elevMax = Math.max(elevMax, c);
+}
+check('elevador: capacidad de una sola caja', elevMax <= 1);
+check('sistema: el Virtual Pocket libera tras subir, bufferizar y bajar', bf.stats.released > 0);
+// los elevadores cíclicos son cuello (limitan el flujo) -> aparecen en cuellos o el buffer llena
+check('sistema: detecta cuellos (elevadores/buffer)', bf.bottlenecks.length > 0);
+
+// salidas regulables
+const bs3 = new ConveyorSim(buildBufferedSorter({ outputs: 3 }), { seed: 2 });
+let zpCount = 0;
+for (const seg of bs3.segments.values()) if (/^o\d+_zp$/.test(seg.id)) zpCount++;
+check('sistema: cantidad de salidas regulable (outputs=3)', zpCount === 3);
+
 console.log(`\n${passed} ok, ${failed} fail` + (failed ? `  -> ${fails.join(', ')}` : ''));
 process.exit(failed ? 1 : 0);

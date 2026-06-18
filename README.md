@@ -24,14 +24,32 @@ src/
                 procesos (con fatiga), salidas, extracción, enrutado, cuellos.
   layouts.js    Generadores PARAMÉTRICOS de modelos (buildComb, buildDemo) —
                 semilla del modelador: parámetros -> modelo.
+  catalog.js    Biblioteca de conveyors (catálogo Hytrol 24") + createConveyorLibrary():
+                place/connect/validate/graphToModel — arma modelos desde un grafo de nodos.
+  builder-ui.js Modelador 3D reutilizable: initBuilder() construye la UI + escena.
+  index.js      Entrada única: createSimulator() reúne catálogo + motor + render.
   render.js     Render 3D (Three.js) que consume el estado del motor + HUD + navegación.
+  box-physics.js Motor 2D de COMPORTAMIENTO de la caja (con colisiones e inercia).
+                Independiente de engine.js: la caja es un cuerpo libre; el transportador
+                la EMPUJA, las cajas CHOCAN y, en curva, pueden SALIRSE (derrape).
+  box-layouts.js Layout simple para box-physics: entrada → curva 60° → tramo de presión
+                con desviador y salida a 30° → curva 60° → salida.
+modelador.html  PÁGINA DEDICADA del modelador (raíz), independiente del simulador
+                principal (index.html). Carga src/builder-ui.js. Es la que se publica aparte.
+comportamiento-cajas.html  PÁGINA DEDICADA al simulador de comportamiento de la caja
+                (raíz, vista 2D cenital): cerebro de velocidades por equipo + escenarios.
 examples/
   index.html    Ejemplo navegable: carga motor+render+layout, panel de control, auto-run.
+  builder.html  Cáscara de ejemplo del modelador (misma UI que /modelador.html).
 test/
   harness.mjs   Validación headless del motor (15 comprobaciones).
+  catalog.mjs   Validación de la biblioteca de conveyors (13 comprobaciones).
+  box-physics.mjs Validación headless del motor de comportamiento (tracción, choque por
+                frenado, derrape en curva, desvío). `npm run test:box`.
 docs/
   principles.md Aprendizajes clave (cero presión, generación, cuellos, render, ...).
   schema.md     Referencia del esquema de layout (el "lenguaje" del modelador).
+  catalog.md    Catálogo Hytrol 24", la función callable y el modelador 3D.
   roadmap.md    Camino hacia el modelador online.
 ```
 
@@ -108,6 +126,39 @@ direcciones, tramos, curvas) a un modelo como estos.
   evacuación/salida o en la alimentación.
 
 Detalle y fundamentos en `docs/principles.md`.
+
+## Simulador de comportamiento de la caja (con colisiones)
+
+El motor principal (`engine.js`) está construido sobre **cero presión**: las cajas
+nunca se tocan y van pegadas a la línea. Eso es ideal para evaluar flujo, pero **no
+puede** mostrar lo que pasa de verdad cuando el transportador tiene más fuerza que la
+caja: choques al frenar, acumulación con contacto y, sobre todo, la **pérdida de
+trayectoria en curva** cuando el empuje supera a la guía.
+
+Para eso existe un segundo motor, **independiente y sin tocar el primero**:
+`src/box-physics.js` + `src/box-layouts.js`, con su página dedicada
+`comportamiento-cajas.html` (vista 2D cenital, sin alturas). La caja es un **cuerpo
+libre** en el plano:
+
+- **El transportador empuja** la caja hacia la velocidad de banda *a lo largo de la
+  tangente* (tracción con tope). No redirige la inercia lateral: la caja "quiere seguir
+  recto".
+- **Las cajas chocan** entre sí (impulso casi inelástico) → acumulación con contacto y
+  culebreo. Al **frenar** un equipo aguas abajo, la de atrás embiste a la de adelante.
+- **La guía/riel** es lo que dobla la caja en la curva. Si la centrípeta necesaria
+  (`v²/R`) supera la fuerza máxima de la guía (`railMax`), la caja **se sale de la
+  curva** (derrape). El empuje del cuello aumenta `v` y dispara el mismo efecto.
+- **Desviador**: en el punto de desvío, el desviador "agarra" una fracción de las cajas
+  y las pasa a una **salida a 30°**.
+
+La página trae un **cerebro de velocidades** (un slider por equipo) y escenarios listos
+(*Nominal*, *Cuello/choque*, *Derrape por empuje*, *Guía débil*) para mostrarle a un
+cliente la diferencia entre el flujo ideal y lo que ocurre físicamente. La física se
+valida headless: `npm run test:box`.
+
+Para compartirlo como **un solo archivo** (sin servidor, sin npm, sin CDN — es 2D con
+`<canvas>`, no usa three.js), `npm run build:box` genera
+`dist/comportamiento-cajas-standalone.html`, que se abre con doble clic.
 
 ## Roadmap
 

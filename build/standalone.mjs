@@ -1,0 +1,67 @@
+// build/standalone.mjs — genera dist/standalone.html: un único archivo que abre la
+// simulación SIN servidor ni npm install (Three.js se carga desde CDN). Pensado para
+// abrirlo directo en el móvil.
+//
+//   node build/standalone.mjs
+//
+// Funde src/geometry.js + engine.js + layouts.js + render.js en un solo módulo,
+// quitando los import/export locales, y lo inyecta en examples/index.html.
+
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+
+const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+const read = p => readFileSync(join(root, p), 'utf8');
+
+// Quita imports locales y la importación de three; convierte export X -> X.
+function strip(src) {
+  return src
+    .split('\n')
+    .filter(l => !/^\s*import\s.*from\s+['"](\.\/|three)/.test(l)) // imports locales y de three
+    .filter(l => !/^\s*export\s+default\b/.test(l))                 // export default ...
+    .filter(l => !/^\s*export\s*\{[^}]*\}\s*;?\s*$/.test(l))         // export { a, b };
+    .map(l => l.replace(/^(\s*)export\s+(class|function|const|let|var)\b/, '$1$2'))
+    .join('\n');
+}
+
+// Three.js se INCRUSTA (build global UMD vendor/three.min.js): cero dependencias de
+// red, funciona offline y desde file://. El código usa el global THREE. OrbitControls
+// va en su variante "global" (usa el THREE global) e inline en el mismo módulo.
+const merged = [
+  strip(read('vendor/OrbitControls.global.js')),
+  strip(read('src/geometry.js')),
+  strip(read('src/engine.js')),
+  strip(read('src/layouts.js')),
+  strip(read('src/render.js')),
+].join('\n\n');
+const threeUMD = read('vendor/three.min.js');
+
+// En examples/index.html, reemplaza las 3 importaciones desde ../src por el código fundido.
+const html = read('examples/index.html');
+const importBlock =
+  "import { ConveyorSim } from '../src/engine.js';\n" +
+  "    import { mountSim } from '../src/render.js';\n" +
+  "    import { buildComb, buildSorter4500, buildBufferedSorter } from '../src/layouts.js';";
+
+if (!html.includes(importBlock)) {
+  console.error('No se encontró el bloque de imports esperado en examples/index.html');
+  process.exit(1);
+}
+
+if (threeUMD.includes('</script>')) {
+  console.error('three.min.js contiene "</script>"; habría que escaparlo.');
+  process.exit(1);
+}
+
+const out = html
+  .replace('<title>Conveyor Sim</title>', '<title>Conveyor Sim (standalone)</title>')
+  // el standalone no usa importmap ni CDN: Three.js va incrustado (global UMD).
+  .replace(/\s*<!-- Three\.js desde CDN[^>]*-->\s*<script type="importmap">[\s\S]*?<\/script>/, '')
+  // incrusta Three.js (clásico, define el global THREE) antes del módulo
+  .replace('<script type="module">', `<script>\n${threeUMD}\n</script>\n  <script type="module">`)
+  .replace(importBlock, merged);
+
+mkdirSync(join(root, 'dist'), { recursive: true });
+writeFileSync(join(root, 'dist/standalone.html'), out);
+console.log('dist/standalone.html generado (' + out.length + ' bytes)');

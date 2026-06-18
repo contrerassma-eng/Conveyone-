@@ -1,0 +1,1380 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Sorter 4500 + Qimarox + Virtual Pocket — Simulador 3D</title>
+<link rel="icon" href="data:,">
+<style>
+  html,body{margin:0;height:100%;background:#0d1117;overflow:hidden;font-family:system-ui,Segoe UI,Arial}
+  #app{position:fixed;inset:0}
+  #panel{position:absolute;top:10px;right:12px;background:rgba(16,21,32,.92);border:1px solid #243049;border-radius:12px;padding:12px 14px;color:#dfe7f3;font-size:12px;min-width:210px;max-width:240px}
+  #panel h1{font-size:13px;margin:0 0 8px;color:#9fc3ff;font-weight:700}
+  #panel label{display:block;margin:9px 0 2px;color:#aebbd0}
+  #panel input[type=range]{width:100%}
+  #panel select{width:100%;background:#1a2740;color:#dfe7f3;border:1px solid #2a3a5a;border-radius:6px;padding:5px}
+  #panel .v{float:right;color:#fff;font-weight:700}
+  #panel .hint{margin-top:10px;color:#7f8ca3;font-size:11px;line-height:1.4}
+  #panel h1 #hideCtl{float:right;cursor:pointer;color:#9fc3ff}
+  #showCtl{position:absolute;top:10px;right:12px;z-index:6;display:none;background:rgba(16,21,32,.92);border:1px solid #243049;border-radius:10px;color:#dfe7f3;padding:9px 12px;font:600 13px system-ui;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<button id="showCtl">☰ Controles</button>
+<div id="panel">
+  <h1>Sorter · 16 SKUs + Pocket <span id="hideCtl" title="Ocultar controles">✕</span></h1>
+  <label>Columnas <span class="v" id="vOuts">4 (16 SKUs)</span></label>
+  <input type="range" id="outs" min="1" max="4" step="1" value="4">
+  <label>Entrada (cajas/min) <span class="v" id="vRate">24</span></label>
+  <input type="range" id="rate" min="6" max="80" step="1" value="24">
+  <label>Velocidad de SALIDA (cajas/min) <span class="v" id="vOut">24</span></label>
+  <input type="range" id="orate" min="6" max="60" step="1" value="24">
+  <label style="margin-top:6px;color:#9fc3ff">Paletizadores KUKA</label>
+  <div style="display:flex;gap:6px;align-items:center">
+    <span style="color:#aebbd0;font-size:11px;flex:1">Robots</span><input type="number" id="probots" min="1" max="12" value="6" style="width:42px;background:#121821;color:#fff;border:1px solid #2a3a5a;border-radius:6px;padding:3px;font-size:11px;text-align:center">
+    <span style="color:#aebbd0;font-size:11px;flex:1">Pos/robot</span><input type="number" id="ppos" min="1" max="12" value="10" style="width:42px;background:#121821;color:#fff;border:1px solid #2a3a5a;border-radius:6px;padding:3px;font-size:11px;text-align:center">
+  </div>
+  <div style="display:flex;gap:6px;align-items:center;margin-top:3px">
+    <span style="color:#aebbd0;font-size:11px;flex:1">Cajas por pallet</span><input type="number" id="pcap" min="4" max="80" value="32" style="width:42px;background:#121821;color:#fff;border:1px solid #2a3a5a;border-radius:6px;padding:3px;font-size:11px;text-align:center">
+  </div>
+  <div style="display:flex;gap:6px;align-items:center;margin-top:3px">
+    <span style="color:#aebbd0;font-size:11px;flex:1">Máx. cajas por tanda</span><input type="number" id="pbatch" min="1" max="20" value="4" style="width:42px;background:#121821;color:#fff;border:1px solid #2a3a5a;border-radius:6px;padding:3px;font-size:11px;text-align:center">
+  </div>
+  <div style="display:flex;gap:6px;align-items:center;margin-top:3px">
+    <span style="color:#aebbd0;font-size:11px;flex:1">Ciclo pick (s/caja)</span><input type="number" id="ptime" min="1" max="60" step="1" value="15" style="width:42px;background:#121821;color:#fff;border:1px solid #2a3a5a;border-radius:6px;padding:3px;font-size:11px;text-align:center">
+  </div>
+  <label style="display:flex;gap:6px;align-items:center;margin-top:4px;cursor:pointer"><input type="checkbox" id="ppull" checked> <span style="font-size:11px">Tren a medida (sincronizado → 0 faltas)</span></label>
+  <label>Receta de salida · 17 líneas (elige el SKU por línea)</label>
+  <div id="recipeRows" style="max-height:150px;overflow:auto;display:grid;gap:3px;margin-top:2px"></div>
+  <label>Velocidad simulación <span class="v" id="vSpeed">3×</span></label>
+  <input type="range" id="speed" min="1" max="8" step="1" value="3">
+  <label style="display:flex;gap:6px;align-items:center;margin-top:8px;cursor:pointer"><input type="checkbox" id="hideKuka" checked> <span style="font-size:11px">Ocultar KUKAs y segregador (cajas salen al final del principal)</span></label>
+  <button id="pdfBtn" style="width:100%;margin-top:10px;background:#f39200;color:#1a1a1a;border:0;border-radius:8px;padding:9px;font:700 12px system-ui;cursor:pointer">📄 Generar reporte PDF</button>
+  <div class="hint">16 SKUs (4 columnas × 4 niveles, cada nivel un color/SKU) = 85%, más una SALIDA DIRECTA sin elevador = 15%. Entrada desordenada por SKU (mix Danich); el Virtual Pocket entrega un tren ordenado a la banda de salida. Baja la velocidad de salida para estresar (se llenan los buffers).<br><b style="color:#9fc3ff">VR (Meta Quest):</b> abre este link en el navegador del visor y pulsa <b>ENTRAR VR</b> — stick izq camina · stick der gira 45° · gatillo apunta al piso y teletransporta.</div>
+</div>
+
+<!-- Diagnóstico (script clásico): captura errores aunque falle la carga del módulo/scripts -->
+<script>
+  window.__ok = false; window.__errs = [];
+  window.showErr = function (msg) {
+    window.__errs.push(msg);
+    var d = document.getElementById('err');
+    if (!d) { d = document.createElement('div'); d.id = 'err'; d.style.cssText = 'position:fixed;left:8px;bottom:8px;max-width:92%;z-index:99;background:#7a1020;color:#fff;font:12px/1.4 ui-monospace,Menlo,Consolas,monospace;padding:9px 11px;border-radius:8px;white-space:pre-wrap;box-shadow:0 6px 24px #0008'; document.body.appendChild(d); }
+    d.textContent = '⚠ ' + window.__errs.join('\n— ');
+  };
+  // CAPTURE = true: así también caza fallos de carga de <script src> (no sólo errores JS)
+  addEventListener('error', function (e) { window.showErr((e.error && e.error.stack) || e.message || ('No cargó: ' + (e.target && (e.target.src || e.target.href) || e))); }, true);
+  addEventListener('unhandledrejection', function (e) { window.showErr('Promesa rechazada: ' + ((e.reason && (e.reason.stack || e.reason.message)) || e.reason)); });
+  window.hasWebGL = function () { try { var c = document.createElement('canvas'); return !!(window.WebGLRenderingContext && (c.getContext('webgl') || c.getContext('experimental-webgl'))); } catch (e) { return false; } };
+  setTimeout(function () { if (!window.__ok && !window.__errs.length) window.showErr('El render no arrancó en 7 s y no hubo error JS: el navegador puede no tener WebGL (visores embebidos) o bloqueó los scripts. Abre la URL de GitHub Pages en Chrome/Safari real.'); }, 7000);
+</script>
+<!-- three.js INCRUSTADO (sin CDN): funciona offline y en navegadores que bloquean jsdelivr -->
+<script src="vendor/three.min.js"></script>
+<script src="vendor/OrbitControls.js"></script>
+<script src="vendor/VRButton.js"></script>
+<!-- chequeo explícito: ¿cargaron los scripts locales? -->
+<script>
+  if (typeof THREE === 'undefined') window.showErr('No cargó vendor/three.min.js (revisa que el deploy de Pages ya terminó y que la ruta /vendor/ existe).');
+  else if (!THREE.OrbitControls) window.showErr('three.js cargó pero NO vendor/OrbitControls.js.');
+  else if (!window.hasWebGL()) window.showErr('three.js cargó OK, pero este navegador NO tiene WebGL (típico del visor embebido). Abre la URL en Chrome/Safari real.');
+</script>
+<script type="module">
+const OrbitControls = THREE.OrbitControls;   // THREE global (build UMD local)
+
+// ===== MOTOR (headless) =====
+// engine.mjs — Motor headless del sistema Sorter 4500 + Qimarox + buffers + Virtual Pocket.
+
+// ---------- RNG con semilla (mulberry32) — determinismo ----------
+function makeRng(seed) {
+  let a = (seed >>> 0) || 1;
+  return () => {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// ---------- geometría: paths planares; los 'lift' se tratan aparte ----------
+function dist(a, b) { return Math.hypot(b[0] - a[0], b[1] - a[1]); }
+function makePath(points) {
+  const segs = []; let L = 0;
+  for (let i = 0; i < points.length - 1; i++) { const d = dist(points[i], points[i + 1]); segs.push({ a: points[i], b: points[i + 1], d, acc: L }); L += d; }
+  return {
+    points, length: L,
+    pointAt(s) { s = Math.max(0, Math.min(L, s)); for (let i = 0; i < segs.length; i++) { const g = segs[i]; if (s <= g.acc + g.d || i === segs.length - 1) { const t = g.d ? (s - g.acc) / g.d : 0; return [g.a[0] + (g.b[0] - g.a[0]) * t, g.a[1] + (g.b[1] - g.a[1]) * t]; } } return points[points.length - 1].slice(); },
+    dirAt(s) { s = Math.max(0, Math.min(L, s)); let g = segs[0]; for (let i = 0; i < segs.length; i++) { if (s <= segs[i].acc + segs[i].d || i === segs.length - 1) { g = segs[i]; break; } } const dx = g.b[0] - g.a[0], dz = g.b[1] - g.a[1]; const m = Math.hypot(dx, dz) || 1; return [dx / m, dz / m]; },
+  };
+}
+function pointsFromSpec(geom) {
+  if (geom.points) return geom.points.map((p) => p.slice());
+  if (geom.type === 'straight') return [geom.from.slice(), geom.to.slice()];
+  if (geom.type === 'polyline') return geom.points.map((p) => p.slice());
+  if (geom.type === 'arc') { const n = geom.samples || 14; const pts = []; for (let i = 0; i <= n; i++) { const a = geom.a0 + (geom.a1 - geom.a0) * (i / n); pts.push([geom.center[0] + geom.radius * Math.cos(a), geom.center[1] + geom.radius * Math.sin(a)]); } return pts; }
+  throw new Error('geom?: ' + JSON.stringify(geom));
+}
+
+let _bid = 1;
+class Box {
+  constructor(seg, t, color) {
+    this.id = _bid++; this.seg = seg; this.s = 0; this.color = color;
+    this.tBorn = t; this.onLift = false; this.progress = 0; this.h0 = 0; this.h1 = 0;
+    this.targetDrain = null; this.moved = true; this.throttled = false; this.held = false;
+  }
+}
+
+class SorterSim {
+  constructor(model, seed = 12345) {
+    this.model = model; this.meta = model.meta || {};
+    this.box = this.meta.boxSize || [0.4, 0.13, 0.3];
+    this.colors = this.meta.colors || ['red', 'blue', 'green', 'yellow', 'orange', 'purple'];
+    this.rng = makeRng(seed);
+    this.t = 0; this.boxes = [];
+    this.generated = 0; this.released = 0; this.rejected = 0;
+    this.releasedLog = []; this.relByColor = {};
+    this.seg = {}; this.lifts = []; this.pocketSegs = []; this.pickSegs = [];
+    this._build();
+    this._pocket = { idx: 0, inStep: 0, done: false }; this._pocketNext = 0;
+    this._pending = []; this._slotG = null; this._slotBase = 0;
+    this.robots = {}; this._palEvents = []; this._batch = null; this._robotRelNext = {};
+  }
+
+  _build() {
+    const allPts = [];
+    for (const s of this.model.segments) {
+      const isLift = s.geom.type === 'lift';
+      const rt = { id: s.id, kind: s.kind || (isLift ? 'lift' : 'conveyor'), color: s.color || null, next: s.next || [], isLift, robot: s.robot };
+      if (rt.kind === 'pick') this.pickSegs.push(s.id);
+      if (isLift) {
+        rt.at = s.geom.at.slice(); rt.h0 = s.geom.h0; rt.h1 = s.geom.h1;
+        rt.dir = s.geom.h1 >= s.geom.h0 ? 'up' : 'down';
+        // Qimarox mk5 CONTINUO: conveyor vertical con portadores; varias cajas a la vez
+        rt.length = Math.abs(rt.h1 - rt.h0);
+        rt.speed = s.carrierSpeed != null ? s.carrierSpeed : 0.6;   // velocidad de carrier
+        rt.pitch = s.carrierPitch != null ? s.carrierPitch : 0.5;   // paso entre productos en el elevador
+        rt.col = s.col; rt.pocketControlled = !!s.pocketControlled;
+        allPts.push(rt.at);
+      } else {
+        rt.path = makePath(pointsFromSpec(s.geom)); rt.length = rt.path.length;
+        rt.height = s.height != null ? s.height : 0.9;
+        rt.speed = s.speed != null ? s.speed : 0.6;
+        rt.pitch = s.pitch != null ? s.pitch : (this.box[0] + 0.1);
+        rt.sort = s.sort || null;
+        rt.source = s.source || null;
+        rt.sink = !!s.sink; rt.reject = !!s.reject;
+        rt.pocketBuffer = !!s.pocketBuffer;
+        rt.outfeedS = s.outfeedS != null ? s.outfeedS : null;   // posición de inyección en la banda de salida
+        rt.entryByColor = !!s.entryByColor;                     // la banda de salida usa outfeedS por salida
+        rt.cap = s.cap || Math.max(1, Math.floor(rt.length / rt.pitch));
+        rt.nextSpawn = 0; rt.count = 0;
+        if (rt.source) this._srcColorCtr = 0;
+        if (rt.pocketBuffer) this.pocketSegs.push(s.id);
+        allPts.push(...rt.path.points);
+      }
+      this.seg[s.id] = rt;
+    }
+    // elevadores: derivar feeders (tramos cuyo next incluye el lift) y drains (lift.next)
+    for (const id in this.seg) {
+      const L = this.seg[id]; if (!L.isLift) continue;
+      this.lifts.push(id);
+      L.feeders = []; for (const sid in this.seg) if (this.seg[sid].next && this.seg[sid].next.includes(id)) L.feeders.push(sid);
+      L.drains = L.next.slice();
+    }
+    this._bounds = boundsOf(allPts);
+  }
+
+  get bounds() { return this._bounds; }
+  reset() {
+    this.t = 0; this.boxes.length = 0; this.generated = this.released = this.rejected = 0;
+    this.releasedLog.length = 0; this.relByColor = {};
+    this._pocket = { idx: 0, inStep: 0, done: false }; this._pocketNext = 0;
+    this._pending = []; this._slotG = null; this._slotBase = 0;
+    this.robots = {}; this._palEvents = []; this._batch = null; this._robotRelNext = {};
+    this._pallets = {}; this.palDone = 0; this.palMiss = 0; this._palSent = {}; this._prioPtr = 0; this._palRR = 0;
+    for (const id in this.seg) { const r = this.seg[id]; if (r.isLift) { r.cooldownUntil = 0; r.feedCtr = 0; r.levelCtr = 0; } else { r.nextSpawn = 0; r.count = 0; } }
+    this._ftEMA = 0;
+  }
+
+  _liftBox(id) { for (const b of this.boxes) if (b.seg === id) return b; return null; }
+  _boxAtEnd(id) { const seg = this.seg[id]; let best = null; for (const b of this.boxes) if (b.seg === id && b.s >= seg.length - 1e-2) { if (!best || b.s > best.s) best = b; } return best; }
+  _entryFree(id) {
+    // hay hueco si no hay caja dentro de un paso (pitch) del inicio — vale para
+    // transportadores y para el elevador continuo Qimarox (slot de carrier en s=0)
+    const seg = this.seg[id], pitch = seg.pitch;
+    for (const b of this.boxes) if (b.seg === id && b.s < pitch) return false;
+    return true;
+  }
+  _occ(id) { let n = 0; for (const b of this.boxes) if (b.seg === id) n++; return n; }
+
+  step(dt) {
+    this.t += dt; const T = this.t;
+
+    // 1) FUENTES (color round-robin entre las salidas)
+    for (const id in this.seg) {
+      const seg = this.seg[id]; if (!seg.source) continue;
+      if (T >= seg.nextSpawn) {
+        const src = seg.source;
+        const overCap = src.cap && this.boxes.length >= src.cap;
+        if (!overCap && this._entryFree(id)) {
+          const sk = this._nextSku(src); // entrada por TANDAS (lotes del mismo SKU; promedio horario = tabla)
+          const box = new Box(id, T, sk.color); box.sku = sk.idx; box.col = sk.col; box.lvl = sk.lvl; box.direct = sk.direct;
+          box.robot = sk.direct ? this.meta.directRobot : (this.meta.skus[sk.idx] ? this.meta.skus[sk.idx].robot : 0); // KUKA destino (carril de su SKU)
+          box.conv = sk.direct ? this.meta.directConv : (this.meta.skus[sk.idx] ? this.meta.skus[sk.idx].conv : 0); // conveyor de paletizado
+          this.boxes.push(box); this.generated++;
+          this._inBySku = this._inBySku || {}; this._inBySku[sk.key] = (this._inBySku[sk.key] || 0) + 1;
+          seg.nextSpawn = T + this._batchGap(src);
+        } else { seg.nextSpawn = T + 0.2; }
+      }
+    }
+
+    // 2) MOVIMIENTO (cero presión) — incluye elevadores Qimarox mk5 (CONTINUOS, varias cajas)
+    const bySeg = {};
+    for (const b of this.boxes) (bySeg[b.seg] || (bySeg[b.seg] = [])).push(b);
+    for (const id in bySeg) {
+      const seg = this.seg[id];
+      const list = bySeg[id].sort((a, b) => b.s - a.s);
+      let cap = seg.length;
+      for (const b of list) {
+        const old = b.s; const ns = Math.min(b.s + seg.speed * dt, cap); b.s = ns;
+        const adv = ns - old; b.moved = adv > 1e-5; b.throttled = adv < seg.speed * dt * 0.9;
+        cap = b.s - seg.pitch;
+      }
+    }
+
+    // 3) SALIDA del elevador continuo: SUBE -> empuja la caja a SU nivel; BAJA -> a la banda
+    for (const id of this.lifts) {
+      const L = this.seg[id];
+      for (const b of this.boxes) {
+        if (b.seg !== id) continue;
+        if (L.dir === 'up') {
+          const ex = (b.exitS != null) ? b.exitS : L.length;
+          if (b.s >= ex - 1e-3 && b.targetDrain && this._entryFree(b.targetDrain)) { b.seg = b.targetDrain; b.s = 0; b.exitS = null; b.targetDrain = null; }
+        } else { // BAJA -> entrega a la BANDA PLANA (1 m) que va a la evacuación
+          if (b.s >= L.length - 1e-3) {
+            const out = b.targetDrain; if (out && this._entryFree(out)) { b.seg = out; b.s = 0; b.targetDrain = null; }
+          }
+        }
+      }
+    }
+
+    // 4) TRANSFERENCIAS en transportadores (divert; board al elevador de SUBIDA)
+    for (const b of this.boxes) {
+      const seg = this.seg[b.seg];
+      if (seg.isLift) continue;
+      if (b.s < seg.length - 1e-3) continue;
+      if (seg.sink) { b._sink = true; continue; }
+      if (seg.pocketBuffer) continue;                 // lo gobierna el Virtual Pocket (fase 5)
+      const nx = this._chooseNext(seg, b); if (!nx) continue;
+      const nseg = this.seg[nx];
+      if (nseg.isLift) {
+        // board al elevador de SUBIDA (continuo): carrier libre en s=0 y nivel del SKU con hueco
+        const lid = nseg.drains[b.lvl]; const lvlH = lid ? this.seg[lid].height : nseg.h1;
+        if (lid && this._entryFree(nx) && this._entryFree(lid)) { b.seg = nx; b.s = 0; b.exitS = (lvlH - nseg.h0); b.targetDrain = lid; }
+      } else if (nseg.entryByColor) {
+        // La caja espera al final de su banda negra; el MERGE SINCRONIZADO (fase 5) la
+        // inyecta a la evacuación en su estación (X de su columna) cuando su SLOT reservado
+        // llega ahí. Esto garantiza orden perfecto del tren y evita la "pasada".
+        continue;
+      } else {
+        b.seg = nx; b.s = Math.max(0, Math.min(b.s - seg.length, nseg.length));
+      }
+    }
+
+    // 5) VIRTUAL POCKET (decide orden + arranca la cadena) + MERGE SINCRONIZADO por slots
+    this._pocketStep();
+    this._mergeStep();
+
+    // 5.5) PICK de los robots KUKA: 1 caja cada pickTime, SIN ACUMULACIÓN. El robot se reservó
+    // (engaged) al desviarse la caja; cuando ésta llega al punto de pick arranca el ciclo. Mientras
+    // pickea no entra ninguna otra (la siguiente espera en la línea de segregación).
+    const pickTime = (this.meta.pal && this.meta.pal.pickTime) || 15;
+    for (const sid of this.pickSegs) {
+      const sg = this.seg[sid], r = sg.robot;
+      const rs = this.robots[r] || (this.robots[r] = { busy: false, engaged: false, until: 0, color: null, box: null, phase: 0 });
+      if (rs.busy) {
+        rs.phase = Math.max(0, Math.min(1, 1 - (rs.until - this.t) / pickTime));
+        if (this.t >= rs.until) { this._palletize(rs.box); rs.busy = false; rs.engaged = false; rs.box = null; rs.boxId = null; rs.color = null; rs.phase = 0; }
+      } else {
+        const b = this._boxAtEnd(sid);                  // la caja (temporizada por el pocket) llegó al punto de pick
+        if (b) { const k = this.boxes.indexOf(b); if (k >= 0) this.boxes.splice(k, 1); rs.busy = true; rs.until = this.t + pickTime; rs.box = b; rs.color = b.color; rs.phase = 0; rs.px = sg.path.points[sg.path.points.length - 1][0]; rs.sku = b.direct ? 'DIR' : ('S' + b.sku); }
+      }
+    }
+
+    // 6) SALIDAS (sink / overflow)
+    for (let i = this.boxes.length - 1; i >= 0; i--) {
+      const b = this.boxes[i]; if (!b._sink) continue;
+      const seg = this.seg[b.seg];
+      if (seg.reject) this.rejected++;
+      else this._palletize(b);                          // llega al paletizador KUKA
+      this.boxes.splice(i, 1);
+    }
+
+    // 7) métricas + EMA de congestión (cajas frenadas)
+    for (const id in this.seg) this.seg[id].count = 0;
+    for (const b of this.boxes) this.seg[b.seg].count++;
+    let ft = 0; for (const b of this.boxes) if (b.throttled) ft++;
+    this._ftEMA = 0.96 * (this._ftEMA || 0) + 0.04 * ft;
+
+    // muestreo de ocupación de buffers (para el reporte: promedio y pico)
+    if (((this._stepCtr = (this._stepCtr || 0) + 1) % 10) === 0) {
+      let bt = 0, cap = 0; for (const id in this.seg) { const s = this.seg[id]; if (s.kind === 'buffer') { bt += s.count; cap += s.cap; } }
+      this._bufCap = cap; this._bufSum = (this._bufSum || 0) + bt; this._bufSamples = (this._bufSamples || 0) + 1;
+      if (bt > (this._bufPeak || 0)) this._bufPeak = bt;
+    }
+  }
+
+  // datos para el REPORTE PDF: entrada/salida por SKU, ocupación de buffers, paletizado, parámetros
+  report() {
+    const skus = this.meta.skus || [], inB = this._inBySku || {}, outB = this._outBySku || {};
+    const tIn = Object.values(inB).reduce((a, b) => a + b, 0) || 1;
+    const tOut = Object.values(outB).reduce((a, b) => a + b, 0) || 1;
+    const rows = skus.map(s => { const k = 'S' + s.idx; return { name: s.name, color: s.color, ref: s.w, in: inB[k] || 0, inPct: (inB[k] || 0) / tIn, out: outB[k] || 0, outPct: (outB[k] || 0) / tOut }; });
+    rows.push({ name: this.meta.directName || 'Directo', color: this.meta.directColor, ref: this.meta.directW || 0.15, in: inB['DIRECT'] || 0, inPct: (inB['DIRECT'] || 0) / tIn, out: outB['DIR'] || 0, outPct: (outB['DIR'] || 0) / tOut });
+    const ev = this.seg['outfeed'], src = (this.seg['main_d'] || {}).source || {};
+    return {
+      t: this.t, rows, totalIn: tIn, totalOut: tOut,
+      buffers: { avg: (this._bufSum || 0) / Math.max(1, this._bufSamples || 0), peak: this._bufPeak || 0, cap: this._bufCap || 0 },
+      pal: { cfg: this.meta.pal, done: this.palDone || 0, miss: this.palMiss || 0 },
+      params: { box: this.box, refPerMin: (this.meta.ref || {}).perMin || 11, srcRate: src.rate || 0, vout: ev ? ev.speed : 0, outPitch: ev ? ev.pitch : 0, ncol: this.meta.ncol, nlvl: this.meta.nlvl, bufCap: this._bufCap || 0 },
+      generated: this.generated, released: this.released, rejected: this.rejected,
+    };
+  }
+
+  _pickLevel(L) {
+    // round-robin entre drains (niveles) con hueco
+    // FILL-FIRST: llena el nivel más bajo con hueco (nivel 1, luego 2, ...)
+    for (let i = 0; i < L.drains.length; i++) { if (this._entryFree(L.drains[i])) return L.drains[i]; }
+    return null;
+  }
+
+  _chooseNext(seg, b) {
+    if (seg.sort) {
+      const S = seg.sort;
+      if (S.by === 'col') { if (!b.direct && b.col === S.divertCol) return this._entryFree(S.lane) ? S.lane : null; return S.cont && this._entryFree(S.cont) ? S.cont : null; } // es de esta columna: entra o ESPERA (cero presión), no se va a overflow
+      if (S.by === 'direct') { if (b.direct) return this._entryFree(S.lane) ? S.lane : null; return S.cont && this._entryFree(S.cont) ? S.cont : null; }
+      if (S.by === 'color') { if (b.color === S.divertColor && this._entryFree(S.lane)) return S.lane; return S.cont && this._entryFree(S.cont) ? S.cont : null; }
+      if (S.by === 'robot') { if (b.robot === S.robot) return this._entryFree(S.lane) ? S.lane : null; return S.cont && this._entryFree(S.cont) ? S.cont : null; }
+      if (S.by === 'lane') { const mine = S.direct ? b.direct : (!b.direct && b.sku === S.sku); if (mine) return this._entryFree(S.lane) ? S.lane : null; return S.cont && this._entryFree(S.cont) ? S.cont : null; }
+      if (S.by === 'conv') { if (b.conv === S.conv) return this._entryFree(S.lane) ? S.lane : null; return S.cont && this._entryFree(S.cont) ? S.cont : null; } // a su CONVEYOR o sigue por la espina
+    }
+    const nx = seg.next;
+    if (!nx.length) return null;
+    if (nx.length === 1) return this._entryFree(nx[0]) ? nx[0] : null;
+    let best = null, bn = Infinity; for (const id of nx) { if (!this._entryFree(id)) continue; const n = this._occ(id); if (n < bn) { bn = n; best = id; } } return best;
+  }
+
+  _sampleSku() {
+    const skus = this.meta.skus || [];
+    let r = this.rng(), acc = 0;
+    for (const s of skus) { acc += s.w; if (r < acc) return { idx: s.idx, col: s.col, lvl: s.lvl, color: s.color, direct: false, key: 'S' + s.idx }; }
+    return { idx: -1, col: -1, lvl: -1, color: this.meta.directColor || 0x9aa3b0, direct: true, key: 'DIRECT' };
+  }
+
+  // ENTRADA POR TANDAS: la producción real llega en lotes (corridas) de un mismo SKU. Se elige
+  // el SKU de la tanda por peso (tabla Danich) y un tamaño de lote aleatorio (exponencial). Así
+  // se ven TANDAS a la entrada; el promedio por SKU y la tasa total se conservan (la pausa entre
+  // tandas compensa la ráfaga rápida dentro de la tanda).
+  _nextSku(src) {
+    if (!this._batch || this._batch.remaining <= 0) {
+      const sk = this._sampleSku(), mean = src.batchMean || 4, cap = src.batchCap || 9;
+      const size = Math.max(1, Math.min(cap, Math.round(-mean * Math.log(1 - this.rng()))));
+      this._batch = { sk, remaining: size, size };
+    }
+    this._batch.remaining--; this._batchLast = this._batch.remaining <= 0;
+    return this._batch.sk;
+  }
+  // intervalo entre cajas: RÁFAGA dentro de la tanda (un poco más rápida que el promedio, pero
+  // absorbible por la columna) + PAUSA al cerrar la tanda (conserva la tasa media de la tabla).
+  _batchGap(src) {
+    const perMin = Math.max(0.1, (src.rate || 1800) / 60), mean = 60 / perMin, intra = mean * 0.6;
+    if (!this._batchLast) return Math.max(0.5, intra * (0.7 + 0.6 * this.rng()));
+    const N = this._batch ? this._batch.size : 4, pause = mean * (0.4 * N + 0.6);
+    return Math.max(0.6, pause * (0.6 + 0.8 * this.rng()));
+  }
+
+  // PALETIZADO (robots KUKA, tras el SEGREGADOR): cada caja llega al carril de SU robot y
+  // va al pallet de su SKU. Cada robot tiene `positions` posiciones propias; 1 pallet por SKU.
+  // Sin buffer: si el SKU no tiene pallet abierto y el robot no tiene posición libre -> falta.
+  _palletize(b) {
+    const cfg = this.meta.pal || { robots: 4, positions: 5, cap: 32 };
+    const r = b.robot != null ? b.robot : 0;
+    this._pallets = this._pallets || {};               // key 'r:SKU' -> nº cajas en su pallet abierto
+    const key = r + ':' + (b.direct ? 'DIR' : ('S' + b.sku));
+    const outKey = b.direct ? 'DIR' : ('S' + b.sku);
+    this._outBySku = this._outBySku || {}; this._outBySku[outKey] = (this._outBySku[outKey] || 0) + 1; // SALIDA por SKU (reporte)
+    if (this._pallets[key] != null) {
+      this._pallets[key]++;
+      if (this._pallets[key] >= cfg.cap) { delete this._pallets[key]; this.palDone = (this.palDone || 0) + 1; this._palEvents.push({ r, color: b.color, sku: outKey, t: this.t }); } // pallet completo -> sale
+    } else {
+      let openR = 0; const pre = r + ':'; for (const k in this._pallets) if (k.startsWith(pre)) openR++;
+      if (openR < cfg.positions) this._pallets[key] = 1;   // abre un pallet nuevo para ese SKU en este robot
+      else this.palMiss = (this.palMiss || 0) + 1;          // robot sin posición libre -> falta (sin buffer)
+    }
+  }
+
+  _colorKey(color) { const s = (this.meta.skus || []).find(s => s.color === color); return s ? ('S' + s.idx) : 'DIR'; }
+  _bufWith(key) { for (const sid of this.pocketSegs) { const b = this._boxAtEnd(sid); if (b) { const k = b.direct ? 'DIR' : ('S' + b.sku); if (k === key) return sid; } } return null; }
+
+  // cadena de salida de una salida (buffer/directo): banda negra (banda plana) que entrega
+  // a la evacuación. columna: buffer -> elevador BAJA -> o{c}_flat. directa: direct_in -> direct_flat.
+  _flatOf(segId) { const out = this.seg[segId].next[0]; return this.seg[out].isLift ? this.seg[out].next[0] : out; }
+  // posición (coordenada s) de la estación de esa salida sobre la banda de evacuación
+  _sCof(segId) { const f = this.seg[this._flatOf(segId)]; return f.outfeedS != null ? f.outfeedS : 0; }
+
+  // libera una caja por su CADENA REAL de salida: buffer -> (elevador mk5 BAJA) -> banda
+  // negra -> [merge sincronizado] -> evacuación. Directa (sin elevador): buffer -> banda negra.
+  // Devuelve la caja liberada (o null si no se pudo: cadena ocupada / sin caja).
+  _injectTrain(segId) {
+    const seg = this.seg[segId]; const out = seg.next[0]; if (!out) return null;
+    const outSeg = this.seg[out];
+    const b = this._boxAtEnd(segId); if (!b) return null;
+    if (outSeg.isLift) {                                // entra al elevador de bajada (Qimarox mk5)
+      const boardS = outSeg.h0 - seg.height;
+      for (const o of this.boxes) if (o.seg === out && Math.abs(o.s - boardS) < outSeg.pitch) return null;
+      b.seg = out; b.s = boardS; b.targetDrain = outSeg.next[0];
+    } else {                                            // entra a la banda negra (directa, sin elevador)
+      for (const o of this.boxes) if (o.seg === out && o.s < outSeg.pitch) return null;
+      b.seg = out; b.s = 0; b.targetDrain = null;
+    }
+    this.released++; this.releasedLog.push({ t: this.t, color: b.color }); this.relByColor[b.color] = (this.relByColor[b.color] || 0) + 1;
+    return b;
+  }
+
+  // VIRTUAL POCKET = ECUALIZADOR. Los buffers verticales absorben las TANDAS; el pocket libera
+  // para CADA robot como máximo 1 caja cada pickTime (15 s), eligiendo el SKU de ese robot con
+  // MÁS cola (para no saturar ningún buffer). Así la caja llega justo cuando el robot queda libre:
+  // sin acumulación en la entrada del KUKA y sin frenar la línea. Conserva el orden FIFO por SKU.
+  _pocketStep() {
+    const pickTime = (this.meta.pal && this.meta.pal.pickTime) || 15;
+    const R = (this.meta.pal && this.meta.pal.robots) || 9;
+    if (this._slotG == null) { this._slotG = 0; this._slotBase = this.t; }
+    this._robotRelNext = this._robotRelNext || {};
+    for (let r = 0; r < R; r++) {
+      if (this.t < (this._robotRelNext[r] || 0)) continue;          // este robot aún no toca (espaciado 15 s)
+      const sid = this._pickBufferForRobot(r);
+      if (!sid) continue;                                           // sin producto para este robot -> queda libre
+      const b = this._injectTrain(sid);
+      if (!b) continue;                                             // cadena ocupada -> reintenta el próximo step
+      b.mergeSlot = this._slotG;
+      this._pending.push({ id: b.id, slot: this._slotG++, sC: this._sCof(sid), flat: this._flatOf(sid) });
+      this._robotRelNext[r] = this.t + pickTime;                    // próxima caja a este robot en 15 s
+    }
+  }
+  // elige, entre los SKUs de ese robot CON producto listo, el buffer con más cola (equaliza/evita saturar)
+  _pickBufferForRobot(r) {
+    let best = null, bestN = -1;
+    for (const sid of this.pocketSegs) {
+      const b = this._boxAtEnd(sid); if (!b) continue;
+      const robot = b.direct ? this.meta.directRobot : (this.meta.skus[b.sku] ? this.meta.skus[b.sku].robot : 0);
+      if (robot !== r) continue;
+      const n = this.seg[sid].count;
+      if (n > bestN) { bestN = n; best = sid; }
+    }
+    return best;
+  }
+
+  // MERGE REALISTA (cero presión): la caja recorre su banda negra hasta el final (que EMPALMA
+  // con la evacuación en z=9.9) y se fusiona EN SU ESTACIÓN (la X de su columna) en cuanto hay
+  // hueco en la take-away. Nunca desaparece ni salta: si no hay hueco, espera sobre la banda
+  // negra. Se procesa en ORDEN de tren (slot) para dar prioridad a la caja que va primero.
+  _mergeStep() {
+    const ev = this.seg['outfeed']; if (!ev) return;
+    this._pending.sort((a, b) => a.slot - b.slot);     // prioridad al orden del tren
+    for (let i = 0; i < this._pending.length; i++) {
+      const rec = this._pending[i]; const flat = this.seg[rec.flat];
+      const b = this.boxes.find(o => o.id === rec.id && o.seg === rec.flat && o.s >= flat.length - 0.06);
+      if (!b) continue;                                // aún bajando elevador / en la banda negra (jamás se pierde)
+      let free = true;                                 // ¿hueco en la evacuación en su estación?
+      for (const o of this.boxes) if (o.seg === 'outfeed' && Math.abs(o.s - rec.sC) < ev.pitch) { free = false; break; }
+      if (!free) continue;                             // sin hueco -> la caja espera a tope en la banda negra
+      b.seg = 'outfeed'; b.s = rec.sC; b.targetDrain = null;   // se fusiona justo donde termina la banda negra
+      this._pending.splice(i, 1); i--;
+    }
+  }
+
+  _interArrival(src) {
+    const perMin = Math.max(0.1, (src.rate || 1800) / 60); const mean = 60 / perMin; const shortGap = 0.45;
+    if (this.rng() < (src.burst || 0)) return shortGap;
+    const mN = Math.max(shortGap, (mean - (src.burst || 0) * shortGap) / (1 - (src.burst || 0)));
+    const cv = src.cv || 0; if (cv <= 0) return mN;
+    const sigma = Math.sqrt(Math.log(1 + cv * cv)); const g = this._gauss();
+    return Math.max(shortGap, mN * Math.exp(sigma * g - sigma * sigma / 2));
+  }
+  _gauss() { let u = 0, v = 0; while (u === 0) u = this.rng(); while (v === 0) v = this.rng(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); }
+
+  // demanda actual del pocket (para HUD)
+  pocketDemand() {
+    const P = this.model.pocket; if (!P || !P.steps || !P.steps.length) return { color: 'FIFO', remaining: 0 };
+    if (this._pocket.done) return { color: '—', remaining: 0 };
+    const step = P.steps[this._pocket.idx];
+    return { color: step.color, remaining: step.qty - this._pocket.inStep, step: this._pocket.idx };
+  }
+
+  // ocupación de cada buffer (por salida): cuántas cajas en sus 4 niveles
+  bufferLevels() {
+    const out = [];
+    const groups = {};
+    for (const id in this.seg) { const s = this.seg[id]; if (s.kind === 'buffer') { const m = id.match(/^o(\d+)_/); const k = m ? +m[1] : 0; (groups[k] || (groups[k] = { color: s.color, levels: [0, 0, 0, 0], cap: 0 })); const lm = id.match(/lvl(\d+)/); const li = lm ? +lm[1] : 0; groups[k].levels[li] = s.count; groups[k].cap += s.cap; } }
+    for (const k of Object.keys(groups).sort((a, b) => a - b)) { const g = groups[k]; out.push({ output: +k, color: g.color, count: g.levels.reduce((a, b) => a + b, 0), levels: g.levels, cap: g.cap }); }
+    return out;
+  }
+
+  bottleneck() {
+    // elevadores con su infeed acumulado, o pocket esperando un color
+    const tExit = Math.max(2.5, (this.meta.outputs || 4) * 0.6);
+    if ((this._ftEMA || 0) >= tExit) return { kind: 'congestion', msg: 'Acumulación (elevadores/buffers saturados)', q: +(this._ftEMA).toFixed(1) };
+    return null;
+  }
+
+  throughput(W = 60) {
+    const win = Math.min(W, Math.max(this.t, 1)); let c = 0;
+    for (let i = this.releasedLog.length - 1; i >= 0; i--) { if (this.t - this.releasedLog[i].t <= win) c++; else break; }
+    return (c * 60) / win;
+  }
+
+  frame() {
+    const boxes = this.boxes.map((b) => {
+      const sg = this.seg[b.seg]; const kuka = sg.kind === 'segre' || sg.kind === 'pick' || sg.kind === 'roblane';
+      if (sg.isLift) { const f = sg.length ? b.s / sg.length : 0; return { id: b.id, x: sg.at[0], z: sg.at[1], y: sg.h0 + (sg.h1 - sg.h0) * f, dx: 0, dz: 1, color: b.color, held: false, kuka }; }
+      const seg = this.seg[b.seg]; const p = seg.path.pointAt(b.s); const d = seg.path.dirAt(b.s);
+      return { id: b.id, x: p[0], z: p[1], y: seg.height, dx: d[0], dz: d[1], color: b.color, held: !!seg.pocketBuffer, kuka };
+    });
+    // estado de cada robot KUKA (para animar el brazo y el pick)
+    const robots = Object.keys(this.robots).map(r => ({ r: +r, busy: this.robots[r].busy, phase: this.robots[r].phase, color: this.robots[r].color, px: this.robots[r].px, sku: this.robots[r].sku }));
+    const events = this._palEvents; this._palEvents = [];   // eventos de pallet completo (consumidos por el render)
+    return {
+      time: this.t, boxes,
+      stats: { generated: this.generated, released: this.released, rejected: this.rejected, inSystem: this.boxes.length, throughput: this.throughput(60) },
+      pal: { cfg: this.meta.pal || { robots: 4, positions: 5, cap: 32 }, open: this._pallets || {}, done: this.palDone || 0, miss: this.palMiss || 0 },
+      robots, palEvents: events,
+      buffers: this.bufferLevels(), pocket: this.pocketDemand(), bottleneck: this.bottleneck(),
+    };
+  }
+}
+
+function boundsOf(pts) { let mnx = Infinity, mnz = Infinity, mxx = -Infinity, mxz = -Infinity; for (const p of pts) { if (p[0] < mnx) mnx = p[0]; if (p[0] > mxx) mxx = p[0]; if (p[1] < mnz) mnz = p[1]; if (p[1] > mxz) mxz = p[1]; } return { minx: mnx, minz: mnz, maxx: mxx, maxz: mxz, cx: (mnx + mxx) / 2, cz: (mnz + mxz) / 2, w: mxx - mnx, h: mxz - mnz }; }
+
+
+// ===== LAYOUT (paramétrico) — 16 SKUs (4 columnas × 4 niveles = colores) + directa 15% =====
+function hslHex(h, s, l) { const a = s * Math.min(l, 1 - l); const f = n => { const k = (n + h * 12) % 12; const c = l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)); return Math.round(255 * c); }; return (f(0) << 16) | (f(8) << 8) | f(4); }
+// arco de transportador (curva real): puntos sobre el radio R, ángulos a0->a1 (tangentes continuas)
+function arcPts(cx, cz, R, a0, a1, n = 12) { const p = []; for (let i = 0; i <= n; i++) { const a = a0 + (a1 - a0) * i / n; p.push([cx + R * Math.cos(a), cz + R * Math.sin(a)]); } return p; }
+
+// 16 SKUs principales (tabla Danich, flujo cajas/día) — el resto (15% baja frecuencia)
+// se agrupa en "Directo".
+const DANICH_SKUS = [
+  { name: 'PpPna 57 Mr#', flow: 3516 }, { name: 'Pal S/Plat Porc Mr#', flow: 2313 },
+  { name: 'PpPna 59 Mr#', flow: 1852 }, { name: 'Chu Vet Porc Mr#', flow: 1764 },
+  { name: 'Cos 75 TF 4un', flow: 1732 }, { name: 'Chu Ctro Porc Mr#', flow: 1484 },
+  { name: 'Chu Ctro Mr#', flow: 1097 }, { name: 'Chu Vet Repas Mr#', flow: 944 },
+  { name: 'Cos 75 Mit#', flow: 914 }, { name: 'Gord chic#', flow: 878 },
+  { name: 'Pal S/Plat Mr#', flow: 873 }, { name: 'PpPna 57#', flow: 815 },
+  { name: 'Cne Long#', flow: 800 }, { name: 'Recortes (Ganglios)#', flow: 697 },
+  { name: 'Resto Hso#', flow: 662 }, { name: 'PpPna 59#', flow: 620 },
+];
+const DIRECT_NAME = 'Directo · cola 15%';
+
+function buildSorter(opts = {}) {
+  const NCOL = opts.outputs ?? 4, NLVL = 4, NSKU = NCOL * NLVL;
+  const CELL = opts.cell ?? 1.2;                     // PASO entre salidas del S4500 = 1,2 m (uniforme, compacto)
+  const cycle = opts.cycle ?? 3, cooldown = opts.cooldown ?? 2;
+  const heights = [0.9, 1.5, 2.1, 2.7];              // nivel 0 = altura de banda
+  const vmain = opts.mainSpeed ?? 0.6, vlane = opts.laneSpeed ?? 0.6, vout = opts.outSpeed ?? 0.95;
+  const rate = opts.rate ?? 11 * 60 * (opts.rateMul ?? 3); // ref Danich ~11 c/min, escalado
+
+  // --- SKUs: 16 buffereados (85%) + directo (15%), pesos decrecientes (curva ABC) ---
+  // SKUs: 16 (Danich, peso por flujo real) repartidos en la grilla columnas×niveles
+  const flows = DANICH_SKUS.map(s => s.flow); const ftot = flows.slice(0, NSKU).reduce((a, b) => a + b, 0);
+  const skus = [];
+  for (let i = 0; i < NSKU; i++) skus.push({ idx: i, name: DANICH_SKUS[i] ? DANICH_SKUS[i].name : ('SKU' + i), col: i % NCOL, lvl: Math.floor(i / NCOL), color: hslHex(i / NSKU, 0.62, 0.55), w: 0.85 * flows[i] / ftot });
+  const skuAt = (c, l) => skus.find(s => s.col === c && s.lvl === l);
+  const directW = 0.15, directColor = 0x9aa3b0;
+
+  // --- KUKA: 3 CONVEYORS + 2 PASILLOS de robots (3 c/u). Cada robot ARMA HASTA `positions` pallets
+  //     (frente y espalda). SKU -> robot (reparto parejo) -> conveyor (grupo) -> pasillo. ---
+  const pal = opts.pal || { robots: 6, positions: 10, cap: 32, pickTime: 15 };
+  const positions = Math.max(1, pal.positions || 10), nrob = Math.max(1, pal.robots || 6);
+  const NCONV = Math.max(1, opts.convs || 3), NAISLE_R = Math.max(1, NCONV - 1);   // pasillos = conveyors-1
+  const robPerConv = Math.max(1, Math.ceil(nrob / NCONV));          // robots por conveyor
+  const convOf = r => Math.min(Math.floor(r / robPerConv), NCONV - 1);
+  // reparto BALANCEADO por volumen (LPT: el flujo más pesado primero al robot menos cargado).
+  // La SALIDA DIRECTA (15%) entra al MISMO pool, así NO recarga a un robot que ya tiene un grupo
+  // de SKUs. Con 6 robots cada uno queda ~16-17% del flujo (≈4/min a 24 c/min = su techo de pick),
+  // de modo que ningún buffer se llena ni se obstruye el sistema.
+  const _load = new Array(nrob).fill(0);
+  const _leastRobot = () => { let mr = 0; for (let r = 1; r < nrob; r++) if (_load[r] < _load[mr]) mr = r; return mr; };
+  let directRobot = 0;
+  const _items = [...skus.map(s => ({ s, w: s.w })), { direct: true, w: directW }].sort((a, b) => b.w - a.w);
+  for (const it of _items) { const r = _leastRobot(); _load[r] += it.w; if (it.direct) directRobot = r; else { it.s.robot = r; it.s.conv = convOf(r); } }
+  const directConv = convOf(directRobot);
+
+  const segs = [];
+  const CELLd = CELL;                                // misma celda para la salida DIRECTA (todo uniforme, paso 1,2 m)
+  const colX = c => CELLd + (c + 1) * CELL;          // x de cada columna (salidas a paso 1,2 m)
+  const LIN = opts.inLen ?? 10;                       // largo del transportador recto de ENTRADA (m)
+  // SALIDA (evacuación): su extremo izquierdo se ALINEA con el de la entrada (x = -LIN) para que
+  // ambos tramos rectos queden PAREJOS a ambos lados, sobre la misma vertical.
+  const xR = colX(NCOL - 1) + CELL, xL = -LIN;
+  const outS = x => (xR - x);                         // inyección a la evacuación en la X de cada salida
+
+  // ----- TRAMO RECTO DE ENTRADA al S4500 (infeed ~10 m): la fuente entra aquí y alimenta el sorter -----
+  segs.push({ id: 'entry', kind: 'main', geom: { type: 'straight', from: [-LIN, 0], to: [0, 0] }, height: 0.9, speed: vmain, pitch: 0.5,
+    source: { rate, cv: 0.35, burst: 0.1, cap: NSKU * 9, batchMean: Math.max(1, (opts.batchCap || 4) * 0.6), batchCap: Math.max(1, opts.batchCap || 4) },
+    next: ['main_d'] });
+  // ----- Línea principal: PRIMERO deriva la salida DIRECTA (sin elevador, 15%), luego columnas -----
+  segs.push({ id: 'main_d', kind: 'main', geom: { type: 'straight', from: [0, 0], to: [CELLd, 0] }, height: 0.9, speed: vmain, pitch: 0.5,
+    sort: { by: 'direct', lane: 'direct_in', cont: 'main0' }, next: ['direct_in', 'main0'] });
+  for (let c = 0; c < NCOL; c++) {
+    const x0 = CELLd + c * CELL, x1 = CELLd + (c + 1) * CELL;
+    segs.push({ id: 'main' + c, kind: 'main', geom: { type: 'straight', from: [x0, 0], to: [x1, 0] }, height: 0.9, speed: vmain, pitch: 0.5,
+      sort: { by: 'col', divertCol: c, lane: 'o' + c + '_in', cont: (c < NCOL - 1 ? 'main' + (c + 1) : 'overflow') },
+      next: ['o' + c + '_in', (c < NCOL - 1 ? 'main' + (c + 1) : 'overflow')] });
+  }
+  segs.push({ id: 'overflow', kind: 'overflow', geom: { type: 'straight', from: [CELLd + NCOL * CELL, 0], to: [CELLd + NCOL * CELL + 2.5, 0] }, height: 0.9, speed: vmain, pitch: 0.5, sink: true, reject: true });
+
+  // ----- Salida DIRECTA (PRIMERA, sin elevador, 15%) -> evacuación -----
+  segs.push({ id: 'direct_in', kind: 'direct', color: directColor, geom: { type: 'straight', from: [CELLd, 0.6], to: [CELLd, 8.4] }, height: 0.9, speed: vlane, pitch: 0.5, pocketBuffer: true, direct: true, next: ['direct_flat'], outfeedS: outS(CELLd) });
+  // BANDA NEGRA de la salida DIRECTA (sin elevador) -> EMPALMA con la evacuación (z=9.9)
+  segs.push({ id: 'direct_flat', kind: 'flat', geom: { type: 'straight', from: [CELLd, 8.7], to: [CELLd, 9.55] }, height: 0.9, speed: vout, pitch: 0.5, next: ['outfeed'], outfeedS: outS(CELLd) });
+
+  // ----- Columnas: in -> SUBE(SKU a su nivel) -> 4 niveles(=SKU) -> BAJA(pocket) -> BANDA PLANA 1m -> evacuación -----
+  for (let c = 0; c < NCOL; c++) {
+    const x = colX(c);
+    // INGRESO al elevador: termina ANTES de las garras de ascenso (separación atrás); la caja
+    // espera ahí y al transferir avanza a la zona de traslape donde la garra la toma y sube.
+    segs.push({ id: 'o' + c + '_in', kind: 'infeed', color: skuAt(c, 0).color, geom: { type: 'straight', from: [x, 0.4], to: [x, 1.95] }, height: 0.9, speed: vlane, pitch: 0.5, next: ['o' + c + '_up'] });
+    segs.push({ id: 'o' + c + '_up', kind: 'lift', col: c, carrierSpeed: 0.6, carrierPitch: 0.5, geom: { type: 'lift', at: [x, 2.5], h0: 0.9, h1: 2.7 }, next: ['o' + c + '_lvl0', 'o' + c + '_lvl1', 'o' + c + '_lvl2', 'o' + c + '_lvl3'] });
+    for (let l = 0; l < NLVL; l++) { const sk = skuAt(c, l);
+      segs.push({ id: 'o' + c + '_lvl' + l, kind: 'buffer', color: sk.color, sku: sk.idx, geom: { type: 'straight', from: [x, 3.05], to: [x, 7.95] }, height: heights[l], speed: vlane, pitch: 0.5, cap: 10, pocketBuffer: true, next: ['o' + c + '_down'] }); }
+    segs.push({ id: 'o' + c + '_down', kind: 'lift', col: c, carrierSpeed: 0.6, carrierPitch: 0.5, geom: { type: 'lift', at: [x, 8.5], h0: 2.7, h1: 0.9 }, pocketControlled: true, next: ['o' + c + '_flat'] });
+    // BANDA NEGRA (rodillo motriz/retorno 80 mm): empieza tras las garras del elevador y termina
+    // en la ESTRUCTURA LATERAL de la evacuación (no invade su eje). La caja salta a la evacuación.
+    segs.push({ id: 'o' + c + '_flat', kind: 'flat', geom: { type: 'straight', from: [x, 9.05], to: [x, 9.55] }, height: 0.9, speed: vout, pitch: 0.5, next: ['outfeed'], outfeedS: outS(x) });
+  }
+
+  // ----- EVACUACIÓN (take-away) CERCA (~1 m de los elevadores) + entrega 24" -----
+  segs.push({ id: 'outfeed', kind: 'outfeed', geom: { type: 'straight', from: [xR, 9.9], to: [xL, 9.9] }, height: 0.9, speed: vout, pitch: 0.55, entryByColor: true, next: ['deliv'] });
+  segs.push({ id: 'deliv', kind: 'deliv', geom: { type: 'straight', from: [xL, 9.9], to: [xL - 0.61, 9.9] }, height: 0.9, speed: vout, pitch: 0.55, next: ['seg_feed'] });
+
+  // ----- LLEGADA IDEAL: ESPINA -> 3 CONVEYORS (por grupo) + 2 PASILLOS de robots (3 c/u). Cada
+  // robot pica de SU conveyor (espuela con curva) y apila a ambos lados (frente/espalda).
+  const spineX = 1.0, Rc = 0.55, CZ = 4.0, Z0 = 12.5;          // conveyor0 z=12.5, paso 4 m entre conveyors
+  const convZ = c => Z0 + c * CZ;                              // z de cada conveyor
+  const robPA = Math.max(1, Math.ceil(nrob / NAISLE_R));       // robots por pasillo
+  const robotAisle = r => Math.min(Math.floor(r / robPA), NAISLE_R - 1);
+  const aisleZ = pa => convZ(pa) + CZ / 2;                     // pasillo entre conv pa y pa+1
+  const X0 = 3.0, XP = 4.0, robotX = r => X0 + (r % robPA) * XP;  // 3 robots equidistantes (paso 4 m)
+  // EMPALME evacuación -> espina (curva 90°)
+  segs.push({ id: 'seg_feed', kind: 'segre', geom: { type: 'polyline', points: [[xL - 0.61, 9.9], [spineX + Rc, 9.9], ...arcPts(spineX + Rc, 9.9 + Rc, Rc, -Math.PI / 2, -Math.PI, 6)] }, height: 0.9, speed: vout, pitch: 0.55, next: ['spine0'] });
+  // ESPINA de distribución (vertical) con divert a cada CONVEYOR por grupo (box.conv)
+  for (let c = 0; c < NCONV; c++) {
+    const z0 = c === 0 ? 9.9 + Rc : convZ(c - 1), z1 = convZ(c), cont = c < NCONV - 1 ? 'spine' + (c + 1) : 'spine_end';
+    segs.push({ id: 'spine' + c, kind: 'segre', geom: { type: 'straight', from: [spineX, z0], to: [spineX, z1] }, height: 0.9, speed: vout, pitch: 0.55,
+      sort: { by: 'conv', conv: c, lane: 'cv' + c + '_0', cont }, next: ['cv' + c + '_0', cont] });
+  }
+  segs.push({ id: 'spine_end', kind: 'segre', geom: { type: 'straight', from: [spineX, convZ(NCONV - 1)], to: [spineX, convZ(NCONV - 1) + 1.4] }, height: 0.9, speed: vout, pitch: 0.55, sink: true, reject: true });
+  // CONVEYORS: cada uno lleva su grupo; divert al pick de cada robot (sort by:'robot'); el resto sigue
+  for (let c = 0; c < NCONV; c++) {
+    const z = convZ(c), robs = []; for (let r = 0; r < nrob; r++) if (convOf(r) === c) robs.push(r);
+    robs.sort((a, b) => robotX(a) - robotX(b));
+    let prevX = spineX;
+    for (let q = 0; q < robs.length; q++) {
+      const r = robs[q], rx = robotX(r), cont = q < robs.length - 1 ? 'cv' + c + '_' + (q + 1) : 'cv' + c + '_end';
+      segs.push({ id: 'cv' + c + '_' + q, kind: 'segre', geom: { type: 'straight', from: [prevX, z], to: [rx, z] }, height: 0.9, speed: vout, pitch: 0.55,
+        sort: { by: 'robot', robot: r, lane: 'pick' + r, cont }, next: ['pick' + r, cont] });
+      // ESPUELA: curva 90° del conveyor al pasillo del robot (±z según el lado) + recta al pick
+      const pa = robotAisle(r), pz = aisleZ(pa), up = pz > z;
+      const spur = up ? [...arcPts(rx, z + Rc, Rc, -Math.PI / 2, 0, 5), [rx + Rc, pz]] : [...arcPts(rx, z - Rc, Rc, Math.PI / 2, 0, 5), [rx + Rc, pz]];
+      segs.push({ id: 'pick' + r, kind: 'pick', robot: r, geom: { type: 'polyline', points: spur }, height: 0.9, speed: vlane, pitch: 0.5 });
+      prevX = rx;
+    }
+    segs.push({ id: 'cv' + c + '_end', kind: 'segre', geom: { type: 'straight', from: [robotX(robs[robs.length - 1]), z], to: [robotX(robs[robs.length - 1]) + 1.4, z] }, height: 0.9, speed: vout, pitch: 0.55, sink: true, reject: true });
+  }
+
+  // receta: tren consecutivo (1 caja por SKU) INTERCALADO por columnas (paraleliza los
+  // 4 elevadores de descenso) + directo. El orden del tren lo dicta esta secuencia.
+  // receta por defecto: 16 SKUs en orden (idx ya intercala columnas) + 17ª línea = Directo
+  const steps = skus.map(s => ({ color: s.color, qty: 1 })); steps.push({ color: directColor, qty: 1 });
+  const pocket = opts.pocket || { loop: true, steps, interval: 0.15 }; // libera tirante (cero presión arma el tren)
+
+  return { meta: { name: 'Sorter 4500 · 16 SKUs + directa', boxSize: [0.4, 0.13, 0.3], skus, directW, directColor, directName: DIRECT_NAME, ncol: NCOL, nlvl: NLVL, pal, directRobot, directConv, nconv: NCONV, naisle: NAISLE_R, ref: { perMin: 11 } }, segments: segs, pocket };
+}
+
+
+// ===== RENDER =====
+const COLMAP = {
+  red: 0xd23b3b, blue: 0x3b6fd2, green: 0x2fa84f, yellow: 0xe0c020,
+  orange: 0xe08020, purple: 0x8a4fd0, cyan: 0x20b0c0, pink: 0xd060a0,
+};
+// Colores reales: estructura RAL 7035 (gris claro), rodillos GALVANIZADOS (plata),
+// elevador Qimarox gris 7035 con portadores naranja (marca Qimarox).
+const RAL7035 = 0xc7cac6, GALV = 0xc2c8ce, QIMAROX_ORANGE = 0xf39200;
+const SCENE_COL = { bg: 0x0d1117, ground: 0x11151c, grid: 0x232a33, steel: GALV, frame: RAL7035, lift: RAL7035, buffer: GALV, reject: 0x7a1d1d, outfeed: GALV, leg: RAL7035 };
+
+function mountSorter(sim, opts = {}) {
+  const app = opts.container;
+  const boxSize = sim.box || [0.4, 0.13, 0.3];
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(SCENE_COL.bg);
+  const b = sim.bounds;
+  const span = Math.max(b.w, b.h, 8);
+  scene.fog = new THREE.Fog(SCENE_COL.bg, span * 1.4, span * 4);
+
+  const renderer = new THREE.WebGLRenderer({ antialias: Math.min(innerWidth, innerHeight) >= 600, powerPreference: 'high-performance' });
+  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, Math.min(innerWidth, innerHeight) < 600 ? 1.5 : 2));
+  renderer.setSize(app.clientWidth || innerWidth, app.clientHeight || innerHeight);
+  app.appendChild(renderer.domElement);
+
+  const camera = new THREE.PerspectiveCamera(50, (app.clientWidth || innerWidth) / (app.clientHeight || innerHeight), 0.1, 1000);
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true; controls.dampingFactor = 0.08;
+  controls.target.set(b.cx, 1.2, b.cz);
+
+  const views = {
+    iso: { pos: [b.cx + span * 0.55, span * 0.7, b.cz - span * 0.45], tar: [b.cx, 1.0, b.cz] },
+    top: { pos: [b.cx, span * 1.5, b.cz + 0.01], tar: [b.cx, 0, b.cz] },
+    front: { pos: [b.cx, span * 0.4, b.cz - span * 1.0], tar: [b.cx, 1.2, b.cz] },
+  };
+  applyView(views.iso, true);
+
+  // ---- VR (WebXR · Meta Quest): RIG (dolly) con cámara y 2 controladores. La planta está a
+  //      escala real (metros), 'local-floor' pone tus pies en y=0. Locomoción AMBOS estilos:
+  //      stick IZQ = caminar suave (2 m/s, dirección de la mirada) · stick DER = giro por pasos
+  //      de 45° (confort) · GATILLO (cualquier mano) = apuntar al piso y soltar = teletransporte.
+  const rig = new THREE.Group(); rig.add(camera); scene.add(rig);
+  const VRC = { move: 2.0, snap: Math.PI / 4, snapOn: 0.7, snapOff: 0.3, dead: 0.15, maxTp: 12, vigK: 0.55, turned: false, homed: false };  // histéresis 0.7/0.3 · teleport ≤12 m
+  const rigHome = () => { rig.position.set(b.cx, 0, -6); rig.rotation.y = Math.PI; };  // spawn: frente al sorter, mirando la línea
+  const _UP = new THREE.Vector3(0, 1, 0), _v1 = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3(), _m4 = new THREE.Matrix4();
+  const tpMark = new THREE.Mesh(new THREE.RingGeometry(0.18, 0.26, 24), new THREE.MeshBasicMaterial({ color: 0x2ee56a, side: THREE.DoubleSide }));
+  tpMark.rotation.x = -Math.PI / 2; tpMark.visible = false; scene.add(tpMark);
+  // VIÑETA de confort: túnel que se cierra (opacidad 0.55) mientras hay locomoción suave
+  const vig = new THREE.Mesh(new THREE.RingGeometry(0.55, 3.5, 24), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0, side: THREE.DoubleSide, depthTest: false, depthWrite: false }));
+  vig.position.z = -0.6; vig.renderOrder = 999; vig.visible = false; camera.add(vig);
+  const xrCtrls = [];
+  if (renderer.xr && renderer.xr.getController) {
+    for (let i = 0; i < 2; i++) {
+      const c = renderer.xr.getController(i);
+      const ray = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1)]), new THREE.LineBasicMaterial({ color: 0x4da3ff }));
+      ray.visible = false; c.add(ray); c.userData.ray = ray;
+      const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.028, 0.12, 10), new THREE.MeshStandardMaterial({ color: 0xe8e8e8, roughness: 0.5 }));
+      grip.rotation.x = Math.PI / 2; c.add(grip);
+      c.addEventListener('connected', e => { c.userData.src = e.data; });    // inputSource (sticks + háptica)
+      c.addEventListener('disconnected', () => { c.userData.src = null; });
+      c.addEventListener('selectstart', () => { c.userData.aiming = true; ray.visible = true; });
+      c.addEventListener('selectend', () => {
+        c.userData.aiming = false; ray.visible = false; tpMark.visible = false;
+        const t = c.userData.tp; c.userData.tp = null;
+        if (t) {
+          camera.getWorldPosition(_v1); rig.position.x += t.x - _v1.x; rig.position.z += t.z - _v1.z;  // aterriza el VISOR sobre el punto
+          const g = c.userData.src && c.userData.src.gamepad;                                          // pulso háptico: "llegué"
+          if (g && g.hapticActuators && g.hapticActuators[0] && g.hapticActuators[0].pulse) g.hapticActuators[0].pulse(0.5, 50);
+        }
+      });
+      rig.add(c); xrCtrls.push(c);
+    }
+    if (renderer.xr.setReferenceSpaceType) renderer.xr.setReferenceSpaceType('local-floor');  // pies en y=0 (no 'local')
+    renderer.xr.addEventListener('sessionstart', () => {
+      controls.enabled = false; rigHome();
+      renderer.setPixelRatio(1);                                                              // Quest: fill-rate (72 fps)
+      if (renderer.xr.setFoveation) renderer.xr.setFoveation(1);
+    });
+    renderer.xr.addEventListener('sessionend', () => {
+      controls.enabled = true; rig.position.set(0, 0, 0); rig.rotation.y = 0;
+      vig.material.opacity = 0; vig.visible = false;
+      renderer.setPixelRatio(Math.min(devicePixelRatio || 1, Math.min(innerWidth, innerHeight) < 600 ? 1.5 : 2));
+      applyView(views.iso, true);
+    });
+  }
+  function xrUpdate(dt) {
+    if (!renderer.xr || !renderer.xr.isPresenting) return;
+    const session = renderer.xr.getSession();
+    let moving = false, anyB = false;
+    if (session) for (const src of session.inputSources) {           // sticks (Quest: axes[2]/[3])
+      if (!src.gamepad || !src.gamepad.axes) continue;
+      const ax = src.gamepad.axes, x = ax.length > 2 ? ax[2] : (ax[0] || 0), y = ax.length > 3 ? ax[3] : (ax[1] || 0);
+      const bt = src.gamepad.buttons || [];
+      if (bt[5] && bt[5].pressed) anyB = true;                       // B/Y: volver al punto de inicio (anti-perderse)
+      if (src.handedness === 'right') {                              // giro por pasos, pivotando en el VISOR (no en el rig)
+        if (Math.abs(x) > VRC.snapOn && !VRC.turned) {
+          VRC.turned = true; const a = -Math.sign(x) * VRC.snap;
+          camera.getWorldPosition(_v1);
+          const px = rig.position.x - _v1.x, pz = rig.position.z - _v1.z, ca = Math.cos(a), sa = Math.sin(a);
+          rig.position.x = _v1.x + px * ca + pz * sa; rig.position.z = _v1.z - px * sa + pz * ca;
+          rig.rotation.y += a;
+        } else if (Math.abs(x) < VRC.snapOff) VRC.turned = false;
+      } else if (Math.hypot(x, y) > VRC.dead) {                      // caminar suave hacia DONDE MIRAS (sin componente vertical)
+        moving = true;
+        camera.getWorldDirection(_v1); _v1.y = 0; _v1.normalize();
+        _v2.crossVectors(_v1, _UP);                                  // forward × up = derecha
+        rig.position.addScaledVector(_v1, -y * VRC.move * dt).addScaledVector(_v2, x * VRC.move * dt);
+      }
+    }
+    if (anyB && !VRC.homed) { VRC.homed = true; rigHome(); } else if (!anyB) VRC.homed = false;
+    const vo = vig.material.opacity, vt = moving ? VRC.vigK : 0;     // viñeta de confort: cierra al moverse
+    vig.material.opacity = vo + (vt - vo) * Math.min(1, dt * 6); vig.visible = vig.material.opacity > 0.02;
+    for (const c of xrCtrls) {                                       // teletransporte: rayo del control al piso (y=0)
+      if (!c.userData.aiming) continue;
+      _m4.identity().extractRotation(c.matrixWorld);
+      _v2.set(0, 0, -1).applyMatrix4(_m4); _v1.setFromMatrixPosition(c.matrixWorld);
+      let hit = false;
+      if (_v2.y < -0.08) { const t = -_v1.y / _v2.y; if (t > 0 && t < VRC.maxTp) { _v3.copy(_v1).addScaledVector(_v2, t); hit = true; } }
+      if (hit) { c.userData.tp = { x: _v3.x, z: _v3.z }; tpMark.position.set(_v3.x, 0.02, _v3.z); tpMark.visible = true; c.userData.ray.scale.set(1, 1, _v1.distanceTo(_v3)); }
+      else { c.userData.tp = null; tpMark.visible = false; c.userData.ray.scale.set(1, 1, 5); }
+    }
+  }
+  // Botón ENTRAR VR (sólo si el navegador soporta WebXR; en el Quest abre la sesión inmersiva)
+  if (typeof navigator !== 'undefined' && navigator.xr && THREE.VRButton && THREE.VRButton.createButton) {
+    renderer.xr.enabled = true;
+    const vrBtn = THREE.VRButton.createButton(renderer);
+    Object.assign(vrBtn.style, { position: 'absolute', right: '12px', bottom: '12px', width: 'auto', padding: '8px 14px', border: '1px solid #2a6df3', borderRadius: '8px', background: 'rgba(20,40,80,.85)', color: '#fff', font: '700 12px system-ui', opacity: '0.85', zIndex: '5' });
+    vrBtn.title = 'Stick izq: caminar · Stick der: giro 45° · Gatillo: apuntar al piso y soltar = teletransporte';
+    app.appendChild(vrBtn);
+  }
+
+  scene.add(new THREE.HemisphereLight(0xcfe0ff, 0x202830, 0.95));
+  const sun = new THREE.DirectionalLight(0xffffff, 0.95); sun.position.set(b.cx + 12, 24, b.cz - 8); scene.add(sun);
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(span * 4, span * 4), new THREE.MeshStandardMaterial({ color: SCENE_COL.ground, roughness: 1 }));
+  ground.rotation.x = -Math.PI / 2; ground.position.set(b.cx, -0.01, b.cz); scene.add(ground);
+  const grid = new THREE.GridHelper(span * 4, Math.ceil(span * 4), SCENE_COL.grid, SCENE_COL.grid); grid.position.set(b.cx, 0, b.cz); scene.add(grid);
+
+  // ---- materiales ----
+  const steelMat = new THREE.MeshStandardMaterial({ color: GALV, metalness: 0.85, roughness: 0.32 }); // rodillos galvanizados
+  const frameMat = new THREE.MeshStandardMaterial({ color: RAL7035, metalness: 0.25, roughness: 0.7 }); // estructura RAL 7035
+  const bufMat = new THREE.MeshStandardMaterial({ color: GALV, metalness: 0.85, roughness: 0.32 });     // buffers: rodillos galvanizados
+  const liftMat = new THREE.MeshStandardMaterial({ color: RAL7035, metalness: 0.3, roughness: 0.6 });   // Qimarox mk5: estructura 7035
+  const carrierMat = new THREE.MeshStandardMaterial({ color: QIMAROX_ORANGE, metalness: 0.4, roughness: 0.5 }); // portadores naranja
+  const rejMat = new THREE.MeshStandardMaterial({ color: SCENE_COL.reject, metalness: 0.3, roughness: 0.7 });
+  const outMat = new THREE.MeshStandardMaterial({ color: GALV, metalness: 0.8, roughness: 0.35 });      // banda de salida galvanizada
+  const beltMat = new THREE.MeshStandardMaterial({ color: 0x2b2f36, metalness: 0.1, roughness: 0.85 }); // banda plana (negra)
+  const legMat = new THREE.MeshStandardMaterial({ color: RAL7035, metalness: 0.25, roughness: 0.75 });  // patas RAL 7035
+
+  // ---- construir tramos ----
+  const liftAnimators = [];                            // portadores mk5 (cadena continua) animados
+  const rollerXf = [], beltRollerXf = [], rollerXfK = []; // rodillos: planta / banda / lado KUKA (ocultable)
+  const kukaGroup = new THREE.Group(); scene.add(kukaGroup);  // todo el SEGREGADOR + KUKAs + pallets (ocultable)
+  let hideKuka = false;
+  for (const s of sim.model.segments) buildSeg(s);
+  buildRollers();                                      // instancia todos los rodillos (1 draw call)
+
+  // RODILLOS reales: transportadores de rodillos = Ø1.9" (48 mm) a paso 3" (76 mm);
+  // bandas negras = rodillo motriz/retorno Ø80 mm en cada extremo.
+  function buildRollers() {
+    if (rollerXf.length) {
+      const g = new THREE.CylinderGeometry(0.0241, 0.0241, 0.6, 10); g.rotateX(Math.PI / 2); // eje a lo ancho
+      const im = new THREE.InstancedMesh(g, steelMat, rollerXf.length); const d = new THREE.Object3D();
+      rollerXf.forEach((r, i) => { d.position.set(r.x, r.h + 0.024, r.z); d.rotation.set(0, r.a, 0); d.scale.set(1, 1, r.w / 0.6); d.updateMatrix(); im.setMatrixAt(i, d.matrix); });
+      im.instanceMatrix.needsUpdate = true; scene.add(im);
+    }
+    if (beltRollerXf.length) {
+      const g = new THREE.CylinderGeometry(0.04, 0.04, 0.72, 12); g.rotateX(Math.PI / 2);
+      const im = new THREE.InstancedMesh(g, steelMat, beltRollerXf.length); const d = new THREE.Object3D();
+      beltRollerXf.forEach((r, i) => { d.position.set(r.x, r.h + 0.01, r.z); d.rotation.set(0, r.a, 0); d.updateMatrix(); im.setMatrixAt(i, d.matrix); });
+      im.instanceMatrix.needsUpdate = true; scene.add(im);
+    }
+    if (rollerXfK.length) {                             // rodillos del lado KUKA -> al grupo ocultable
+      const g = new THREE.CylinderGeometry(0.0241, 0.0241, 0.6, 10); g.rotateX(Math.PI / 2);
+      const im = new THREE.InstancedMesh(g, steelMat, rollerXfK.length); const d = new THREE.Object3D();
+      rollerXfK.forEach((r, i) => { d.position.set(r.x, r.h + 0.024, r.z); d.rotation.set(0, r.a, 0); d.scale.set(1, 1, r.w / 0.6); d.updateMatrix(); im.setMatrixAt(i, d.matrix); });
+      im.instanceMatrix.needsUpdate = true; kukaGroup.add(im);
+    }
+  }
+
+  function pts(geom) {
+    if (geom.points) return geom.points;
+    if (geom.type === 'straight') return [geom.from, geom.to];
+    if (geom.type === 'arc') { const n = geom.samples || 14, a = []; for (let i = 0; i <= n; i++) { const t = geom.a0 + (geom.a1 - geom.a0) * i / n; a.push([geom.center[0] + geom.radius * Math.cos(t), geom.center[1] + geom.radius * Math.sin(t)]); } return a; }
+    return [[0, 0], [1, 0]];
+  }
+  function buildSeg(s) {
+    if (s.geom.type === 'lift') { buildLift(s); return; }
+    const isBelt = s.kind === 'flat' || s.kind === 'deliv';
+    const isKuka = s.kind === 'segre' || s.kind === 'roblane' || s.kind === 'pick';   // segregador (ocultable)
+    const isOut = s.kind === 'outfeed' || isBelt || isKuka;
+    const W = isOut ? 0.66 : 0.6, P = pts(s.geom), h = s.height != null ? s.height : 0.9;  // equipos 0,6 m -> pasillo 0,6 m a paso 1,2 m
+    const tgt = isKuka ? kukaGroup : scene;            // el lado KUKA va al grupo ocultable
+    let legAcc = 0;
+    for (let i = 0; i < P.length - 1; i++) {
+      const a = P[i], c = P[i + 1];
+      const d = dirOf(a, c), perp = [-d[1], d[0]], len = Math.hypot(c[0] - a[0], c[1] - a[1]);
+      if (isBelt) {
+        // BANDA NEGRA: superficie de banda + rodillo motriz/retorno Ø80 mm en cada extremo
+        scene.add(segBox(a, c, W, 0.04, h, beltMat));
+        beltRollerXf.push({ x: a[0] + d[0] * 0.05, z: a[1] + d[1] * 0.05, h, a: Math.atan2(-d[1], d[0]) });
+        beltRollerXf.push({ x: c[0] - d[0] * 0.05, z: c[1] - d[1] * 0.05, h, a: Math.atan2(-d[1], d[0]) });
+      } else {
+        // TRANSPORTADOR DE RODILLOS: rodillos Ø1.9" a paso 3" (76 mm)
+        const n = Math.max(1, Math.floor(len / 0.0762)), ang = Math.atan2(-d[1], d[0]), arr = isKuka ? rollerXfK : rollerXf;
+        for (let k = 0; k < n; k++) { const t = (k + 0.5) * 0.0762; arr.push({ x: a[0] + d[0] * t, z: a[1] + d[1] * t, h, a: ang, w: W }); }
+      }
+      // rieles laterales + patas (estructura RAL 7035)
+      const aL = off(a, perp, W / 2), cL = off(c, perp, W / 2), aR = off(a, perp, -W / 2), cR = off(c, perp, -W / 2);
+      tgt.add(segBox(aL, cL, 0.04, 0.1, h + 0.02, frameMat));
+      tgt.add(segBox(aR, cR, 0.04, 0.1, h + 0.02, frameMat));
+      legAcc += len;
+      if (legAcc >= 1.8 && h > 0.3) { legAcc = 0; const leg = new THREE.Mesh(new THREE.BoxGeometry(0.06, h, 0.06), legMat); leg.position.set(a[0], h / 2, a[1]); tgt.add(leg); }
+    }
+  }
+  // Qimarox Prorunner mk5: torre RAL 7035 + portadores tipo PEINE en cadena continua que
+  // suben por la cara de carga y retornan por la trasera (varias cajas a la vez).
+  function buildLift(s) {
+    const x = s.geom.at[0], z = s.geom.at[1];
+    const dir = s.geom.h1 >= s.geom.h0 ? 1 : -1;        // sube (+1) o baja (-1)
+    const h0 = Math.min(s.geom.h0, s.geom.h1) - 0.12, h1 = Math.max(s.geom.h0, s.geom.h1) + 0.30;
+    const W = 0.6, D = 0.52, H = h1 - h0;             // torre del elevador 0,6 m de ancho (pasillo 0,6 m a paso 1,2 m)
+    // 4 columnas + travesaños arriba/abajo (estructura 7035)
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.06, H, 0.06), liftMat);
+      post.position.set(x + sx * W / 2, h0 + H / 2, z + sz * D / 2); scene.add(post);
+    }
+    for (const yy of [h0, h1]) for (const sz of [-1, 1]) {
+      const cb = new THREE.Mesh(new THREE.BoxGeometry(W + 0.08, 0.07, 0.06), liftMat);
+      cb.position.set(x, yy, z + sz * D / 2); scene.add(cb);
+    }
+    // paneles de guarda laterales (semitransparentes, look de jaula)
+    const guardMat = new THREE.MeshStandardMaterial({ color: RAL7035, metalness: 0.2, roughness: 0.8, transparent: true, opacity: 0.12 });
+    for (const sx of [-1, 1]) { const g = new THREE.Mesh(new THREE.BoxGeometry(0.02, H, D), guardMat); g.position.set(x + sx * (W / 2 + 0.01), h0 + H / 2, z); scene.add(g); }
+    // portadores tipo peine, repartidos en el lazo (cara delantera + retorno trasero)
+    const front = z - (D / 2 + 0.07), back = z + (D / 2 + 0.07);
+    const pitch = s.carrierPitch || 0.5, n = Math.max(2, Math.ceil((2 * H) / pitch));
+    const tineGeo = new THREE.BoxGeometry(0.045, 0.03, 0.36), spineGeo = new THREE.BoxGeometry(W + 0.04, 0.05, 0.05);
+    const carriers = [];
+    for (let i = 0; i < n; i++) {
+      const g = new THREE.Group();
+      const spine = new THREE.Mesh(spineGeo, carrierMat); spine.position.set(0, 0, -0.17); g.add(spine);
+      for (const fx of [-0.18, -0.06, 0.06, 0.18]) { const t = new THREE.Mesh(tineGeo, carrierMat); t.position.set(fx, 0, 0); g.add(t); }
+      scene.add(g); carriers.push(g);
+    }
+    liftAnimators.push((tt) => {
+      // sentido del lazo INVERTIDO (los portadores suben por la cara de carga como el mk5 real)
+      const trav = ((2 * H) - ((tt * (s.carrierSpeed || 0.6)) % (2 * H))) % (2 * H);
+      for (let i = 0; i < n; i++) {
+        const ph = (trav + i * pitch) % (2 * H);
+        let yy, zz;
+        if (ph < H) { zz = front; yy = dir > 0 ? h0 + ph : h1 - ph; }       // cara de carga
+        else { const p2 = ph - H; zz = back; yy = dir > 0 ? h1 - p2 : h0 + p2; } // retorno
+        const g = carriers[i]; g.position.set(x, yy, zz); g.rotation.y = zz === back ? Math.PI : 0;
+      }
+    });
+  }
+  function segBox(a, c, w, th, h, mat) { const dx = c[0] - a[0], dz = c[1] - a[1]; const len = Math.max(0.02, Math.hypot(dx, dz)); const m = new THREE.Mesh(new THREE.BoxGeometry(w, th, len), mat); m.position.set((a[0] + c[0]) / 2, h, (a[1] + c[1]) / 2); m.rotation.y = Math.atan2(dx, dz); return m; }
+  // crea un Mesh y posiciona vía .position.set (Object3D.position es de SOLO LECTURA: Object.assign falla)
+  function posMesh(geo, mat, x, y, z) { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); return m; }
+  function dirOf(a, c) { const dx = c[0] - a[0], dz = c[1] - a[1], m = Math.hypot(dx, dz) || 1; return [dx / m, dz / m]; }
+  function off(p, d, k) { return [p[0] + d[0] * k, p[1] + d[1] * k]; }
+
+  // ---- pool de cajas (color = destino) ----
+  const boxGeo = new THREE.BoxGeometry(boxSize[0], boxSize[1], boxSize[2]);
+  const mats = {}; for (const c in COLMAP) mats[c] = new THREE.MeshStandardMaterial({ color: COLMAP[c], roughness: 0.55 });
+  const matByHex = new Map();
+  function boxMat(col) { if (typeof col === 'number') { let m = matByHex.get(col); if (!m) { m = new THREE.MeshStandardMaterial({ color: col, roughness: 0.55 }); matByHex.set(col, m); } return m; } return mats[col] || steelMat; }
+  const pool = new Map();
+  function updateBoxes(frame) {
+    const seen = new Set();
+    for (const bx of frame.boxes) {
+      if (hideKuka && bx.kuka) continue;               // KUKAs ocultos: la caja desaparece al final del principal
+      seen.add(bx.id); let m = pool.get(bx.id);
+      if (!m) { m = new THREE.Mesh(boxGeo, boxMat(bx.color)); scene.add(m); pool.set(bx.id, m); }
+      m.material = boxMat(bx.color);
+      m.position.set(bx.x, bx.y + boxSize[1] / 2 + 0.03, bx.z);
+      m.rotation.y = Math.atan2(bx.dx, bx.dz);
+    }
+    for (const [id, m] of pool) if (!seen.has(id)) { scene.remove(m); pool.delete(id); }
+  }
+
+  // ---- PICK: 1 por ROBOT (kind 'pick'). Cada robot apila sus SKUs en filas a AMBOS lados (frente/espalda). ----
+  const picks = sim.model.segments.filter(s => s.kind === 'pick').map(s => { const p = s.geom.points ? s.geom.points[s.geom.points.length - 1] : s.geom.to; return { r: s.robot, x: p[0], z: p[1] }; });
+  const robotInfo = {}; for (const p of picks) robotInfo[p.r] = { x: p.x, z: p.z };
+  const skusByRobot = {};                                              // robot -> [ 'S#' / 'DIR' ]
+  for (const s of (sim.meta.skus || [])) (skusByRobot[s.robot] = skusByRobot[s.robot] || []).push('S' + s.idx);
+  (skusByRobot[sim.meta.directRobot] = skusByRobot[sim.meta.directRobot] || []).push('DIR');
+  const palKeyP = {};                                                  // 'r:SKU' -> {x, z, side} (fila frente -z / espalda +z)
+  for (const r in robotInfo) {
+    const info = robotInfo[r], keys = skusByRobot[r] || [];
+    keys.forEach((k, idx) => { const side = (idx % 2 === 0) ? -1 : 1, slot = Math.floor(idx / 2); palKeyP[r + ':' + k] = { x: info.x + (slot - 1) * 1.0, z: info.z + side * 1.15, side }; });
+  }
+  const colOfKey = k => { const sku = k.slice(k.indexOf(':') + 1); return sku === 'DIR' ? (sim.meta.directColor || 0x9aa3b0) : (sim.meta.skus[+sku.slice(1)] ? sim.meta.skus[+sku.slice(1)].color : 0x999999); };
+
+  // ---- robots KUKA: uno por robot, en su punto de pick; brazo sincronizado pick -> pallet ----
+  const kukaBaseMat = new THREE.MeshStandardMaterial({ color: 0x2a2f36, metalness: 0.5, roughness: 0.5 });
+  const kukaArmMat = new THREE.MeshStandardMaterial({ color: QIMAROX_ORANGE, metalness: 0.35, roughness: 0.45 });
+  const robotRig = {};
+  for (const r in robotInfo) {
+    const info = robotInfo[r], bx = info.x, bz = info.z;
+    const g = new THREE.Group(); g.position.set(bx, 0, bz); kukaGroup.add(g);
+    g.add(posMesh(new THREE.CylinderGeometry(0.34, 0.42, 0.3, 16), kukaBaseMat, 0, 0.15, 0));
+    const col = new THREE.Group(); col.position.y = 0.3; g.add(col);
+    col.add(posMesh(new THREE.CylinderGeometry(0.22, 0.26, 0.55, 14), kukaBaseMat, 0, 0.27, 0));
+    const sh = new THREE.Group(); sh.position.y = 0.5; col.add(sh);
+    sh.add(posMesh(new THREE.BoxGeometry(0.16, 1.05, 0.16), kukaArmMat, 0, 0.52, 0));
+    const el = new THREE.Group(); el.position.y = 1.02; sh.add(el);
+    el.add(posMesh(new THREE.BoxGeometry(0.13, 0.13, 1.15), kukaArmMat, 0, 0, -0.5));
+    const wr = new THREE.Group(); wr.position.z = -1.05; el.add(wr);
+    wr.add(posMesh(new THREE.BoxGeometry(0.4, 0.12, 0.34), kukaBaseMat, 0, -0.12, 0));
+    const held = new THREE.Mesh(boxGeo, boxMat(0xffffff)); held.visible = false; kukaGroup.add(held);
+    robotRig[r] = { col, sh, el, wr, held, bx, bz, zPick: info.z };
+  }
+  function poseRobot(rs) {
+    const rig = robotRig[rs.r]; if (!rig) return;
+    if (!rs.busy || rs.px == null) { rig.col.rotation.y = 0; rig.sh.rotation.x = -0.3; rig.el.rotation.x = 0.5; rig.wr.rotation.x = -0.2; rig.held.visible = false; return; }
+    const ph = rs.phase, pp = palKeyP[rs.r + ':' + (rs.sku || '')] || { x: rig.bx, z: rig.zPick + 1.15 };
+    const tgtX = ph < 0.45 ? rs.px : pp.x, tgtZ = ph < 0.45 ? rig.zPick : pp.z;   // apunta al pick y luego al pallet (frente/espalda)
+    rig.col.rotation.y = Math.atan2(rig.bx - tgtX, rig.bz - tgtZ);
+    const grab = Math.max(0, 1 - Math.abs(ph - 0.18) / 0.18), place = Math.max(0, 1 - Math.abs(ph - 0.85) / 0.18), dip = Math.max(grab, place);
+    rig.sh.rotation.x = -0.3 - dip * 0.5; rig.el.rotation.x = 0.5 + dip * 0.6; rig.wr.rotation.x = -rig.sh.rotation.x - rig.el.rotation.x;
+    rig.held.visible = ph > 0.12 && ph < 0.97;                          // la caja VIAJA del pick a SU pallet (frente o espalda)
+    if (rig.held.visible) { const t = Math.max(0, Math.min(1, (ph - 0.18) / 0.72)); rig.held.position.set(rs.px + (pp.x - rs.px) * t, 1.0 + Math.sin(t * Math.PI) * 0.45, rig.zPick + (pp.z - rig.zPick) * t); rig.held.material = boxMat(rs.color); }
+  }
+
+  // ---- pallets creciendo en 3D (filas a ambos lados) + pallet COMPLETO que sale ----
+  const palGroup = new THREE.Group(); kukaGroup.add(palGroup);
+  const palMesh = []; const palBoxGeo = new THREE.BoxGeometry(0.42, 0.14, 0.32);
+  const woodMat = new THREE.MeshStandardMaterial({ color: 0x8a6a3a, roughness: 0.85 });
+  const flyPallets = [];
+  function spawnFullPallet(ev) {
+    const p = palKeyP[ev.r + ':' + ev.sku]; if (!p) return;
+    const col = colOfKey(ev.r + ':' + ev.sku), grp = new THREE.Group();
+    grp.add(posMesh(new THREE.BoxGeometry(0.95, 0.12, 0.75), woodMat, 0, 0.06, 0));
+    grp.add(posMesh(new THREE.BoxGeometry(0.9, 1.1, 0.7), new THREE.MeshStandardMaterial({ color: col, roughness: 0.6 }), 0, 0.67, 0));
+    grp.position.set(p.x, 0, p.z); grp.userData.t0 = sim.t; grp.userData.z0 = p.z; grp.userData.dir = p.side; kukaGroup.add(grp); flyPallets.push(grp);
+    if (hideKuka) grp.visible = false;
+  }
+  function updateFlyPallets() {
+    for (let i = flyPallets.length - 1; i >= 0; i--) { const g = flyPallets[i], age = sim.t - g.userData.t0; g.position.z = g.userData.z0 + g.userData.dir * age * 1.1; if (age > 3) { scene.remove(g); flyPallets.splice(i, 1); } }
+  }
+  function updatePallets(pal) {
+    let mi = 0;
+    for (const [key, n] of Object.entries(pal.open)) {
+      const p = palKeyP[key]; if (!p) continue;
+      const col = colOfKey(key);
+      for (let k = 0; k < n; k++) {
+        let m = palMesh[mi];
+        if (!m) { m = new THREE.Mesh(palBoxGeo, new THREE.MeshStandardMaterial({ roughness: 0.6 })); palGroup.add(m); palMesh.push(m); }
+        m.visible = true; m.material.color.setHex(col);
+        const layer = Math.floor(k / 4), inL = k % 4;
+        m.position.set(p.x + (inL % 2 ? 0.46 : 0) - 0.23, 0.18 + layer * 0.15, p.z + (inL < 2 ? 0 : 0.34));
+        mi++;
+      }
+    }
+    for (let j = mi; j < palMesh.length; j++) palMesh[j].visible = false;
+  }
+
+  // ---- HUD ----
+  const hud = elDiv({ position: 'absolute', top: '10px', left: '12px', font: '600 12px system-ui,Segoe UI,Arial', color: '#dfe7f3', textShadow: '0 1px 2px #000', pointerEvents: 'none', lineHeight: '1.5', maxWidth: '260px' });
+  app.appendChild(hud);
+  const banner = elDiv({ position: 'absolute', top: '54px', left: '50%', transform: 'translateX(-50%)', background: '#7a1020', color: '#fff', padding: '6px 14px', borderRadius: '8px', font: '700 12px system-ui', display: 'none' });
+  app.appendChild(banner);
+  const bar = elDiv({ position: 'absolute', bottom: '12px', left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: '8px' });
+  app.appendChild(bar);
+  for (const k of Object.keys(views)) bar.appendChild(mkBtn(k.toUpperCase(), () => { if (FP.on) fpToggle(false); applyView(views[k]); }));
+
+  // ---- PRIMERA PERSONA (escritorio): caminar la planta a altura de ojos (1,65 m).
+  //      WASD/flechas mueve · Shift corre (4 m/s) · arrastra el mouse para mirar. Sin colisión
+  //      con equipos (inspección); en VR este modo se ignora (manda el visor).
+  const FP = { on: false, yaw: Math.PI, pitch: -0.05, eye: 1.65, v: 1.4, vRun: 4.0, drag: false, lx: 0, ly: 0, keys: {} };
+  const fpBtn = mkBtn('🚶 Caminar', () => fpToggle());
+  fpBtn.title = 'WASD/flechas camina · Shift corre · arrastrar el mouse mira';
+  bar.appendChild(fpBtn);
+  function fpToggle(force) {
+    FP.on = force != null ? force : !FP.on; controls.enabled = !FP.on;
+    fpBtn.textContent = FP.on ? '🛰 Órbita' : '🚶 Caminar';
+    if (FP.on) { camera.rotation.order = 'YXZ'; camera.position.set(b.cx, FP.eye, -5); FP.yaw = Math.PI; FP.pitch = -0.05; }
+    else applyView(views.iso, true);
+  }
+  const fpDom = renderer.domElement;
+  if (fpDom && fpDom.addEventListener) {
+    fpDom.addEventListener('mousedown', e => { if (FP.on) { FP.drag = true; FP.lx = e.clientX; FP.ly = e.clientY; } });
+    fpDom.addEventListener('mousemove', e => { if (FP.on && FP.drag) { FP.yaw -= (e.clientX - FP.lx) * 0.005; FP.pitch = Math.max(-1.48, Math.min(1.48, FP.pitch - (e.clientY - FP.ly) * 0.005)); FP.lx = e.clientX; FP.ly = e.clientY; } });
+  }
+  addEventListener('mouseup', () => { FP.drag = false; });
+  addEventListener('keydown', e => { if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT')) return; FP.keys[e.code] = 1; });
+  addEventListener('keyup', e => { FP.keys[e.code] = 0; });
+  function fpUpdate(dt) {
+    if (!FP.on || (renderer.xr && renderer.xr.isPresenting)) return;
+    camera.rotation.y = FP.yaw; camera.rotation.x = FP.pitch;
+    const k = FP.keys, f = (k.KeyW || k.ArrowUp ? 1 : 0) - (k.KeyS || k.ArrowDown ? 1 : 0), l = (k.KeyD || k.ArrowRight ? 1 : 0) - (k.KeyA || k.ArrowLeft ? 1 : 0);
+    if (!f && !l) return;
+    const v = (k.ShiftLeft || k.ShiftRight) ? FP.vRun : FP.v;
+    camera.position.x += (-Math.sin(FP.yaw) * f + Math.cos(FP.yaw) * l) * v * dt;   // yaw=0 mira -z
+    camera.position.z += (-Math.cos(FP.yaw) * f - Math.sin(FP.yaw) * l) * v * dt;
+    camera.position.y = FP.eye;
+  }
+
+  // ---- Gráfico OCULTABLE: tasa de SALIDA por SKU (cajas/min, en vivo) ----
+  const chart = elDiv({ position: 'absolute', left: '12px', bottom: '56px', width: '238px', maxHeight: '44vh', overflow: 'auto', background: 'rgba(16,21,32,.93)', border: '1px solid #243049', borderRadius: '10px', padding: '8px 10px', color: '#dfe7f3', font: '11px system-ui' });
+  app.appendChild(chart);
+  const chartShow = mkBtn('📊 Tasas SKU', () => { chart.style.display = ''; chartShow.style.display = 'none'; });
+  Object.assign(chartShow.style, { position: 'absolute', left: '12px', bottom: '12px', display: 'none' }); app.appendChild(chartShow);
+  const chHead = elDiv({ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' });
+  chHead.innerHTML = '<b style="color:#9fc3ff">Tasa de salida por SKU (c/min)</b>';
+  const chHide = document.createElement('span'); chHide.textContent = '✕'; chHide.style.cssText = 'cursor:pointer;color:#9fc3ff;padding:0 2px'; chHide.onclick = () => { chart.style.display = 'none'; chartShow.style.display = ''; };
+  chHead.appendChild(chHide); chart.appendChild(chHead);
+  const chRows = elDiv({ display: 'grid', gap: '4px' }); chart.appendChild(chRows);
+  const chartKeys = (sim.meta.skus || []).map(s => ({ key: 'S' + s.idx, name: s.name, color: s.color }));
+  chartKeys.push({ key: 'DIR', name: sim.meta.directName || 'Directo', color: sim.meta.directColor });
+  const chItems = chartKeys.map(ck => {
+    const wrap = elDiv({});
+    const row = elDiv({ display: 'grid', gridTemplateColumns: '10px 1fr 40px', gap: '5px', alignItems: 'center' });
+    const sw = elDiv({ width: '9px', height: '9px', borderRadius: '2px', background: hex(ck.color) });
+    const name = elDiv({ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#cfd8e6', fontSize: '10.5px' }); name.textContent = ck.name;
+    const val = elDiv({ textAlign: 'right', color: '#fff', fontWeight: '700' }); val.textContent = '0';
+    row.appendChild(sw); row.appendChild(name); row.appendChild(val);
+    const barbg = elDiv({ height: '5px', background: '#1b2436', borderRadius: '3px', overflow: 'hidden', marginTop: '2px' });
+    const fill = elDiv({ height: '100%', width: '0%', background: hex(ck.color), borderRadius: '3px', transition: 'width .3s' });
+    barbg.appendChild(fill); wrap.appendChild(row); wrap.appendChild(barbg); chRows.appendChild(wrap);
+    return { val, fill };
+  });
+  const chTot = elDiv({ marginTop: '6px', paddingTop: '5px', borderTop: '1px solid #243049', color: '#aebbd0' }); chart.appendChild(chTot);
+  let _chPrev = {}, _chPrevT = 0;
+  function updateChart() {
+    const cur = sim._outBySku || {}; const dt = sim.t - _chPrevT; if (dt < 1.0) return;
+    const rates = chartKeys.map(ck => Math.max(0, ((cur[ck.key] || 0) - (_chPrev[ck.key] || 0)) / dt * 60));
+    const mx = Math.max(1, ...rates), tot = rates.reduce((a, b) => a + b, 0);
+    chartKeys.forEach((ck, i) => { chItems[i].val.textContent = rates[i].toFixed(1); chItems[i].fill.style.width = (100 * rates[i] / mx).toFixed(0) + '%'; });
+    chTot.innerHTML = 'Salida total <b style="color:#fff">' + tot.toFixed(1) + '</b> c/min';
+    _chPrev = Object.assign({}, cur); _chPrevT = sim.t;
+  }
+
+  function applyView(v, instant) { camera.position.set(...v.pos); controls.target.set(...v.tar); if (instant) camera.lookAt(...v.tar); }
+  function onResize() { const w = app.clientWidth || innerWidth, h = app.clientHeight || innerHeight; renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix(); }
+  addEventListener('resize', onResize); onResize();
+
+  // warmup: pre-poblar antes del primer cuadro
+  if (opts.warmup !== false) { const dtW = 0.05, n = Math.floor((opts.warmup || 60) / dtW); for (let k = 0; k < n; k++) sim.step(dtW); }
+  sim._palEvents = [];                                  // no spawnear de golpe los pallets del warmup
+
+  let running = false, last = 0, speed = opts.speed || 3;
+  const useAnimLoop = typeof renderer.setAnimationLoop === 'function';   // requerido por WebXR
+  function loop(ts) {
+    if (!running) return; if (!useAnimLoop) requestAnimationFrame(loop);
+    const dt = Math.min(0.05, (ts - last) / 1000 || 0.016); last = ts;
+    const steps = Math.max(1, Math.round((dt * speed) / 0.016));
+    for (let k = 0; k < steps; k++) sim.step(0.016 * speed);
+    const fr = sim.frame();
+    updateBoxes(fr);
+    updatePallets(fr.pal);
+    for (const rs of fr.robots) poseRobot(rs);           // brazos KUKA sincronizados al pick
+    for (const ev of fr.palEvents) spawnFullPallet(ev);  // pallet completo -> sale y aparece otro
+    updateFlyPallets();
+    for (const a of liftAnimators) a(sim.t);             // portadores mk5 en movimiento
+    xrUpdate(dt);                                        // locomoción VR (sticks + teletransporte)
+    fpUpdate(dt);                                        // caminar en escritorio (si está activo)
+    if ((!renderer.xr || !renderer.xr.isPresenting) && !FP.on) controls.update();   // en VR/caminar no manda la órbita
+    renderer.render(scene, camera);
+    drawHUD(fr);
+    updateChart();                                       // tasas de salida por SKU (en vivo)
+  }
+  const colorName = {}; for (const s of (sim.meta.skus || [])) colorName[s.color] = s.name; if (sim.meta.directColor != null) colorName[sim.meta.directColor] = sim.meta.directName || 'Directo';
+  function nameOfColor(c) { if (c === 'FIFO' || c === '—' || c == null) return c || 'FIFO'; if (Array.isArray(c)) return c.map(x => colorName[x] || '').join('+'); return colorName[c] || hex(c); }
+  function drawHUD(fr) {
+    const st = fr.stats, pk = fr.pocket;
+    let html = `<b>t</b> ${fmt(fr.time)}<br>generadas ${st.generated} · liberadas <b>${st.released}</b> · rechazo ${st.rejected}<br>en sistema ${st.inSystem} · salida <b>${st.throughput.toFixed(1)}</b> c/min<br>`;
+    const pkName = nameOfColor(pk.color);
+    html += `<b>Pocket pide:</b> <span style="color:${hex(pk.color)}">${pkName}</span>${pk.remaining ? ' ×' + pk.remaining : ''}<br>`;
+    // ---- Paletizadores KUKA ----
+    const pal = fr.pal;
+    const skuName = s => s === 'DIR' ? (sim.meta.directName || 'Directo') : (sim.meta.skus[+s.slice(1)] ? sim.meta.skus[+s.slice(1)].name : s);
+    html += `<b>KUKA</b> ${pal.cfg.robots}×${pal.cfg.positions} pos · pallet ${pal.cfg.cap} cajas · <b>${pal.done}</b> completos · faltas <span style="color:${pal.miss ? '#ff8080' : '#7f8ca3'}">${pal.miss}</span><br>`;
+    // agrupa pallets abiertos por robot (clave 'r:SKU')
+    const byR = {}; for (const [k, n] of Object.entries(pal.open)) { const ci = k.indexOf(':'); const r = ci >= 0 ? k.slice(0, ci) : '0'; (byR[r] || (byR[r] = [])).push([ci >= 0 ? k.slice(ci + 1) : k, n]); }
+    for (const r of Object.keys(byR).sort()) html += `<span style="color:#9fc3ff">R${r}:</span> ` + byR[r].map(([s, n]) => `${skuName(s).slice(0, 10)} ${n}`).join(' · ') + '<br>';
+    hud.innerHTML = html;
+    if (fr.bottleneck) { banner.textContent = '⚠ ' + fr.bottleneck.msg; banner.style.display = 'block'; } else banner.style.display = 'none';
+  }
+
+  return {
+    start() { if (!running) { running = true; last = performance.now(); if (useAnimLoop) renderer.setAnimationLoop(loop); else requestAnimationFrame(loop); } },
+    stop() { running = false; if (useAnimLoop) renderer.setAnimationLoop(null); },
+    setSpeed(x) { speed = x; },
+    view(n) { if (views[n]) applyView(views[n]); },
+    setHideKuka(v) { hideKuka = !!v; kukaGroup.visible = !hideKuka; },   // oculta segregador + KUKAs + pallets
+
+  };
+}
+
+function elDiv(style) { const e = document.createElement('div'); Object.assign(e.style, style); return e; }
+function mkBtn(label, onClick) { const b = document.createElement('button'); b.textContent = label; Object.assign(b.style, { background: '#1a2740', color: '#dfe7f3', border: '1px solid #2a3a5a', borderRadius: '8px', padding: '7px 12px', font: '600 12px system-ui', cursor: 'pointer' }); b.onclick = onClick; return b; }
+function fmt(s) { const m = Math.floor(s / 60), ss = Math.floor(s % 60); return `${String(m).padStart(2, '0')}:${String(ss).padStart(2, '0')}`; }
+function hex(c) { if (typeof c === 'number') return '#' + c.toString(16).padStart(6, '0'); const map = { FIFO: '#cfe0ff', '—': '#888' }; return map[c] || '#cfe0ff'; }
+
+
+// ===== ARRANQUE + CONTROLES =====
+const app = document.getElementById('app');
+let ctl = null, sim = null, speed = 3, seed = 12345;
+
+const $ = id => document.getElementById(id);
+
+// velocidad de SALIDA (cajas/min) -> velocidad de la banda de evacuación (para estresar)
+const voutNow = () => Math.max(0.15, Math.min(1.4, (+$('orate').value) * 0.024));
+function skuOptions(meta) { const o = meta.skus.map(s => ({ label: s.name, color: s.color })); o.push({ label: meta.directName, color: meta.directColor }); return o; }
+// multiplicador por defecto según VOLUMEN de la distribución (entero ≥1)
+function volMults(meta) { const ws = meta.skus.map(s => s.w).concat([meta.directW]); const mn = Math.min(...ws); return ws.map(w => Math.max(1, Math.round(w / mn))); }
+function buildRecipeRows(meta) {
+  const opts = skuOptions(meta), mults = volMults(meta), cont = $('recipeRows'); cont.innerHTML = '';
+  for (let i = 0; i < opts.length; i++) {
+    const row = document.createElement('div'); row.style.cssText = 'display:flex;gap:4px;align-items:center';
+    const num = document.createElement('span'); num.textContent = (i + 1); num.style.cssText = 'width:15px;color:#7f8ca3;text-align:right;font-size:11px';
+    const dot = document.createElement('span'); dot.style.cssText = 'width:9px;height:9px;border-radius:2px;flex:0 0 auto';
+    const sel = document.createElement('select'); sel.style.cssText = 'flex:1;min-width:0;background:#121821;color:#dfe7f3;border:1px solid #2a3a5a;border-radius:6px;padding:3px;font-size:11px';
+    opts.forEach((op, j) => { const e = document.createElement('option'); e.value = j; e.textContent = op.label; sel.appendChild(e); });
+    sel.value = i;
+    const qty = document.createElement('input'); qty.type = 'number'; qty.min = '1'; qty.max = '20'; qty.value = mults[i];
+    qty.title = '× (múltiplo por volumen)'; qty.style.cssText = 'width:34px;background:#121821;color:#fff;border:1px solid #2a3a5a;border-radius:6px;padding:3px;font-size:11px;text-align:center';
+    const paint = () => { dot.style.background = hex(opts[+sel.value].color); };
+    sel.onchange = () => { paint(); qty.value = mults[+sel.value]; applyRecipe(); };
+    qty.onchange = applyRecipe;
+    paint(); row.appendChild(num); row.appendChild(dot); row.appendChild(sel); row.appendChild(qty); cont.appendChild(row);
+  }
+}
+function currentRecipe(meta) {
+  const opts = skuOptions(meta), rows = $('recipeRows').children;
+  const steps = [];
+  for (const r of rows) { const sel = r.querySelector('select'), q = r.querySelector('input'); steps.push({ color: opts[+sel.value].color, qty: Math.max(1, +q.value || 1) }); }
+  return { loop: true, steps, interval: 0.15 };
+}
+function applyRecipe() { if (!sim) return; sim.model.pocket = currentRecipe(sim.meta); sim._pocket = { idx: 0, inStep: 0, done: false }; sim._pocketNext = 0; }
+
+const palCfg = () => ({ robots: Math.max(1, +$('probots').value || 6), positions: Math.max(1, +$('ppos').value || 10), cap: Math.max(2, +$('pcap').value || 32), pickTime: Math.max(1, +$('ptime').value || 15), pull: $('ppull').checked });
+function applyPal() { if (!sim) return; sim.meta.pal = palCfg(); sim._pallets = {}; sim.palDone = 0; sim.palMiss = 0; sim._palSent = {}; sim._prioPtr = 0; sim._palRR = 0; }
+
+function build(rebuildRows = true) {
+  const N = +$('outs').value;
+  const rate = +$('rate').value * 60;
+  const batchCap = Math.max(1, +$('pbatch').value || 4);
+  const model = buildSorter({ outputs: N, rate, outSpeed: voutNow(), pal: palCfg(), batchCap });
+  if (rebuildRows || $('recipeRows').children.length !== model.meta.skus.length + 1) buildRecipeRows(model.meta);
+  model.pocket = currentRecipe(model.meta);            // usa las 17 líneas de la UI
+  if (ctl) ctl.stop();
+  app.innerHTML = '';
+  sim = new SorterSim(model, seed); window._sim = sim;
+  ctl = mountSorter(sim, { container: app, speed, warmup: 120 });
+  ctl.start();
+  if ($('hideKuka').checked) ctl.setHideKuka(true);    // conserva el estado del toggle al reconstruir
+}
+
+$('outs').oninput = e => { $('vOuts').textContent = e.target.value + ' (' + (e.target.value * 4) + ' SKUs)'; build(true); };
+$('rate').oninput = e => { $('vRate').textContent = e.target.value; build(false); };
+$('orate').oninput = e => { $('vOut').textContent = e.target.value; build(false); };
+$('probots').onchange = () => build(false);   // nº de robots cambia la geometría del segregador
+$('ppos').onchange = applyPal;                 // posiciones = capacidad de pallets (sólo umbral de faltas)
+$('pcap').onchange = applyPal; $('ppull').onchange = applyPal; $('ptime').onchange = applyPal;
+$('pbatch').onchange = () => build(false);     // tamaño de tanda cambia el patrón de la fuente
+$('speed').oninput = e => { speed = +e.target.value; $('vSpeed').textContent = speed + '×'; if (ctl) ctl.setSpeed(speed); };
+$('hideKuka').onchange = e => { if (ctl) ctl.setHideKuka(e.target.checked); };
+
+// ---- Reporte PDF (jsPDF vía CDN) : entrada/salida por SKU, ocupación de buffers, paletizado, parámetros ----
+$('pdfBtn').onclick = generarPDF;
+async function generarPDF() {
+  if (!sim) return;
+  const btn = $('pdfBtn'), label = btn.textContent; btn.textContent = '⏳ generando…'; btn.disabled = true;
+  try {
+    const { jsPDF } = await import('https://cdn.jsdelivr.net/npm/jspdf@2.5.1/+esm');
+    const R = sim.report(), doc = new jsPDF({ unit: 'mm', format: 'a4' });
+    const PW = 210, M = 14; let y = 0;
+    const hx = c => '#' + (typeof c === 'number' ? c.toString(16).padStart(6, '0') : '999999');
+    const rgb = c => [(c >> 16) & 255, (c >> 8) & 255, c & 255];
+    const pct = v => (v * 100).toFixed(1) + '%';
+    const head = (t, sub) => { doc.setFillColor(243, 146, 0); doc.rect(0, y, PW, 9, 'F'); doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.text(t, M, y + 6); if (sub) { doc.setTextColor(255, 236, 214); doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.text(sub, PW - M, y + 6, { align: 'right' }); } y += 13; doc.setTextColor(30, 30, 30); }; // Qimarox naranja
+    const page = () => { doc.addPage(); y = M; };
+
+    // ---- Portada / encabezado (antracita Qimarox + franja naranja) ----
+    doc.setFillColor(38, 40, 46); doc.rect(0, 0, PW, 30, 'F');
+    doc.setFillColor(243, 146, 0); doc.rect(0, 30, PW, 1.8, 'F');     // franja Qimarox
+    doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold'); doc.setFontSize(15);
+    doc.text('Reporte de simulación — Sorter 4500 + Qimarox mk5', M, 13);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(210, 214, 220);
+    const dur = fmt(R.t), now = new Date().toLocaleString('es-CL');
+    doc.text(`Generado ${now}  ·  duración simulada ${dur}  ·  16 SKUs (4×4) + directa`, M, 20);
+    doc.text(`Entrada ${R.generated} cajas · liberadas ${R.released} · entregadas ${R.totalOut} · rechazo ${R.rejected}`, M, 26);
+    y = 36;
+
+    // ---- 1) Distribución de ENTRADA por SKU ----
+    head('1 · Distribución de ENTRADA por SKU', `total ${R.totalIn} cajas`);
+    doc.setFontSize(7.5);
+    const barW = 46, x0 = M, xRef = 92, xIn = 116, xBar = 140;
+    doc.setFont('helvetica', 'bold'); doc.setTextColor(110, 120, 140);
+    doc.text('SKU', x0, y); doc.text('ref %', xRef, y, { align: 'right' }); doc.text('entrada', xIn, y, { align: 'right' }); doc.text('% entrada', xBar - 1, y, { align: 'right' }); y += 1.5;
+    doc.setDrawColor(220, 224, 230); doc.line(M, y, PW - M, y); y += 3.5;
+    doc.setFont('helvetica', 'normal');
+    for (const r of R.rows) {
+      const [cr, cg, cb] = rgb(r.color); doc.setFillColor(cr, cg, cb); doc.rect(x0, y - 2.6, 2.6, 2.6, 'F');
+      doc.setTextColor(40, 40, 40); doc.text(r.name.slice(0, 26), x0 + 4, y);
+      doc.text(pct(r.ref), xRef, y, { align: 'right' }); doc.text(String(r.in), xIn, y, { align: 'right' });
+      doc.setFillColor(232, 236, 242); doc.rect(xBar, y - 2.6, barW, 2.6, 'F');
+      doc.setFillColor(cr, cg, cb); doc.rect(xBar, y - 2.6, barW * Math.min(1, r.inPct / 0.2), 2.6, 'F');
+      doc.setTextColor(90, 100, 120); doc.text(pct(r.inPct), xBar + barW + 2, y);
+      y += 4.4; if (y > 280) page();
+    }
+    y += 4;
+
+    // ---- 2) Distribución de SALIDA por SKU (verifica que respeta la mezcla) ----
+    if (y > 215) page(); head('2 · Distribución de SALIDA por SKU (tren ordenado)', `total ${R.totalOut} cajas`);
+    doc.setFontSize(7.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(110, 120, 140);
+    doc.text('SKU', x0, y); doc.text('salida', xIn, y, { align: 'right' }); doc.text('% salida', xBar - 1, y, { align: 'right' }); y += 1.5;
+    doc.line(M, y, PW - M, y); y += 3.5; doc.setFont('helvetica', 'normal');
+    for (const r of R.rows) {
+      const [cr, cg, cb] = rgb(r.color); doc.setFillColor(cr, cg, cb); doc.rect(x0, y - 2.6, 2.6, 2.6, 'F');
+      doc.setTextColor(40, 40, 40); doc.text(r.name.slice(0, 26), x0 + 4, y); doc.text(String(r.out), xIn, y, { align: 'right' });
+      doc.setFillColor(232, 236, 242); doc.rect(xBar, y - 2.6, barW, 2.6, 'F');
+      doc.setFillColor(cr, cg, cb); doc.rect(xBar, y - 2.6, barW * Math.min(1, r.outPct / 0.2), 2.6, 'F');
+      doc.setTextColor(90, 100, 120); doc.text(pct(r.outPct), xBar + barW + 2, y);
+      y += 4.4; if (y > 280) page();
+    }
+    y += 4; if (y > 230) page();
+
+    // ---- 3) Ocupación de buffers ----
+    head('3 · Ocupación de buffers (cero presión)');
+    doc.setFontSize(9); doc.setTextColor(40, 40, 40);
+    const occPct = R.buffers.cap ? R.buffers.avg / R.buffers.cap : 0, peakPct = R.buffers.cap ? R.buffers.peak / R.buffers.cap : 0;
+    doc.text(`Capacidad total: ${R.buffers.cap} cajas  (4 columnas × 4 niveles × 12)`, M, y); y += 5.5;
+    doc.text(`Ocupación promedio: ${R.buffers.avg.toFixed(1)} cajas  (${pct(occPct)})`, M, y); y += 5.5;
+    doc.text(`Ocupación pico: ${R.buffers.peak} cajas  (${pct(peakPct)})`, M, y); y += 7;
+    doc.setFillColor(232, 236, 242); doc.rect(M, y, 120, 5, 'F'); doc.setFillColor(243, 146, 0); doc.rect(M, y, 120 * Math.min(1, occPct), 5, 'F');
+    doc.setFillColor(38, 40, 46); doc.rect(M + 120 * Math.min(1, peakPct) - 0.6, y, 1.2, 5, 'F');
+    doc.setFontSize(7); doc.setTextColor(120, 120, 120); doc.text('prom (naranja) · pico (marca)', M, y + 9); y += 16;
+
+    // ---- 4) Paletizado KUKA ----
+    if (y > 250) page(); head('4 · Paletizado (robots KUKA)');
+    doc.setFontSize(9); doc.setTextColor(40, 40, 40);
+    doc.text(`Configuración: ${R.pal.cfg.robots} robot(s) × ${R.pal.cfg.positions} posición(es) · ${R.pal.cfg.cap} cajas/pallet`, M, y); y += 5.5;
+    doc.text(`Pallets completados: ${R.pal.done}`, M, y); y += 5.5;
+    doc.setTextColor(R.pal.miss ? 180 : 40, R.pal.miss ? 40 : 40, 40);
+    doc.text(`Faltas (sin posición disponible): ${R.pal.miss}  ${R.pal.miss ? '→ faltan paletizadores' : '→ capacidad suficiente'}`, M, y); y += 9;
+
+    // ---- 5) Parámetros de transporte ----
+    if (y > 250) page(); head('5 · Parámetros de transporte');
+    doc.setFontSize(9); doc.setTextColor(40, 40, 40);
+    const P = R.params, lines = [
+      `Caja: ${(P.box[0] * 1000) | 0}×${(P.box[2] * 1000) | 0}×${(P.box[1] * 1000) | 0} mm · 22 kg (dominante Danich)`,
+      `Tasa de referencia: ${P.refPerMin} cajas/min (P90 14, máx 15) · fuente simulada ${(P.srcRate / 60).toFixed(0)} c/min`,
+      `Velocidad de salida (evacuación): ${P.vout.toFixed(2)} m/s · paso ${P.outPitch.toFixed(2)} m`,
+      `Estructura: ${P.ncol} columnas × ${P.nlvl} niveles · niveles 0.9 / 1.5 / 2.1 / 2.7 m`,
+      `Elevadores: Qimarox Prorunner mk5 (continuo, portadores) subida + bajada por columna`,
+      `Capacidad de buffer: ${P.bufCap} cajas (12 por nivel) · 85% buffereado + 15% directo`,
+      `Colores: estructura RAL 7035 · rodillos galvanizados · portadores Qimarox naranja`,
+    ];
+    for (const l of lines) { doc.text('• ' + l, M, y); y += 5.5; }
+
+    doc.save(`reporte-simulacion-${Date.now()}.pdf`);
+  } catch (e) {
+    alert('No se pudo generar el PDF: ' + e.message);
+  } finally { btn.textContent = label; btn.disabled = false; }
+}
+
+// mostrar / ocultar controles
+const _panel = document.getElementById('panel'), _show = document.getElementById('showCtl');
+document.getElementById('hideCtl').onclick = () => { _panel.style.display = 'none'; _show.style.display = 'block'; };
+_show.onclick = () => { _panel.style.display = ''; _show.style.display = 'none'; };
+
+// arranque con diagnóstico: si no hay WebGL o build() falla, lo muestra en pantalla
+if (window.hasWebGL && !window.hasWebGL()) {
+  window.showErr('Este navegador no tiene WebGL disponible (frecuente en visores embebidos). Abre la URL de GitHub Pages en Chrome/Safari real.');
+} else {
+  try { build(); window.__ok = true; }
+  catch (e) { (window.showErr || alert)('Error al construir el simulador:\n' + (e && (e.stack || e.message) || e)); throw e; }
+}
+
+</script>
+</body>
+</html>
