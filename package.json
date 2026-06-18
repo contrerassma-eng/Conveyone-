@@ -10,6 +10,7 @@
     "gif": "node build/render-gif.mjs",
     "serve": "http-server . -p 8080",
     "build:modelador": "node build/modelador-standalone.mjs",
+    "build:box": "node build/box-standalone.mjs",
     "topview": "node build/topview.mjs"
   },
   "dependencies": {

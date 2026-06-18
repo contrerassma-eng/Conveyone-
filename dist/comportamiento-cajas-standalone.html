@@ -1,0 +1,945 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <meta name="theme-color" content="#0e1116" />
+  <title>Comportamiento de la caja (autocontenido) · choques, cuellos y derrape en curva</title>
+  <meta name="description" content="Simulador 2D del COMPORTAMIENTO de la caja: empuje del transportador, colisiones, acumulación con contacto, culebreo y pérdida de trayectoria en curva. Cerebro de velocidades por equipo." />
+  <style>
+    :root { --bg:#0e1116; --fg:#cdd6e0; --muted:#8b97a6; --panel:rgba(20,26,34,.95); --line:#2a3645; --accent:#f9a825; }
+    * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+    html,body { margin:0; height:100%; background:var(--bg); overflow:hidden; }
+    body { font:13px system-ui,sans-serif; color:var(--fg); }
+    #wrap { position:fixed; inset:0; }
+    canvas { display:block; width:100%; height:100%; touch-action:none; }
+
+    #fab { position:fixed; top:10px; right:10px; z-index:30; width:44px; height:44px;
+      border-radius:12px; border:1px solid var(--line); background:var(--panel); color:var(--fg);
+      font-size:20px; cursor:pointer; }
+    #fab:active { background:#243044; }
+
+    #panel { position:fixed; z-index:20; top:10px; right:64px; width:288px; max-height:calc(100% - 20px);
+      overflow-y:auto; background:var(--panel); border:1px solid var(--line); border-radius:12px;
+      padding:12px 14px; display:grid; gap:9px; transition:transform .2s ease,opacity .2s ease; }
+    #panel.hidden { transform:translateX(130%); opacity:0; pointer-events:none; }
+    @media (max-width:720px){ #panel{ left:8px; right:8px; width:auto; top:auto; bottom:8px; max-height:52vh; } }
+
+    h1 { font-size:14px; margin:0; }
+    h2 { font-size:11px; margin:6px 0 0; color:var(--accent); text-transform:uppercase; letter-spacing:.05em; }
+    .sub { color:var(--muted); font-size:11px; margin:-4px 0 2px; line-height:1.35; }
+    label { display:grid; gap:3px; font-size:12px; color:#aeb9c6; }
+    label .v { color:var(--fg); font-weight:600; }
+    input[type=range]{ width:100%; height:26px; }
+    .row { display:flex; gap:8px; flex-wrap:wrap; }
+    .row button { flex:1; min-width:64px; background:#1b2330; color:var(--fg); border:1px solid var(--line);
+      border-radius:8px; padding:9px 6px; cursor:pointer; font:11px monospace; }
+    .row button:active { background:#243044; }
+    hr { border:none; border-top:1px solid var(--line); margin:4px 0; }
+    .legend { font-size:11px; color:var(--muted); line-height:1.5; }
+    .dot { display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:5px; vertical-align:middle; }
+    #hud { position:fixed; left:10px; top:10px; z-index:10; font:12px/1.5 monospace; color:var(--fg);
+      background:rgba(13,17,23,.72); padding:8px 11px; border-radius:8px; white-space:pre; pointer-events:none; }
+    #err { position:fixed; left:8px; right:8px; top:8px; z-index:40; display:none; font:12px monospace;
+      color:#ffb3b3; background:rgba(40,10,10,.92); border:1px solid #b71c1c; border-radius:8px; padding:10px; white-space:pre-wrap; }
+  </style>
+</head>
+<body>
+  <div id="wrap"><canvas id="c"></canvas></div>
+  <div id="hud"></div>
+  <div id="err"></div>
+  <button id="fab" title="Mostrar / ocultar controles">⚙</button>
+
+  <div id="panel">
+    <h1>Comportamiento de la caja</h1>
+    <div class="sub">Motor físico: el transportador <b>empuja</b>, las cajas <b>chocan</b> y, en curva, pueden <b>perder la trayectoria</b> si el empuje supera la guía.</div>
+
+    <h2>Cerebro de velocidades (m/s)</h2>
+    <div class="sub">Una por equipo. Baja la de una vía aguas abajo para crear el cuello y ver el choque.</div>
+    <div id="speeds" style="display:grid; gap:7px"></div>
+
+    <h2>Física</h2>
+    <label>Resistencia de guías/rieles <span class="v" id="railV"></span>
+      <input id="rail" type="range" min="0.5" max="6" step="0.1" />
+    </label>
+    <div class="sub">Es la centrípeta máx. que aguanta el riel. Si v²/R la supera, la caja se <b>sale de la curva</b>. Bájala (o sube la velocidad de una curva) para verlo.</div>
+    <label>Carga · cajas/hora <span class="v" id="rateV"></span>
+      <input id="rate" type="range" min="400" max="5000" step="100" />
+    </label>
+    <label>Desvío a 30° · fracción <span class="v" id="divV"></span>
+      <input id="div" type="range" min="0" max="1" step="0.05" />
+    </label>
+
+    <h2>Escenarios</h2>
+    <div class="sub">Cada botón arma una demo completa (velocidades + carga + guía).</div>
+    <div class="row">
+      <button data-preset="nominal">Nominal (fluye)</button>
+      <button data-preset="frenar">Cuello / choque</button>
+    </div>
+    <div class="row">
+      <button data-preset="empuje">Derrape por empuje</button>
+      <button data-preset="guia">Guía débil</button>
+    </div>
+
+    <h2>Simulación</h2>
+    <label>Velocidad de reproducción ×<span class="v" id="simV"></span>
+      <input id="sim" type="range" min="0.25" max="3" step="0.25" />
+    </label>
+    <div class="row">
+      <button id="toggle">Pausa</button>
+      <button id="reset">Reset</button>
+      <button id="fit">Encuadrar</button>
+    </div>
+
+    <hr>
+    <div class="legend">
+      <span class="dot" style="background:#c8a073"></span>en banda &nbsp;
+      <span class="dot" style="background:#fb8c00"></span>contacto/cuello<br>
+      <span class="dot" style="background:#1e88e5"></span>desviada (30°) &nbsp;
+      <span class="dot" style="background:#e53935"></span>derrapada (perdió la curva)
+    </div>
+  </div>
+
+  <script>
+    function showErr(m){ var e=document.getElementById('err'); e.style.display='block';
+      e.textContent='Error:\n'+m+'\n\nSi lo abriste como file://, ábrelo desde una URL http(s): los módulos ES se bloquean en file://.'; }
+    addEventListener('error', e=>showErr((e.message||e.error||'')+(e.filename?'\n'+e.filename:'')));
+    addEventListener('unhandledrejection', e=>showErr((e.reason&&e.reason.message)||String(e.reason)));
+  </script>
+
+  <script type="module">
+// ===== módulos incrustados (geometry + box-physics + box-layouts) =====
+
+// geometry.js — Caminos paramétricos para los tramos del transportador.
+//
+// Cada camino expone una parametrización por longitud de arco `s` (en metros):
+//   - length        longitud total del camino
+//   - pointAt(s)    -> [x, y] posición en el plano a distancia s del inicio
+//   - dirAt(s)      -> [dx, dy] vector unitario tangente (sentido de avance)
+//
+// El motor (engine.js) trabaja SOLO en términos de `s`; nunca necesita saber si el
+// tramo es recta, arco o polilínea. El render usa pointAt/dirAt para dibujar y para
+// orientar las cajas. Esta abstracción es la que permite curvas (Hytrol y demás)
+// sin tocar la física.
+
+const TWO_PI = Math.PI * 2;
+
+function sub(a, b) { return [a[0] - b[0], a[1] - b[1]]; }
+function len2(a) { return Math.hypot(a[0], a[1]); }
+
+// ---------- Recta ----------
+function straight(geom) {
+  const from = geom.from, to = geom.to;
+  const d = sub(to, from);
+  const length = len2(d);
+  const ux = length > 0 ? d[0] / length : 1;
+  const uy = length > 0 ? d[1] / length : 0;
+  return {
+    type: 'straight',
+    length,
+    pointAt(s) {
+      const t = clamp(s, 0, length);
+      return [from[0] + ux * t, from[1] + uy * t];
+    },
+    dirAt() { return [ux, uy]; },
+  };
+}
+
+// ---------- Arco ----------
+// Gira desde a0 hasta a1 alrededor de `center` con radio `radius`. El sentido
+// (horario / antihorario) se infiere del signo de (a1 - a0).
+function arc(geom) {
+  const center = geom.center, radius = geom.radius;
+  const a0 = geom.a0, a1 = geom.a1;
+  const sweep = a1 - a0;                 // con signo
+  const length = Math.abs(sweep) * radius;
+  const sign = sweep >= 0 ? 1 : -1;
+  return {
+    type: 'arc',
+    length,
+    center, radius, a0, a1,
+    pointAt(s) {
+      const t = clamp(s, 0, length);
+      const a = a0 + sign * (t / radius);
+      return [center[0] + radius * Math.cos(a), center[1] + radius * Math.sin(a)];
+    },
+    dirAt(s) {
+      const t = clamp(s, 0, length);
+      const a = a0 + sign * (t / radius);
+      // tangente: derivada de (cos,sin) -> (-sin,cos), por el sentido
+      return [-sign * Math.sin(a), sign * Math.cos(a)];
+    },
+  };
+}
+
+// ---------- Polilínea ----------
+// Secuencia de puntos unidos por rectas. Útil para trazados libres del modelador.
+function polyline(geom) {
+  const pts = geom.points;
+  const segs = [];
+  let length = 0;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i], b = pts[i + 1];
+    const d = sub(b, a);
+    const l = len2(d);
+    if (l === 0) continue;
+    segs.push({ a, ux: d[0] / l, uy: d[1] / l, l, s0: length });
+    length += l;
+  }
+  return {
+    type: 'polyline',
+    length,
+    pointAt(s) {
+      const t = clamp(s, 0, length);
+      const seg = locate(segs, t);
+      const local = t - seg.s0;
+      return [seg.a[0] + seg.ux * local, seg.a[1] + seg.uy * local];
+    },
+    dirAt(s) {
+      const t = clamp(s, 0, length);
+      const seg = locate(segs, t);
+      return [seg.ux, seg.uy];
+    },
+  };
+}
+
+function locate(segs, t) {
+  for (let i = 0; i < segs.length; i++) {
+    if (t <= segs[i].s0 + segs[i].l) return segs[i];
+  }
+  return segs[segs.length - 1];
+}
+
+function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
+
+// ---------- Elevador (camino vertical) ----------
+// Footprint fijo en el plano (`at`), pero recorre en ALTURA de h0 a h1. La longitud
+// del camino es el recorrido vertical; la altura la interpola el motor (heightFrom/To).
+function lift(geom) {
+  const at = geom.at || [0, 0];
+  const length = Math.max(1e-6, Math.abs((geom.h1 != null ? geom.h1 : 1) - (geom.h0 != null ? geom.h0 : 0)));
+  return {
+    type: 'lift', length, h0: geom.h0, h1: geom.h1, at,
+    pointAt() { return [at[0], at[1]]; },
+    dirAt() { return [1, 0]; },
+  };
+}
+
+// Fábrica: a partir de un descriptor `geom` produce el camino compilado.
+function makePath(geom) {
+  switch (geom.type) {
+    case 'straight': return straight(geom);
+    case 'arc': return arc(geom);
+    case 'polyline': return polyline(geom);
+    case 'lift': return lift(geom);
+    default: throw new Error(`geometry: tipo desconocido '${geom.type}'`);
+  }
+}
+
+
+
+// box-physics.js — Motor 2D de COMPORTAMIENTO de la caja (con colisiones e inercia).
+//
+// A diferencia de engine.js (cero presión: las cajas NUNCA se tocan y van pegadas a
+// la línea), este motor modela la caja como un cuerpo libre en el plano:
+//
+//   - El transportador EMPUJA la caja hacia la velocidad de banda (tracción con tope).
+//   - Las cajas CHOCAN entre sí y transmiten el empuje (acumulación con contacto).
+//   - Al frenar un equipo, la de atrás embiste a la de adelante (cuello / culebreo).
+//   - En una curva la caja tiende a seguir RECTO (su vector de avance). La guía/riel
+//     la obliga a girar; si el empuje o la velocidad superan la fuerza de la guía,
+//     la caja se SALE de la curva (derrape / pérdida de trayectoria).
+//
+// No dibuja nada. El render lee frame(). La física se valida en test/box-physics.mjs.
+//
+// Es deliberadamente independiente de engine.js (no lo toca ni lo importa): es "otro
+// simulador" derivado del mismo repositorio, enfocado solo en la caja, sin alturas.
+
+
+// ---------------- RNG determinista (mulberry32) ----------------
+function makeRng(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// ---------------- Constantes físicas (afinables desde el HUD) ----------------
+const DEFAULTS = {
+  tau: 0.18,            // s, constante de tiempo de la tracción (qué tan rápido la caja toma la velocidad de banda)
+  tractionMax: 6.0,     // m/s², tope de aceleración que la banda puede imprimir (grip)
+  railK: 700,           // rigidez de la guía/riel lateral
+  railC: 12,            // amortiguación de la guía (solo cuando NO está saturada)
+  railMax: 3.0,         // m/s², FUERZA MÁXIMA de la guía (≈ centrípeta máx). Si v²/R la supera -> derrape
+  derailPen: 0.13,      // m, penetración del riel que confirma el derrape (caja fuera de la banda)
+  latFric: 1.2,         // fricción lateral de la banda (resiste el deslizamiento de costado)
+  friction: 1.4,        // fricción al coastear fuera de la banda (caja derrapada)
+  restitution: 0.04,    // rebote en choques (casi inelástico: las cajas se "amontonan")
+  colRadius: 0.18,      // m, radio de colisión de la caja
+};
+
+let _seq = 0;
+
+class BoxFlowSim {
+  constructor(model, opts = {}) {
+    this.model = model;
+    this.meta = model.meta || {};
+    this.boxSize = this.meta.boxSize || [0.4, 0.13, 0.3];
+    this.rng = makeRng(opts.seed != null ? opts.seed : 7);
+    this.cfg = { ...DEFAULTS, ...(opts.cfg || {}) };
+    this.time = 0;
+    this.boxes = [];
+    this.stats = { generated: 0, delivered: 0, diverted: 0, derailed: 0, inSystem: 0, contacts: 0 };
+    this._compile();
+  }
+
+  _compile() {
+    this.conveyors = [];
+    this.byId = new Map();
+    for (const c of this.model.conveyors) {
+      const path = makePath(c.geom);
+      const conv = {
+        id: c.id,
+        raw: c,
+        geom: c.geom,
+        path,
+        length: path.length,
+        width: c.width != null ? c.width : 0.6,
+        speed: c.speed != null ? c.speed : 0.5,
+        baseSpeed: c.speed != null ? c.speed : 0.5,
+        next: c.next || [],
+        source: c.source || null,
+        sink: !!c.sink,
+        divert: c.divert || null,     // { branch, frac, fromFrac, side:'left'|'right' }
+        kind: c.kind || (c.source ? 'source' : c.sink ? 'sink' : c.divert ? 'divert' : c.geom.type === 'arc' ? 'curve' : 'belt'),
+        _nextGen: 0,
+      };
+      this.conveyors.push(conv);
+      this.byId.set(c.id, conv);
+    }
+  }
+
+  setSpeed(id, speed) { const c = this.byId.get(id); if (c) c.speed = Math.max(0, speed); }
+  setConfig(patch) { Object.assign(this.cfg, patch); }
+  reset() { this.time = 0; this.boxes = []; _seq = 0; this.stats = { generated: 0, delivered: 0, diverted: 0, derailed: 0, inSystem: 0, contacts: 0 }; for (const c of this.conveyors) c._nextGen = 0; }
+
+  // ---------------- proyección de un punto sobre una vía ----------------
+  // Devuelve { s, lateral, latDir:[x,y], tangent:[x,y], L, onPath }.
+  //   lateral  = desplazamiento perpendicular firmado (a lo largo de latDir)
+  //   latDir   = dirección en la que se mide `lateral` (normal izq. en recta, radial en arco)
+  _project(conv, P) {
+    const g = conv.geom;
+    if (g.type === 'arc') return projectArc(g, P);
+    return projectStraight(g, P);
+  }
+
+  // ¿el punto cae dentro del footprint de la vía? (con un pequeño margen en los extremos)
+  _contains(conv, P, margin = 0.0) {
+    const pr = this._project(conv, P);
+    const half = conv.width / 2 + this.cfg.colRadius;
+    return pr.s >= -0.05 && pr.s <= pr.L + 0.05 && Math.abs(pr.lateral) <= half + margin;
+  }
+
+  // ---------------- paso ----------------
+  step(dt) {
+    this.time += dt;
+    this._spawn(dt);
+    this._assign();
+    this._forces(dt);
+    this._integrate(dt);
+    this._collisions();
+    this._handoff();
+    this._stats();
+  }
+
+  _spawn(dt) {
+    for (const conv of this.conveyors) {
+      if (!conv.source) continue;
+      const rate = conv.source.rate || 600;       // cajas/hora
+      conv._nextGen -= dt;
+      if (conv._nextGen > 0) continue;
+      conv._nextGen += 3600 / rate;
+      // hueco en la boca: ninguna caja dentro de un radio de arranque
+      const start = conv.path.pointAt(0);
+      const gap = this.cfg.colRadius * 2 + 0.12;
+      let room = true;
+      for (const b of this.boxes) { if (Math.hypot(b.p[0] - start[0], b.p[1] - start[1]) < gap) { room = false; break; } }
+      if (!room) continue;
+      const dir = conv.path.dirAt(0);
+      this.boxes.push({
+        id: ++_seq, convId: conv.id,
+        p: [start[0], start[1]],
+        v: [dir[0] * conv.speed, dir[1] * conv.speed],
+        offTrack: false, divert: false, divertChecked: false,
+        state: 'ok', bornAt: this.time,
+      });
+      this.stats.generated++;
+    }
+  }
+
+  // Cada caja se queda en la vía cuyo footprint la contiene mejor (con histéresis hacia
+  // la actual). Así la transferencia entre vías es geométrica y continua.
+  _assign() {
+    for (const b of this.boxes) {
+      // una caja derrapada NO se recupera: se salió de la línea (coastea hasta perderse).
+      if (b.offTrack) continue;
+      const cur = this.byId.get(b.convId);
+      if (!cur) continue;
+      const pr = this._project(cur, b.p);
+
+      // DESVIADOR: al pasar el punto de desvío, decide (una vez) si la caja toma la rama.
+      if (cur.divert) {
+        const fromFrac = cur.divert.fromFrac != null ? cur.divert.fromFrac : 0.4;
+        if (!b.divertChecked && pr.s >= fromFrac * pr.L) {
+          b.divertChecked = true;
+          b.divert = this.rng() < (cur.divert.frac != null ? cur.divert.frac : 0.5);
+        }
+        // si va desviada y ya alcanzó el punto de desvío, el desviador la pasa a la rama
+        if (b.divert && b.divertChecked && pr.s >= fromFrac * pr.L) {
+          if (!b._countedDivert) { b._countedDivert = true; this.stats.diverted++; }
+          this._switchTo(b, cur.divert.branch);
+          continue;
+        }
+      }
+
+      // handoff normal: la vía cuyo footprint contiene mejor a la caja (histéresis a la actual)
+      const best = this._bestConveyor(b.p, b.convId, [b.convId, ...cur.next]);
+      if (best && best !== b.convId) this._switchTo(b, best);
+    }
+  }
+
+  // Traspaso a otra vía: realinea la velocidad con la tangente de la nueva vía (mantiene
+  // la rapidez). En curvas el empalme es tangencial (no cambia nada); en el desvío a 30°
+  // hace que la caja se "despegue" limpio en esa dirección, sin falso derrape.
+  _switchTo(b, id) {
+    b.convId = id;
+    const nseg = this.byId.get(id);
+    if (!nseg) return;
+    const npr = this._project(nseg, b.p);
+    const spd = Math.hypot(b.v[0], b.v[1]);
+    b.v[0] = npr.tangent[0] * spd; b.v[1] = npr.tangent[1] * spd;
+  }
+
+  _bestConveyor(P, prefer, ids = null) {
+    const list = ids ? ids.map(id => this.byId.get(id)).filter(Boolean) : this.conveyors;
+    let best = null, bestLat = Infinity;
+    let preferOk = false;
+    for (const conv of list) {
+      const pr = this._project(conv, P);
+      const half = conv.width / 2 + this.cfg.colRadius;
+      const inside = pr.s >= -0.05 && pr.s <= pr.L + 0.05 && Math.abs(pr.lateral) <= half;
+      if (!inside) continue;
+      if (conv.id === prefer) preferOk = true;
+      if (Math.abs(pr.lateral) < bestLat) { bestLat = Math.abs(pr.lateral); best = conv.id; }
+    }
+    // histéresis: si la vía actual aún contiene la caja, quédate en ella salvo que
+    // otra sea claramente mejor (caja claramente más centrada en la otra).
+    if (preferOk && best !== prefer) {
+      const prc = this.byId.get(prefer);
+      const prp = this._project(prc, P);
+      if (Math.abs(prp.lateral) < bestLat + 0.08) return prefer;
+    }
+    return best;
+  }
+
+  _forces(dt) {
+    const cfg = this.cfg;
+    for (const b of this.boxes) {
+      b._a = [0, 0];
+      const conv = this.byId.get(b.convId);
+      if (b.offTrack || !conv) {
+        // caja derrapada: sin tracción, solo fricción -> coastea en línea recta
+        b._a[0] -= b.v[0] * cfg.friction;
+        b._a[1] -= b.v[1] * cfg.friction;
+        b.state = 'derail';
+        continue;
+      }
+      const pr = this._project(conv, b.p);
+
+      // 1) TRACCIÓN: la banda ajusta la velocidad LONGITUDINAL hacia la de banda, a lo
+      //    largo de la tangente. NO redirige la inercia lateral: la caja "quiere seguir
+      //    recto" y es la guía (paso 2) la que debe doblarla en la curva.
+      const tx = pr.tangent[0], ty = pr.tangent[1];
+      const vt = b.v[0] * tx + b.v[1] * ty;        // componente tangencial actual
+      let dvt = (conv.speed - vt) / cfg.tau;
+      if (dvt > cfg.tractionMax) dvt = cfg.tractionMax;
+      else if (dvt < -cfg.tractionMax) dvt = -cfg.tractionMax;
+      b._a[0] += dvt * tx; b._a[1] += dvt * ty;
+      // fricción lateral de la banda: resiste el deslizamiento de costado (no centra).
+      const vl = b.v[0] * pr.latDir[0] + b.v[1] * pr.latDir[1];
+      b._a[0] -= cfg.latFric * vl * pr.latDir[0];
+      b._a[1] -= cfg.latFric * vl * pr.latDir[1];
+
+      // Una caja en proceso de desvío está GUIADA por el brazo del desviador: cruza el
+      // borde de la vía principal hacia la rama a propósito, así que no se le aplica el
+      // riel principal ni cuenta como derrape (eso lo decide _forces más abajo).
+      const beingDiverted = !!(conv.divert && b.divert);
+
+      // 2) GUÍA / RIEL lateral: mantiene la caja dentro del ancho. Aquí vive el
+      //    derrape: en curva, redirigir la caja exige fuerza; si supera railMax, se sale.
+      const half = conv.width / 2 - cfg.colRadius;
+      const over = Math.abs(pr.lateral) - half;
+      if (over > 0 && !beingDiverted) {
+        const sgn = pr.lateral > 0 ? 1 : -1;
+        // Fuerza de guía = resorte hacia adentro, TOPADA en railMax (capacidad del riel).
+        let f = cfg.railK * over;
+        const saturated = f > cfg.railMax;
+        if (saturated) f = cfg.railMax;
+        else {
+          // amortiguación suave solo cuando NO está saturada (estabilidad, no dispara derrape)
+          const outwardV = b.v[0] * pr.latDir[0] * sgn + b.v[1] * pr.latDir[1] * sgn;
+          f = Math.min(cfg.railMax, f + cfg.railC * Math.max(0, outwardV));
+        }
+        b._a[0] -= sgn * pr.latDir[0] * f;
+        b._a[1] -= sgn * pr.latDir[1] * f;
+        // DERRAPE: la caja penetró el riel más que el margen porque la fuerza topada no
+        // alcanzó a redirigirla (v²/R > railMax) o la empujaron por encima del riel.
+        // Un derrape es un incidente: se cuenta una sola vez por caja.
+        if (over > cfg.derailPen) {
+          b.offTrack = true; b.state = 'derail';
+          if (!b._everDerailed) { b._everDerailed = true; this.stats.derailed++; }
+        }
+      }
+
+      // (El desvío se resuelve en _assign como un traspaso temprano a la rama: el
+      //  desviador "agarra" la caja en el punto de desvío y la pasa a la salida a 30°.)
+
+      // estado para el render: contacto se marca en _collisions; aquí ok/divert
+      b.state = b.divert ? 'divert' : 'ok';
+    }
+  }
+
+  _integrate(dt) {
+    for (const b of this.boxes) {
+      b.v[0] += b._a[0] * dt; b.v[1] += b._a[1] * dt;
+      b.p[0] += b.v[0] * dt; b.p[1] += b.v[1] * dt;
+    }
+  }
+
+  // Colisiones caja-caja: separación posicional + impulso (casi inelástico). Es lo que
+  // produce la acumulación con contacto y el "culebreo" (las cajas se empujan de lado).
+  _collisions() {
+    const r = this.cfg.colRadius, minD = 2 * r, e = this.cfg.restitution;
+    const n = this.boxes.length;
+    let contacts = 0;
+    for (let i = 0; i < n; i++) {
+      const a = this.boxes[i];
+      for (let j = i + 1; j < n; j++) {
+        const b = this.boxes[j];
+        let dx = b.p[0] - a.p[0], dy = b.p[1] - a.p[1];
+        let d = Math.hypot(dx, dy);
+        if (d >= minD || d === 0) { if (d === 0) { dx = 1e-3; dy = 0; d = 1e-3; } else continue; }
+        if (d >= minD) continue;
+        contacts++;
+        const nx = dx / d, ny = dy / d;
+        const pen = minD - d;
+        // separa por igual
+        const corr = pen / 2;
+        a.p[0] -= nx * corr; a.p[1] -= ny * corr;
+        b.p[0] += nx * corr; b.p[1] += ny * corr;
+        // impulso normal
+        const rvn = (b.v[0] - a.v[0]) * nx + (b.v[1] - a.v[1]) * ny;
+        if (rvn < 0) {
+          const jimp = -(1 + e) * rvn / 2;
+          a.v[0] -= jimp * nx; a.v[1] -= jimp * ny;
+          b.v[0] += jimp * nx; b.v[1] += jimp * ny;
+          if (!a.offTrack) a.state = 'contact';
+          if (!b.offTrack) b.state = 'contact';
+        }
+      }
+    }
+    this.stats.contacts = contacts;
+  }
+
+  _handoff() {
+    const kept = [];
+    for (const b of this.boxes) {
+      const conv = this.byId.get(b.convId);
+      if (!conv) { // sin vía
+        if (this._outOfBounds(b.p)) continue; // se perdió fuera del layout
+        kept.push(b); continue;
+      }
+      const pr = this._project(conv, b.p);
+      if (b.offTrack) {
+        if (this._outOfBounds(b.p)) continue; // caja derrapada que salió del área
+        kept.push(b); continue;
+      }
+      if (pr.s >= pr.L - 1e-3) {
+        // llegó al final de la vía
+        if (conv.sink && (!conv.next || conv.next.length === 0)) {
+          this.stats.delivered++; continue; // entregada
+        }
+        if (!conv.next || conv.next.length === 0) {
+          // fin sin continuación ni sink declarado: sigue libre (puede derrapar/perderse)
+          if (this._outOfBounds(b.p)) continue;
+        }
+      }
+      kept.push(b);
+    }
+    this.boxes = kept;
+  }
+
+  _outOfBounds(P) {
+    const bb = this.bounds();
+    const m = 3;
+    return P[0] < bb.minX - m || P[0] > bb.maxX + m || P[1] < bb.minY - m || P[1] > bb.maxY + m;
+  }
+
+  _stats() { this.stats.inSystem = this.boxes.length; }
+
+  // límites del layout (para encuadre y "fuera de área")
+  bounds() {
+    if (this._bounds) return this._bounds;
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const conv of this.conveyors) {
+      const N = Math.max(2, Math.ceil(conv.length / 0.3));
+      for (let i = 0; i <= N; i++) {
+        const p = conv.path.pointAt((i / N) * conv.length);
+        const w = conv.width / 2 + 0.3;
+        minX = Math.min(minX, p[0] - w); maxX = Math.max(maxX, p[0] + w);
+        minY = Math.min(minY, p[1] - w); maxY = Math.max(maxY, p[1] + w);
+      }
+    }
+    if (!isFinite(minX)) { minX = maxX = minY = maxY = 0; }
+    this._bounds = { minX, maxX, minY, maxY, cx: (minX + maxX) / 2, cy: (minY + maxY) / 2, w: maxX - minX, h: maxY - minY };
+    return this._bounds;
+  }
+
+  // ---------------- lectura para el render ----------------
+  frame() {
+    const boxes = this.boxes.map(b => ({
+      id: b.id, x: b.p[0], y: b.p[1],
+      angle: Math.atan2(b.v[1], b.v[0]),
+      speed: Math.hypot(b.v[0], b.v[1]),
+      state: b.state,
+    }));
+    return {
+      time: this.time,
+      boxes,
+      conveyors: this._geometry(),
+      stats: { ...this.stats },
+      boxSize: this.boxSize,
+      bounds: this.bounds(),
+    };
+  }
+
+  _geometry() {
+    const out = [];
+    for (const conv of this.conveyors) {
+      const N = Math.max(2, Math.ceil(conv.length / 0.25));
+      const center = [], left = [], right = [];
+      const halfW = conv.width / 2;
+      for (let i = 0; i <= N; i++) {
+        const s = (i / N) * conv.length;
+        const p = conv.path.pointAt(s);
+        const d = conv.path.dirAt(s);
+        const nx = -d[1], ny = d[0];
+        center.push([p[0], p[1]]);
+        left.push([p[0] + nx * halfW, p[1] + ny * halfW]);
+        right.push([p[0] - nx * halfW, p[1] - ny * halfW]);
+      }
+      out.push({ id: conv.id, kind: conv.kind, width: conv.width, speed: conv.speed, baseSpeed: conv.baseSpeed, center, left, right });
+    }
+    return out;
+  }
+
+  run(seconds, dt = 1 / 60) { const n = Math.round(seconds / dt); for (let i = 0; i < n; i++) this.step(dt); return this; }
+}
+
+// ================= proyecciones de geometría =================
+function projectStraight(g, P) {
+  const ax = g.from[0], ay = g.from[1];
+  const dx = g.to[0] - ax, dy = g.to[1] - ay;
+  const L = Math.hypot(dx, dy) || 1e-6;
+  const ux = dx / L, uy = dy / L;        // tangente
+  const nx = -uy, ny = ux;               // normal izquierda
+  const rx = P[0] - ax, ry = P[1] - ay;
+  const s = rx * ux + ry * uy;
+  const lateral = rx * nx + ry * ny;
+  return { s, lateral, latDir: [nx, ny], tangent: [ux, uy], L, onPath: s >= 0 && s <= L };
+}
+
+function projectArc(g, P) {
+  const C = g.center, R = g.radius;
+  const a0 = g.a0, a1 = g.a1;
+  const sweep = a1 - a0, sign = sweep >= 0 ? 1 : -1, sweepAbs = Math.abs(sweep);
+  const L = sweepAbs * R;
+  const dx = P[0] - C[0], dy = P[1] - C[1];
+  const r = Math.hypot(dx, dy) || 1e-6;
+  const ang = Math.atan2(dy, dx);
+  let dAng = (ang - a0) * sign;           // avance angular firmado a lo largo del sweep
+  while (dAng < -Math.PI) dAng += 2 * Math.PI;
+  while (dAng > Math.PI) dAng -= 2 * Math.PI;
+  const sClamped = Math.max(0, Math.min(dAng, sweepAbs));
+  const s = sClamped * R;
+  const a = a0 + sign * sClamped;
+  const tangent = [-sign * Math.sin(a), sign * Math.cos(a)];
+  const latDir = [dx / r, dy / r];        // radial hacia afuera
+  const lateral = r - R;                  // + = afuera de la curva
+  return { s, lateral, latDir, tangent, L, onPath: dAng >= 0 && dAng <= sweepAbs };
+}
+
+
+
+// box-layouts.js — Layouts para el simulador de COMPORTAMIENTO de la caja (box-physics.js).
+//
+// Modelo simple, enfocado en la caja (sin alturas, sin procesos, sin recetas):
+//   entrada -> curva 60° -> tramo de presión (con DESVIADOR y salida a 30°) ->
+//   curva 60° -> salida.
+//
+// Cada vía tiene su propia `speed` (el "cerebro de velocidades" del HUD la edita en
+// caliente). Bajar la velocidad de una vía aguas abajo crea el cuello: las cajas de
+// atrás embisten (colisión) y, antes de una curva, pueden perder la trayectoria.
+
+const D2R = Math.PI / 180;
+
+// dir unit a partir de un ángulo (grados desde +x)
+function dirDeg(a) { return [Math.cos(a * D2R), Math.sin(a * D2R)]; }
+function add(p, d, len) { return [p[0] + d[0] * len, p[1] + d[1] * len]; }
+
+// Línea de demostración con dos curvas de 60° y una salida (desvío) a 30°.
+//
+//   opts.speed     velocidad base de las vías (m/s)            default 0.6
+//   opts.rate      tasa de la fuente (cajas/hora)              default 1500
+//   opts.divertFrac fracción de cajas que toma la salida 30°   default 0.45
+//   opts.width     ancho de banda (m)                          default 0.6
+function buildBehaviorLine(opts = {}) {
+  const v = opts.speed != null ? opts.speed : 0.6;
+  const rate = opts.rate != null ? opts.rate : 1500;
+  const width = opts.width != null ? opts.width : 0.6;
+  const divertFrac = opts.divertFrac != null ? opts.divertFrac : 0.45;
+  const R = opts.radius != null ? opts.radius : 1.5;   // radio de curva (m). Curvas cerradas -> derrape alcanzable.
+
+  // --- ENTRADA: recta +x, con la fuente ---
+  const inFrom = [0, 0], inTo = [8, 0];
+
+  // --- CURVA 1: 60° a la izquierda (ccw). Centro arriba del fin de la entrada. ---
+  const c1Center = [inTo[0], inTo[1] + R];      // [8, 3]
+  const c1a0 = -Math.PI / 2;                    // el fin de la entrada visto desde el centro
+  const c1a1 = c1a0 + 60 * D2R;                 // +60°
+  const c1End = [c1Center[0] + R * Math.cos(c1a1), c1Center[1] + R * Math.sin(c1a1)];
+  const dirAfterC1 = [-Math.sin(c1a1), Math.cos(c1a1)]; // tangente de salida (ccw)
+
+  // --- PRESIÓN: recta diagonal de 6 m. Aquí vive el DESVIADOR y la salida a 30°. ---
+  const pressFrom = c1End;
+  const pressTo = add(pressFrom, dirAfterC1, 6);
+
+  // ángulo de la recta de presión (para construir la salida a 30°)
+  const pressAngDeg = Math.atan2(dirAfterC1[1], dirAfterC1[0]) / D2R; // ~60°
+
+  // --- SALIDA 30°: arranca a 2.5 m del inicio de la presión, hacia la derecha a 30°. ---
+  const exitStart = add(pressFrom, dirAfterC1, 2.5);
+  const exitDir = dirDeg(pressAngDeg - 30);     // 30° menos = se abre a la derecha
+  const exitEnd = add(exitStart, exitDir, 5.5);
+
+  // --- CURVA 2: 60° a la derecha (cw). Vuelve el flujo hacia +x. ---
+  const rightNormal = [dirAfterC1[1], -dirAfterC1[0]]; // normal derecha del avance
+  const c2Center = add(pressTo, rightNormal, R);
+  const c2a0 = Math.atan2(pressTo[1] - c2Center[1], pressTo[0] - c2Center[0]);
+  const c2a1 = c2a0 - 60 * D2R;                 // cw -> -60°
+  const c2End = [c2Center[0] + R * Math.cos(c2a1), c2Center[1] + R * Math.sin(c2a1)];
+
+  // --- SALIDA: recta +x ---
+  const outFrom = c2End;
+  const outTo = add(outFrom, [1, 0], 8);
+
+  return {
+    meta: { name: 'behavior-line', boxSize: [0.4, 0.13, 0.3] },
+    conveyors: [
+      { id: 'entrada', kind: 'source', width, speed: v + 0.1,
+        geom: { type: 'straight', from: inFrom, to: inTo },
+        source: { rate }, next: ['curva1'] },
+
+      { id: 'curva1', kind: 'curve', width, speed: v,
+        geom: { type: 'arc', center: c1Center, radius: R, a0: c1a0, a1: c1a1 },
+        next: ['presion'] },
+
+      { id: 'presion', kind: 'divert', width, speed: v,
+        geom: { type: 'straight', from: pressFrom, to: pressTo },
+        divert: { branch: 'salida30', frac: divertFrac, fromFrac: 0.35, side: 'right' },
+        next: ['curva2', 'salida30'] },
+
+      { id: 'salida30', kind: 'sink', width, speed: v,
+        geom: { type: 'straight', from: exitStart, to: exitEnd },
+        sink: true },
+
+      { id: 'curva2', kind: 'curve', width, speed: v * 0.85,
+        geom: { type: 'arc', center: c2Center, radius: R, a0: c2a0, a1: c2a1 },
+        next: ['salida'] },
+
+      { id: 'salida', kind: 'sink', width, speed: v,
+        geom: { type: 'straight', from: outFrom, to: outTo },
+        sink: true },
+    ],
+  };
+}
+
+
+
+
+    const $ = id => document.getElementById(id);
+    const canvas = $('c'), ctx = canvas.getContext('2d');
+
+    // --- estado de UI ---
+    let rate = 1600, divertFrac = 0.45, railMax = DEFAULTS.railMax, simMul = 1, running = true;
+    let sim, view = null, dragging = false, lastPt = null;
+
+    const KIND = { source:'#2e7d32', sink:'#8e24aa', divert:'#b08900', curve:'#5b6675', belt:'#4a5360' };
+    const STATE_COLOR = { ok:'#c8a073', contact:'#fb8c00', divert:'#1e88e5', derail:'#e53935' };
+
+    function build() {
+      const model = buildBehaviorLine({ rate, divertFrac });
+      sim = new BoxFlowSim(model, { seed: 1, cfg: { railMax } });
+      sim.run(6); // warmup: abrir ya con cajas en movimiento
+      buildSpeedSliders();
+      fitView();
+    }
+
+    // --- cerebro de velocidades: un slider por transportador ---
+    function buildSpeedSliders() {
+      const box = $('speeds'); box.innerHTML = '';
+      for (const c of sim.conveyors) {
+        const lab = document.createElement('label');
+        const name = ({entrada:'Entrada',curva1:'Curva 60° (1)',presion:'Presión + desvío',salida30:'Salida 30°',curva2:'Curva 60° (2)',salida:'Salida'})[c.id] || c.id;
+        lab.innerHTML = `${name} <span class="v" id="sp_${c.id}">${c.speed.toFixed(2)}</span>`;
+        const r = document.createElement('input');
+        r.type='range'; r.min='0'; r.max='2'; r.step='0.05'; r.value=c.speed;
+        r.addEventListener('input', () => { sim.setSpeed(c.id, +r.value); $('sp_'+c.id).textContent=(+r.value).toFixed(2); });
+        lab.appendChild(r); box.appendChild(lab);
+      }
+    }
+
+    // --- vista (encuadre + pan/zoom) ---
+    function fitView() {
+      const b = sim.bounds();
+      const W = canvas.clientWidth, H = canvas.clientHeight;
+      const pad = 0.9;
+      const scale = Math.min(W / (b.w || 1), H / (b.h || 1)) * pad;
+      view = { scale, cx: b.cx, cy: b.cy, ox: W/2, oy: H/2 };
+    }
+    const toScreen = (x,y) => [ view.ox + (x - view.cx) * view.scale, view.oy - (y - view.cy) * view.scale ];
+
+    function resize() {
+      const dpr = Math.min(window.devicePixelRatio||1, 2);
+      const W = canvas.clientWidth, H = canvas.clientHeight;
+      canvas.width = W*dpr; canvas.height = H*dpr; ctx.setTransform(dpr,0,0,dpr,0,0);
+    }
+
+    // --- dibujo ---
+    function drawPoly(pts, close) {
+      ctx.beginPath();
+      for (let i=0;i<pts.length;i++){ const [sx,sy]=toScreen(pts[i][0],pts[i][1]); i?ctx.lineTo(sx,sy):ctx.moveTo(sx,sy); }
+      if (close) ctx.closePath();
+    }
+
+    function render() {
+      const f = sim.frame();
+      const W = canvas.clientWidth, H = canvas.clientHeight;
+      ctx.clearRect(0,0,W,H);
+
+      // transportadores como banda (relleno) + rieles (bordes) + eje
+      for (const c of f.conveyors) {
+        const band = c.left.concat(c.right.slice().reverse());
+        drawPoly(band, true);
+        ctx.fillStyle = '#1a212c'; ctx.fill();
+        ctx.lineWidth = 2; ctx.strokeStyle = KIND[c.kind] || KIND.belt;
+        drawPoly(c.left,false); ctx.stroke();
+        drawPoly(c.right,false); ctx.stroke();
+        // eje + flecha de sentido
+        ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(120,135,155,.35)'; ctx.setLineDash([5,5]);
+        drawPoly(c.center,false); ctx.stroke(); ctx.setLineDash([]);
+        // etiqueta de velocidad en el centro de la vía
+        const mid = c.center[Math.floor(c.center.length/2)];
+        const [mx,my] = toScreen(mid[0],mid[1]);
+        ctx.fillStyle = c.speed < c.baseSpeed - 0.01 ? '#fb8c00' : 'rgba(205,214,224,.85)';
+        ctx.font = '11px monospace'; ctx.textAlign='center';
+        ctx.fillText(`${c.speed.toFixed(2)} m/s`, mx, my - 6);
+      }
+
+      // cajas (rectángulo orientado al vector de avance)
+      const [bw,,bd] = f.boxSize;
+      for (const b of f.boxes) {
+        const [sx,sy] = toScreen(b.x, b.y);
+        ctx.save(); ctx.translate(sx,sy); ctx.rotate(-b.angle);
+        const w = bw*view.scale, h = bd*view.scale;
+        ctx.fillStyle = STATE_COLOR[b.state] || STATE_COLOR.ok;
+        ctx.strokeStyle = 'rgba(0,0,0,.45)'; ctx.lineWidth=1;
+        ctx.fillRect(-w/2,-h/2,w,h); ctx.strokeRect(-w/2,-h/2,w,h);
+        ctx.restore();
+      }
+
+      // HUD
+      const s = f.stats;
+      $('hud').textContent =
+        `t=${f.time.toFixed(1)}s   en sistema ${s.inSystem}\n` +
+        `generadas ${s.generated}   entregadas ${s.delivered}\n` +
+        `desviadas 30° ${s.diverted}   en contacto ${s.contacts}\n` +
+        `DERRAPES (perdieron curva) ${s.derailed}`;
+    }
+
+    function loop(ts){
+      requestAnimationFrame(loop);
+      if (!view) return;
+      if (running){
+        // avanza simMul/60 s de simulación por cuadro, en sub-pasos <= 1/120 s (estable)
+        const target = simMul / 60;
+        const sub = Math.max(1, Math.ceil(target / (1/120)));
+        const h = target / sub;
+        for (let k=0;k<sub;k++) sim.step(h);
+      }
+      render();
+    }
+
+    // --- controles ---
+    function syncLabels(){
+      $('railV').textContent = railMax.toFixed(1); $('rail').value = railMax;
+      $('rateV').textContent = rate; $('rate').value = rate;
+      $('divV').textContent = divertFrac.toFixed(2); $('div').value = divertFrac;
+      $('simV').textContent = simMul.toFixed(2); $('sim').value = simMul;
+    }
+    $('rail').addEventListener('input', e=>{ railMax=+e.target.value; $('railV').textContent=railMax.toFixed(1); sim.setConfig({railMax}); });
+    $('rate').addEventListener('input', e=>{ rate=+e.target.value; $('rateV').textContent=rate; build(); });
+    $('div').addEventListener('input', e=>{ divertFrac=+e.target.value; $('divV').textContent=divertFrac.toFixed(2); build(); });
+    $('sim').addEventListener('input', e=>{ simMul=+e.target.value; $('simV').textContent=simMul.toFixed(2); });
+    $('toggle').addEventListener('click', ()=>{ running=!running; $('toggle').textContent=running?'Pausa':'Reanudar'; });
+    $('reset').addEventListener('click', ()=>{ build(); });
+    $('fit').addEventListener('click', fitView);
+
+    // Escenarios completos: cada uno fija carga + guía + velocidades y reconstruye.
+    const SCENARIOS = {
+      nominal:   { rate:1600, railMax:3,   divertFrac:0.45, speeds:{} },
+      frenar:    { rate:2600, railMax:3,   divertFrac:0.30, speeds:{ entrada:0.9, curva2:0.15 } },
+      empuje:    { rate:4000, railMax:3,   divertFrac:0.30, speeds:{ entrada:2.0, curva1:0.35 } },
+      guia:      { rate:1800, railMax:0.8, divertFrac:0.30, speeds:{ entrada:1.1, curva1:1.1, presion:1.1, curva2:1.1, salida:1.1 } },
+    };
+    document.querySelectorAll('[data-preset]').forEach(btn=>btn.addEventListener('click', ()=>{
+      const scn = SCENARIOS[btn.dataset.preset]; if (!scn) return;
+      rate = scn.rate; railMax = scn.railMax; divertFrac = scn.divertFrac;
+      build();                                   // reconstruye con la nueva carga/guía
+      for (const [id,v] of Object.entries(scn.speeds)) sim.setSpeed(id, v);
+      buildSpeedSliders(); syncLabels();
+    }));
+
+    // panel
+    $('fab').addEventListener('click', ()=>$('panel').classList.toggle('hidden'));
+
+    // pan + zoom
+    canvas.addEventListener('wheel', e=>{ e.preventDefault(); if(!view) return;
+      const f = e.deltaY < 0 ? 1.1 : 1/1.1; view.scale *= f; }, {passive:false});
+    canvas.addEventListener('pointerdown', e=>{ dragging=true; lastPt=[e.clientX,e.clientY]; });
+    addEventListener('pointermove', e=>{ if(!dragging||!view) return;
+      view.ox += e.clientX-lastPt[0]; view.oy += e.clientY-lastPt[1]; lastPt=[e.clientX,e.clientY]; });
+    addEventListener('pointerup', ()=>{ dragging=false; });
+    addEventListener('resize', ()=>{ resize(); });
+
+    // arranque
+    try {
+      resize(); syncLabels(); build();
+      requestAnimationFrame(loop);
+    } catch (err) { showErr((err&&err.stack)||String(err)); }
+  </script>
+</body>
+</html>

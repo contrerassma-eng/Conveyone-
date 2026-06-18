@@ -156,6 +156,10 @@ La página trae un **cerebro de velocidades** (un slider por equipo) y escenario
 cliente la diferencia entre el flujo ideal y lo que ocurre físicamente. La física se
 valida headless: `npm run test:box`.
 
+Para compartirlo como **un solo archivo** (sin servidor, sin npm, sin CDN — es 2D con
+`<canvas>`, no usa three.js), `npm run build:box` genera
+`dist/comportamiento-cajas-standalone.html`, que se abre con doble clic.
+
 ## Roadmap
 
 Hacia el modelador online: editor visual -> modelo JSON -> motor + render. Ver
