@@ -23,9 +23,15 @@
       overflow-y:auto; background:var(--panel); border:1px solid var(--line); border-radius:12px;
       padding:12px 14px; display:grid; gap:9px; transition:transform .2s ease,opacity .2s ease; }
     #panel.hidden { transform:translateX(130%); opacity:0; pointer-events:none; }
-    @media (max-width:720px){ #panel{ left:8px; right:8px; width:auto; top:auto; bottom:8px; max-height:52vh; } }
+    @media (max-width:720px){
+      #panel{ left:8px; right:8px; width:auto; top:auto; bottom:8px; max-height:62vh;
+        border-radius:16px; padding-bottom:16px; }
+      #panel.hidden{ transform:translateY(115%); }   /* hoja inferior: se oculta hacia abajo */
+    }
 
-    h1 { font-size:14px; margin:0; }
+    h1 { font-size:14px; margin:0; display:flex; justify-content:space-between; align-items:center; }
+    h1 #closeP { cursor:pointer; opacity:.7; font-size:16px; padding:2px 6px; }
+    h1 #closeP:active { opacity:1; }
     h2 { font-size:11px; margin:6px 0 0; color:var(--accent); text-transform:uppercase; letter-spacing:.05em; }
     .sub { color:var(--muted); font-size:11px; margin:-4px 0 2px; line-height:1.35; }
     label { display:grid; gap:3px; font-size:12px; color:#aeb9c6; }
@@ -51,8 +57,9 @@
   <button id="fab" title="Mostrar / ocultar controles">⚙</button>
 
   <div id="panel">
-    <h1>Comportamiento de la caja</h1>
+    <h1>Comportamiento de la caja <span id="closeP" title="Ocultar">✕</span></h1>
     <div class="sub">Motor físico: el transportador <b>empuja</b>, las cajas <b>chocan</b> y, en curva, pueden <b>perder la trayectoria</b> si el empuje supera la guía.</div>
+    <div class="sub">📱 Un dedo = mover · dos dedos = zoom · doble toque = encuadrar.</div>
 
     <h2>Cerebro de velocidades (m/s)</h2>
     <div class="sub">Una por equipo. Baja la de una vía aguas abajo para crear el cuello y ver el choque.</div>
@@ -116,7 +123,7 @@
 
     // --- estado de UI ---
     let rate = 1600, divertFrac = 0.45, railMax = DEFAULTS.railMax, simMul = 1, running = true;
-    let sim, view = null, dragging = false, lastPt = null;
+    let sim, view = null;
 
     const KIND = { source:'#2e7d32', sink:'#8e24aa', divert:'#b08900', curve:'#5b6675', belt:'#4a5360' };
     const STATE_COLOR = { ok:'#c8a073', contact:'#fb8c00', divert:'#1e88e5', derail:'#e53935' };
@@ -254,17 +261,50 @@
       buildSpeedSliders(); syncLabels();
     }));
 
-    // panel
-    $('fab').addEventListener('click', ()=>$('panel').classList.toggle('hidden'));
+    // --- panel: arranca OCULTO (primero se ve la simulación); ⚙ y ✕ lo conmutan ---
+    const panel = $('panel');
+    panel.classList.add('hidden');
+    $('fab').addEventListener('click', ()=>panel.classList.toggle('hidden'));
+    $('closeP').addEventListener('click', ()=>panel.classList.add('hidden'));
 
-    // pan + zoom
-    canvas.addEventListener('wheel', e=>{ e.preventDefault(); if(!view) return;
-      const f = e.deltaY < 0 ? 1.1 : 1/1.1; view.scale *= f; }, {passive:false});
-    canvas.addEventListener('pointerdown', e=>{ dragging=true; lastPt=[e.clientX,e.clientY]; });
-    addEventListener('pointermove', e=>{ if(!dragging||!view) return;
-      view.ox += e.clientX-lastPt[0]; view.oy += e.clientY-lastPt[1]; lastPt=[e.clientX,e.clientY]; });
-    addEventListener('pointerup', ()=>{ dragging=false; });
+    // --- NAVEGACIÓN táctil + ratón (Pointer Events): 1 dedo = mover, 2 dedos = zoom ---
+    function zoomAt(px, py, factor){
+      if (!view) return;
+      view.scale *= factor;
+      view.ox = px - (px - view.ox) * factor;   // mantiene fijo el punto bajo los dedos
+      view.oy = py - (py - view.oy) * factor;
+    }
+    const pts = new Map();                       // punteros activos (id -> {x,y})
+    let pinchDist = 0, pinchMid = null;
+    function rel(e){ const r = canvas.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; }
+    canvas.addEventListener('pointerdown', e=>{ canvas.setPointerCapture(e.pointerId); const [x,y]=rel(e); pts.set(e.pointerId,{x,y}); pinchDist=0; });
+    canvas.addEventListener('pointermove', e=>{
+      if (!pts.has(e.pointerId) || !view) return;
+      const [x,y]=rel(e); const p=pts.get(e.pointerId);
+      if (pts.size === 1){                        // un dedo / ratón: desplazar
+        view.ox += x - p.x; view.oy += y - p.y;
+      } else if (pts.size === 2){                 // dos dedos: pellizco -> zoom + desplazar
+        p.x=x; p.y=y;
+        const arr=[...pts.values()];
+        const dist=Math.hypot(arr[0].x-arr[1].x, arr[0].y-arr[1].y);
+        const mid=[(arr[0].x+arr[1].x)/2, (arr[0].y+arr[1].y)/2];
+        if (pinchDist>0){
+          zoomAt(mid[0], mid[1], dist/pinchDist);
+          if (pinchMid){ view.ox += mid[0]-pinchMid[0]; view.oy += mid[1]-pinchMid[1]; }
+        }
+        pinchDist=dist; pinchMid=mid;
+      }
+      p.x=x; p.y=y;
+    });
+    function endPtr(e){ pts.delete(e.pointerId); if (pts.size<2){ pinchDist=0; pinchMid=null; } }
+    canvas.addEventListener('pointerup', endPtr);
+    canvas.addEventListener('pointercancel', endPtr);
+    canvas.addEventListener('wheel', e=>{ e.preventDefault(); const [x,y]=rel(e); zoomAt(x,y, e.deltaY<0?1.1:1/1.1); }, {passive:false});
+    // doble toque / doble clic: re-encuadra
+    canvas.addEventListener('dblclick', fitView);
+
     addEventListener('resize', ()=>{ resize(); });
+    addEventListener('orientationchange', ()=>{ setTimeout(()=>{ resize(); fitView(); }, 200); });
 
     // arranque
     try {
