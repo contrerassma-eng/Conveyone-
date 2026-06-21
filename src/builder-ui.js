@@ -59,6 +59,7 @@ const SCAFFOLD = `
     <button id="bStopOut" title="Detener la salida: las cajas se acumulan (cero presión)">⏸ Salida</button>
     <span class="ctl">Tasa <input id="cRate" type="number" min="1" max="120" step="1" value="30"> c/min</span>
     <span class="ctl">Veloc. <select id="cSpeed"><option value="1">1×</option><option value="3" selected>3×</option><option value="6">6×</option></select></span>
+    <button id="bFrame" title="Encuadrar cámara al layout">⤢ Ver</button>
     <button id="bSave">💾</button><button id="bLoad">📂</button><button id="bClear">🧹</button>
   </div>
   <input id="fileIn" type="file" accept="application/json" style="display:none">
@@ -116,7 +117,7 @@ export function initBuilder() {
     let inst;
     if (last) { inst = lib.place(modelId, { x: 0, z: 0, rot: 0 }); graph.instances.push(inst); lib.connect(graph, last.id, inst.id); }
     else { inst = lib.place(modelId, { x: 0, z: 0, rot: 0 }); graph.instances.push(inst); }
-    select(inst); rebuild();
+    select(inst); rebuild(); frameView();
   }
 
   // ---------- dibujo de una pieza ----------
@@ -373,6 +374,24 @@ export function initBuilder() {
   }
   const byId = id => graph.instances.find(i => i.id === id);
 
+  // encuadra la cámara a TODO el layout (evita abrir mirando vacío)
+  function frameView() {
+    const pts = [];
+    for (const inst of graph.instances) {
+      const n = inst.nodes;
+      if (inst.family === 'prop') pts.push([inst.pose.x, inst.pose.z]);
+      else { for (const k of ['in', 'out', 'out2']) if (n[k]) pts.push(n[k].p); if (n._center) pts.push(n._center); }
+    }
+    if (!pts.length) return;
+    let mnx = Infinity, mxx = -Infinity, mnz = Infinity, mxz = -Infinity;
+    for (const p of pts) { mnx = Math.min(mnx, p[0]); mxx = Math.max(mxx, p[0]); mnz = Math.min(mnz, p[1]); mxz = Math.max(mxz, p[1]); }
+    const cx = (mnx + mxx) / 2, cz = (mnz + mxz) / 2, span = Math.max(mxx - mnx, mxz - mnz, 3);
+    controls.target.set(cx, 0.6, cz);
+    camera.position.set(cx + span * 0.55, span * 0.85, cz + span * 0.9);
+    camera.near = 0.1; camera.far = Math.max(1000, span * 12); camera.updateProjectionMatrix();
+    controls.update();
+  }
+
   // ---------- selección + inspector ----------
   function select(inst) { selected = inst; renderInspector(); rebuild(); }
   const insp = document.getElementById('insp'), iFields = document.getElementById('iFields');
@@ -502,6 +521,7 @@ export function initBuilder() {
   function setConnect(on) { connectMode = on; connectFrom = null; document.getElementById('bConnect').classList.toggle('on', on); showHint(on ? 'Toca un nodo de SALIDA (azul) y luego uno de ENTRADA (verde)' : ''); }
   document.getElementById('bConnect').onclick = () => setConnect(!connectMode);
   document.getElementById('bValidate').onclick = () => validateHud(true);
+  document.getElementById('bFrame').onclick = () => frameView();
   document.getElementById('bClear').onclick = () => { stopSim(); graph.instances = []; graph.links = []; selected = null; renderInspector(); rebuild(); };
   document.getElementById('bRun').onclick = () => running ? stopSim() : startSim();
 
@@ -519,7 +539,7 @@ export function initBuilder() {
   function loadGraph(json) {
     try {
       const g = lib.hydrate(json); stopSim();
-      graph.instances = g.instances; graph.links = g.links; selected = null; renderInspector(); rebuild();
+      graph.instances = g.instances; graph.links = g.links; selected = null; renderInspector(); rebuild(); frameView();
       showHint(`Cargado: ${g.instances.length} piezas`); setTimeout(() => showHint(''), 2500);
     } catch (err) { showHint('JSON inválido: ' + err.message); }
   }
@@ -648,6 +668,7 @@ export function initBuilder() {
   try { const saved = localStorage.getItem('builder.layout'); if (saved) { loadGraph(saved); seeded = true; } } catch (e) {}
   if (!seeded && typeof window !== 'undefined' && window.__seedLayout) { try { loadGraph(JSON.stringify(window.__seedLayout)); seeded = true; } catch (e) {} }
   if (!seeded) addPiece('TA');
+  frameView();   // arranca encuadrando todo el layout (no abrir mirando vacío)
   showHint('Biblioteca (izq) · selecciona para configurar · 🔗 conecta nodos · ▶ simula · 💾/📂 guarda-carga · ENTER VR (Quest)');
   setTimeout(() => showHint(''), 7000);
 
