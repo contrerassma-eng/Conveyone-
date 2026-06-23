@@ -75,21 +75,15 @@ export function createView(canvas, opts = {}) {
     return m;
   }
 
-  // textura de banda (con color configurable)
-  const beltTex = new B.DynamicTexture('belt', { width: 256, height: 48 }, scene, false);
-  beltTex.wrapU = B.Texture.WRAP_ADDRESSMODE; beltTex.uScale = 10;
-  function drawBelt(hex) {
-    const c = beltTex.getContext();
-    c.fillStyle = hex; c.fillRect(0, 0, 256, 48);
-    c.strokeStyle = 'rgba(255,255,255,0.05)'; c.lineWidth = 2;
-    for (let x = 0; x < 256; x += 64) { c.beginPath(); c.moveTo(x, 0); c.lineTo(x, 48); c.stroke(); }
-    c.strokeStyle = 'rgba(0,0,0,0.22)'; c.lineWidth = 1;
-    for (let x = 32; x < 256; x += 64) { c.beginPath(); c.moveTo(x, 0); c.lineTo(x, 48); c.stroke(); }
-    beltTex.update();
-  }
-  drawBelt(opts.beltColor || '#161616');
+  // material de banda: color sólido configurable. Sin DynamicTexture a propósito
+  // (getContext() puede devolver null en WebKit/Safari y romper la escena).
   const beltMat = new B.PBRMetallicRoughnessMaterial('beltM', scene);
-  beltMat.baseTexture = beltTex; beltMat.metallic = 0; beltMat.roughness = 0.66;
+  beltMat.metallic = 0; beltMat.roughness = 0.66;
+  function setBeltColor(hex) {
+    try { beltMat.baseColor = B.Color3.FromHexString(hex); }
+    catch (e) { beltMat.baseColor = new C3(0.09, 0.09, 0.10); }
+  }
+  setBeltColor(opts.beltColor || '#161616');
 
   const v = (pos) => new V3(pos[0] * S, pos[2] * S, pos[1] * S); // CAD -> world
 
@@ -154,15 +148,14 @@ export function createView(canvas, opts = {}) {
     pulleys = [];
     root = new B.TransformNode('machine', scene);
     for (const p of plan.parts) addPart(p);
-    if (plan.meta && plan.meta.belt_color) drawBelt(plan.meta.belt_color);
+    if (plan.meta && plan.meta.belt_color) setBeltColor(plan.meta.belt_color);
     frameCamera();
   }
 
-  // animación: scroll de la banda + giro de poleas + auto-rotación
+  // animación: giro de poleas + auto-rotación
   scene.onBeforeRenderObservable.add(() => {
     const dt = Math.min(engine.getDeltaTime() / 1000, 0.05);
     if (state.anim) {
-      beltTex.uOffset -= 0.6 * dt;
       for (const m of pulleys) m.rotation.y += 1.5 * dt;
     }
     if (state.autoRotate) camera.alpha += 0.0012;
@@ -178,7 +171,7 @@ export function createView(canvas, opts = {}) {
   return {
     scene, engine, camera,
     setPlan,
-    setBeltColor: (hex) => drawBelt(hex),
+    setBeltColor,
     setShowBolts: (on) => { state.showBolts = on; if (root) root.getChildMeshes().forEach((m) => { if (m.metadata?.part?.hideByDefault) m.setEnabled(on); }); },
     setAnim: (on) => { state.anim = on; },
     setAutoRotate: (on) => { state.autoRotate = on; },
