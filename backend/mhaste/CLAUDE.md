@@ -104,11 +104,13 @@ curl -s -X POST http://localhost:8000/generate -H "Content-Type: application/jso
 
 ## Tareas pendientes (priorizadas)
 
-1. **Registrar MC400.** Hay componentes del briefcase PARTcommunity
-   (MC400-201..225, MC400-W300-xxx, drive shaft, MA4080, MC300). Crear
-   `src/mc400.py` con la MISMA interfaz que `mt800.py`
-   (`build / metrics / bom / bom_code / export / export_bom`) y registrarlo en
-   `library.MODELS`. El configurador y la biblioteca lo toman solos.
+1. ~~**Registrar MC400.**~~ ✔ Hecho: `src/mc400.py` (curva de banda, geometría por
+   `revolve` + rodillos radiales) con la misma interfaz que `mt800.py`, registrado
+   en `library.MODELS`. BOM contado de la geometría (90°/R400/W300 → 18 líneas, 178
+   piezas), **idéntico al modelo `mc400` del simulador JS** (front == back).
+   También disponible en el simulador online (selector de modelo). Tests en
+   `tests/test_mc400.py`. Pendiente: refinar dimensiones/códigos contra el briefcase
+   PARTcommunity real (MC400-201..225, drive shaft).
 2. **Refinar BOMs por modelo desde el manual.** `data/manual_parts_index.csv` tiene
    el índice de piezas; falta el despiece exacto por modelo (rasterizar las páginas
    de "parts list" del PDF y mapear cantidades). Ver `docs/SISTEMA-MHASTE.md` §3.

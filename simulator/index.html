@@ -29,8 +29,8 @@
   input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:3px;background:rgba(255,255,255,.13);border-radius:3px;outline:none}
   input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:var(--accent);cursor:pointer;box-shadow:0 0 0 4px rgba(57,208,200,.16)}
   input[type=range]::-moz-range-thumb{width:14px;height:14px;border:none;border-radius:50%;background:var(--accent);cursor:pointer}
-  .seg{display:flex;gap:5px}
-  .seg button{flex:1;font-family:var(--mono);font-size:10.5px;padding:6px 0;background:rgba(255,255,255,.05);border:1px solid var(--line);color:var(--dim);border-radius:7px;cursor:pointer}
+  .seg{display:flex;gap:5px;flex-wrap:wrap}
+  .seg button{flex:1;min-width:34px;font-family:var(--mono);font-size:10.5px;padding:6px 0;background:rgba(255,255,255,.05);border:1px solid var(--line);color:var(--dim);border-radius:7px;cursor:pointer}
   .seg button.on{background:rgba(57,208,200,.16);border-color:rgba(57,208,200,.5);color:var(--accent)}
   .sw{display:flex;gap:6px}
   .sw button{flex:1;height:24px;border-radius:7px;border:2px solid transparent;cursor:pointer}
@@ -63,11 +63,13 @@
   <canvas id="render"></canvas>
   <div class="hud title">
     <div class="k">Conveyone · Simulador de catálogo</div>
-    <h1 id="mname">MT800-<b>Pro</b></h1>
+    <h1 id="mname">—</h1>
     <div class="code" id="code">—</div>
     <div class="stats" id="stats"></div>
   </div>
-  <div class="params"><h2>Parámetros</h2><div id="fields"></div>
+  <div class="params"><h2>Parámetros</h2>
+    <div class="fld"><label>Modelo</label><div class="seg" id="modelsel"></div></div>
+    <div id="fields"></div>
     <button class="btn" id="export">Exportar STEP (B-Rep real)</button>
     <div class="msg" id="exportmsg"></div>
   </div>
@@ -76,7 +78,7 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babylonjs/8.20.0/babylon.js" crossorigin="anonymous"></script>
 <script type="module">
-  import { configure, getModel } from './src/engine/index.js';
+  import { configure, getModel, listModels } from './src/engine/index.js';
   import { createView } from './src/render/babylonView.js';
 
   function showErr(m){ const d=document.getElementById('err'); d.style.display='flex'; d.querySelector('pre').textContent=m; }
@@ -84,44 +86,51 @@
   if(typeof BABYLON==='undefined'){ showErr('Babylon.js no cargó desde el CDN.'); }
 
   try{
-    const MODEL_ID='mt800_pro';
-    const model=getModel(MODEL_ID);
-    const params={...model.defaults()};
-    const view=createView(document.getElementById('render'), { beltColor: params.belt_color });
-    document.getElementById('mname').innerHTML=model.schema.name.split('·')[0];
+    const view=createView(document.getElementById('render'), {});
+    const API=(new URLSearchParams(location.search).get('api')||window.CONVEYONE_API||'').replace(/\/$/,'');
+    let model=null, params=null, last=null, timer=null;
 
-    // --- panel desde el schema del modelo ---
-    const host=document.getElementById('fields');
-    for(const f of model.schema.params){
-      const wrap=document.createElement('div'); wrap.className='fld';
-      if(f.type==='float'||f.type==='int'){
-        wrap.innerHTML=`<label>${f.label} <span class="v" id="v_${f.key}">${params[f.key]}</span></label>
-          <input type="range" id="i_${f.key}" min="${f.min}" max="${f.max}" step="${f.step}" value="${params[f.key]}">`;
-        host.appendChild(wrap);
-        const inp=wrap.querySelector('input'), val=wrap.querySelector('.v');
-        inp.addEventListener('input',()=>{ params[f.key]=parseFloat(inp.value); val.textContent=inp.value; update(true); });
-      } else if(f.type==='enum'){
-        wrap.innerHTML=`<label>${f.label}</label><div class="seg" id="s_${f.key}">`+
-          f.options.map(o=>`<button data-v="${o}"${o===params[f.key]?' class="on"':''}>${o}</button>`).join('')+`</div>`;
-        host.appendChild(wrap);
-        wrap.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{
-          wrap.querySelectorAll('button').forEach(x=>x.classList.remove('on')); b.classList.add('on');
-          params[f.key]=b.dataset.v; update(true);
-        }));
-      } else if(f.type==='bool'){
-        wrap.className='tg'; wrap.innerHTML=`${f.label} <div class="toggle${params[f.key]?' on':''}" id="t_${f.key}"></div>`;
-        host.appendChild(wrap);
-        const t=wrap.querySelector('.toggle');
-        t.addEventListener('click',()=>{ t.classList.toggle('on'); params[f.key]=t.classList.contains('on'); update(true); });
-      } else if(f.type==='color'){
-        const palette=['#161616','#1f5e5a','#1b3a6b','#5a4a1f'];
-        wrap.innerHTML=`<label>${f.label}</label><div class="sw" id="c_${f.key}">`+
-          palette.map(c=>`<button data-c="${c}" style="background:${c}"${c===params[f.key]?' class="on"':''}></button>`).join('')+`</div>`;
-        host.appendChild(wrap);
-        wrap.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{
-          wrap.querySelectorAll('button').forEach(x=>x.classList.remove('on')); b.classList.add('on');
-          params[f.key]=b.dataset.c; view.setBeltColor(b.dataset.c);
-        }));
+    // --- selector de modelo ---
+    const msel=document.getElementById('modelsel');
+    msel.innerHTML=listModels().map((m,i)=>`<button data-id="${m.id}"${i===0?' class="on"':''}>${m.id.toUpperCase().replace('_PRO','')}</button>`).join('');
+    msel.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{
+      msel.querySelectorAll('button').forEach(x=>x.classList.remove('on')); b.classList.add('on');
+      loadModel(b.dataset.id);
+    }));
+
+    function buildFields(){
+      const host=document.getElementById('fields'); host.innerHTML='';
+      for(const f of model.schema.params){
+        const wrap=document.createElement('div'); wrap.className='fld';
+        if(f.type==='float'||f.type==='int'){
+          wrap.innerHTML=`<label>${f.label} <span class="v">${params[f.key]}</span></label>
+            <input type="range" min="${f.min}" max="${f.max}" step="${f.step}" value="${params[f.key]}">`;
+          host.appendChild(wrap);
+          const inp=wrap.querySelector('input'), val=wrap.querySelector('.v');
+          inp.addEventListener('input',()=>{ params[f.key]=parseFloat(inp.value); val.textContent=inp.value; update(true); });
+        } else if(f.type==='enum'){
+          wrap.innerHTML=`<label>${f.label}</label><div class="seg">`+
+            f.options.map(o=>`<button data-v="${o}"${String(o)===String(params[f.key])?' class="on"':''}>${o}</button>`).join('')+`</div>`;
+          host.appendChild(wrap);
+          wrap.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{
+            wrap.querySelectorAll('button').forEach(x=>x.classList.remove('on')); b.classList.add('on');
+            params[f.key]=b.dataset.v; update(true);
+          }));
+        } else if(f.type==='bool'){
+          wrap.className='tg'; wrap.innerHTML=`${f.label} <div class="toggle${params[f.key]?' on':''}"></div>`;
+          host.appendChild(wrap);
+          const t=wrap.querySelector('.toggle');
+          t.addEventListener('click',()=>{ t.classList.toggle('on'); params[f.key]=t.classList.contains('on'); update(true); });
+        } else if(f.type==='color'){
+          const palette=['#161616','#1f5e5a','#1b3a6b','#5a4a1f'];
+          wrap.innerHTML=`<label>${f.label}</label><div class="sw">`+
+            palette.map(c=>`<button data-c="${c}" style="background:${c}"${c===params[f.key]?' class="on"':''}></button>`).join('')+`</div>`;
+          host.appendChild(wrap);
+          wrap.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{
+            wrap.querySelectorAll('button').forEach(x=>x.classList.remove('on')); b.classList.add('on');
+            params[f.key]=b.dataset.c; view.setBeltColor(b.dataset.c);
+          }));
+        }
       }
     }
 
@@ -140,36 +149,46 @@
     }
     function renderInfo(res){
       document.getElementById('code').textContent=res.code;
-      const e=res.plan.meta.envelope_mm;
-      document.getElementById('stats').innerHTML=`bandas <b>${res.plan.meta.lanes}</b> &nbsp; paso <b>${res.plan.meta.pitch_mm}</b> mm &nbsp; envelope <b>${e.join(' × ')}</b> mm`;
+      const m=res.plan.meta, e=m.envelope_mm; let s='';
+      if(m.lanes!=null) s+=`bandas <b>${m.lanes}</b> · paso <b>${m.pitch_mm}</b> mm · `;
+      if(m.rollers!=null) s+=`rodillos <b>${m.rollers}</b> · <b>${m.angle}°</b> · R <b>${m.radius_mm[0]}–${m.radius_mm[1]}</b> · `;
+      s+=`envelope <b>${e.join(' × ')}</b> mm`;
+      document.getElementById('stats').innerHTML=s;
     }
 
-    let timer=null, last=null;
     function update(rebuild){
-      const res=configure(MODEL_ID, params); last=res;
+      const res=configure(model.schema.id, params); last=res;
       if(rebuild){ if(timer)clearTimeout(timer); timer=setTimeout(()=>view.setPlan(res.plan), 40); }
       renderBOM(res.bom, res.total_parts); renderInfo(res);
     }
-    view.setPlan(configure(MODEL_ID, params).plan);
-    update(false);
 
-    // --- exportar STEP real vía backend CadQuery (?api=URL o window.CONVEYONE_API) ---
-    const API=(new URLSearchParams(location.search).get('api')||window.CONVEYONE_API||'').replace(/\/$/,'');
+    function loadModel(id){
+      model=getModel(id); params={...model.defaults()};
+      document.getElementById('mname').innerHTML=model.schema.name.split('·')[0];
+      if(params.belt_color) view.setBeltColor(params.belt_color);
+      buildFields();
+      view.setPlan(configure(id, params).plan);
+      update(false);
+    }
+
+    loadModel(listModels()[0].id);
+
+    // --- exportar STEP real vía backend CadQuery (?api=URL) ---
     const btn=document.getElementById('export'), emsg=document.getElementById('exportmsg');
-    if(!API){ emsg.innerHTML='Para STEP/GLB reales abre con <b>?api=URL</b> del backend M-haste.'; }
+    if(!API){ emsg.innerHTML='Para STEP/GLB reales abre con <b>?api=URL</b> del backend.'; }
     btn.addEventListener('click',()=>{
       if(!API){ emsg.innerHTML='Configura el backend: <b>'+location.pathname+'?api=https://tu-host</b>'; return; }
       btn.disabled=true; emsg.textContent='Generando B-Rep en el backend (CadQuery)…';
       fetch(API+'/generate',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({model:MODEL_ID, params:model.backendParams(params)})})
+        body:JSON.stringify({model:model.schema.id, params:model.backendParams(params)})})
         .then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
         .then(d=>{ const dl=d.downloads;
-          const back=(d.total_parts!=null && d.total_parts!==last.total_parts)
+          const back=(d.total_parts!=null && last && d.total_parts!==last.total_parts)
             ? `<br><span style="color:#ff7a7a">⚠ backend ${d.total_parts} vs sim ${last.total_parts}</span>` : '';
           emsg.innerHTML=`<b style="color:var(--accent2)">${d.code}</b> · ${d.total_parts} piezas<br>`+
             `<a style="color:var(--accent)" href="${API+dl.step}">STEP</a> · `+
-            `<a style="color:var(--accent)" href="${API+dl.glb}">GLB</a> · `+
-            `<a style="color:var(--accent)" href="${API+dl.bom_csv}">BOM csv</a>`+back; })
+            `<a style="color:var(--accent)" href="${API+dl.glb}">GLB</a>`+
+            (dl.bom_csv?` · <a style="color:var(--accent)" href="${API+dl.bom_csv}">BOM csv</a>`:'')+back; })
         .catch(e=>{ emsg.innerHTML='<span style="color:#ff7a7a">Error: '+e.message+'</span>'; })
         .finally(()=>{ btn.disabled=false; });
     });

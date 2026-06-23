@@ -15,6 +15,7 @@ import os
 from dataclasses import asdict
 
 import mt800
+import mc400
 
 LIB = os.environ.get("MHASTE_LIB", os.path.join(os.path.dirname(__file__), "library"))
 
@@ -48,7 +49,16 @@ MODELS = {
         "export": mt800.export,
         "export_bom": mt800.export_bom,
     },
-    # "mc400": { ... }   # se añade registrando otro módulo con la misma interfaz
+    "mc400": {
+        "schema": mc400.MC400_SCHEMA,
+        "params": mc400.MC400Params,
+        "build": mc400.build,
+        "metrics": mc400.metrics,
+        "bom": mc400.bom,
+        "code": mc400.bom_code,
+        "export": mc400.export,
+        "export_bom": mc400.export_bom,
+    },
 }
 
 
