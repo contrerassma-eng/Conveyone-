@@ -1,0 +1,4 @@
+cadquery==2.8.0
+fastapi
+uvicorn[standard]
+trimesh        # opcional: inspección/validación de los GLB
