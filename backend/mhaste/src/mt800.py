@@ -14,6 +14,18 @@ Discrimina 12 categorías de material (perfiles vs accesorios):
     perfil de banda, riel de chasis, placa de cabezal, polea, rodamiento,
     banda, eje, tornillería, motor, placa de motor, pie nivelador, rueda.
 
+BOM contado de la geometría
+---------------------------
+A diferencia de un BOM por fórmula (lo que hace 3Dfindit/PARTcommunity), aquí el
+despiece se **cuenta de la geometría realmente colocada**: cada `asm.add(...)`
+que representa una pieza de catálogo se registra en un *ledger* con su código,
+descripción, material y cantidad. `bom()` agrega ese ledger. Resultado: el BOM
+no puede divergir del modelo —si cambias parámetros o geometría, las cantidades
+se recalculan solas y siguen siendo exactas (p. ej. 140 tornillos reales, no 108
+estimados). Las pocas líneas que no se modelan como sólido (tornillería en T 1:1
+con cada tornillo, conectores estructurales, control board) se marcan con
+`source="derived"` y se derivan de los conteos geométricos.
+
 Ejes (CAD, Z arriba): X=largo  Y=ancho/reparto de bandas  Z=vertical
 """
 
@@ -123,7 +135,8 @@ def pulley(pd, bw, bore):
 
 
 def bearing(pd, bw):
-    """Anillo de rodamiento en cada extremo de la polea."""
+    """Par de anillos de rodamiento (uno en cada extremo de la polea).
+    Modelado como un sólido = 2 rodamientos físicos."""
     R = pd / 2
     ring = cq.Workplane("XZ").circle(R * 0.62).extrude(3).translate((0, bw / 2 - 1.5, 0))
     ring = ring.cut(cq.Workplane("XZ").circle(R * 0.30).extrude(6).translate((0, bw / 2 - 1.5, 0)))
@@ -172,10 +185,52 @@ def motor_unit(shaft_d):
     return plate
 
 
+# banda hueca racetrack
+def _band(span, pulley_d, belt_thk, width):
+    r_in = pulley_d / 2
+    r_out = r_in + belt_thk
+    outer = cq.Workplane("XZ").slot2D(span + 2 * r_out, 2 * r_out).extrude(width / 2, both=True)
+    inner = cq.Workplane("XZ").slot2D(span + 2 * r_in, 2 * r_in).extrude(width, both=True)
+    return outer.cut(inner)
+
+
 # --------------------------------------------------------------------------
-# Ensamblaje
+# Ledger del BOM — registra cada pieza de catálogo a medida que se ensambla
 # --------------------------------------------------------------------------
-def build(params: MT800Params) -> cq.Assembly:
+class _Ledger:
+    """Acumula líneas de BOM ancladas a la geometría colocada."""
+
+    def __init__(self):
+        self.rows = []
+
+    def rec(self, category, code, desc, dim, material, qty=1, source="geom"):
+        self.rows.append({
+            "category": category, "code": code, "desc": desc,
+            "qty": qty, "dim_mm": dim, "material": material, "source": source,
+        })
+
+    def aggregate(self):
+        """Agrupa por código, conserva el orden de primera aparición."""
+        out, order = {}, []
+        for r in self.rows:
+            k = r["code"]
+            if k not in out:
+                out[k] = dict(r)
+                out[k]["qty"] = 0
+                order.append(k)
+            out[k]["qty"] += r["qty"]
+            # si alguna aparición es geométrica, la línea es geométrica
+            if r["source"] == "geom":
+                out[k]["source"] = "geom"
+        return [dict(pos=i + 1, **out[k]) for i, k in enumerate(order)]
+
+
+# --------------------------------------------------------------------------
+# Ensamblaje (geometría + ledger en una sola pasada)
+# --------------------------------------------------------------------------
+def _assemble(params: MT800Params):
+    """Construye el ensamblaje y, en la misma pasada, el ledger del BOM.
+    Devuelve (asm, ledger)."""
     p = params.validate()
     n = p.lanes()
     R = p.pulley_d / 2
@@ -183,6 +238,7 @@ def build(params: MT800Params) -> cq.Assembly:
     bw = p.belt_width
     pitch = p.width / n
     span = Ln - 2 * (R + 14)
+    belt_len = round(2 * span + 3.1416 * (p.pulley_d + 6))  # longitud desarrollada
     lane_y = [-p.width / 2 + pitch / 2 + i * pitch for i in range(n)]
     drive_sign = -1 if p.drive_end == "left" else 1
 
@@ -191,6 +247,9 @@ def build(params: MT800Params) -> cq.Assembly:
     z = railZ + p.rail / 2 + p.profile_h / 2 + R + 6
 
     asm = cq.Assembly(name="mt800_pro")
+    led = _Ledger()
+
+    Ln_i, W_i, bw_i, pd_i = int(Ln), int(p.width), int(bw), int(p.pulley_d)
 
     proto_profile = belt_profile(Ln, p.profile_h, p.profile_w)
     proto_belt = _band(span, p.pulley_d, 3, bw)
@@ -203,32 +262,57 @@ def build(params: MT800Params) -> cq.Assembly:
     for i, y in enumerate(lane_y):
         asm.add(proto_profile, loc=L(V(0, y, z - R - p.profile_h / 2)),
                 name=f"profile_{i}", color=cq.Color(*COL["belt_profile"]))
+        led.rec("Perfil", f"MT800-05-301-W{bw_i}-L{Ln_i}", "Perfil de banda (guía)",
+                f"{bw_i + 5}x80x{Ln_i}", "Aluminio")
+
         asm.add(proto_belt, loc=L(V(0, y, z)), name=f"belt_{i}", color=cq.Color(*COL["belt"]))
+        led.rec("Banda", f"MT800-BELT-PVC-W{bw_i}", f"Banda PVC {bw_i} mm",
+                f"{bw_i}x{belt_len} (perim.)", "PVC")
+
         for sx in (-1, 1):
+            motriz = (sx == drive_sign)
             asm.add(proto_pulley, loc=L(V(sx * span / 2, y, z)),
                     name=f"pulley_{i}_{sx}", color=cq.Color(*COL["pulley"]))
+            if motriz:
+                led.rec("Transmisión", f"MT800-PUL-D{pd_i}", "Polea motriz", f"Ø{pd_i}x{bw_i}", "Acero")
+            else:
+                led.rec("Transmisión", f"MT800-PUL-D{pd_i}-I", "Polea idler", f"Ø{pd_i}x{bw_i}", "Acero")
+
             asm.add(proto_bearing, loc=L(V(sx * span / 2, y, z)),
                     name=f"bearing_{i}_{sx}", color=cq.Color(*COL["bearing"]))
+            led.rec("Transmisión", "MT800-BRG-625", "Rodamiento", "Ø16x5", "Acero cromado", qty=2)
+
             for sp in (-1, 1):
                 yb = y + sp * (bw / 2 + p.plate_thk / 2 + 1)
                 px = sx * (span / 2 - plate_span / 2 + R)
                 asm.add(proto_plate, loc=L(V(px, yb, z)),
                         name=f"plate_{i}_{sx}_{sp}", color=cq.Color(*COL["head_plate"]))
+                if motriz:
+                    led.rec("Cabezal", "MTB800-207", "Placa de cabezal motriz", "250x220x6", "Aluminio mecanizado")
+                else:
+                    led.rec("Cabezal", "MTB800-207-I", "Placa de cabezal idler (tensor)", "250x220x6", "Aluminio mecanizado")
                 if p.bolts:
                     for (gx, gz) in grid[::2]:
                         by = yb + sp * (p.plate_thk / 2 + 1)
                         asm.add(proto_bolt, loc=L(V(px + gx, by, z + gz), V(1, 0, 0), 90 if sp > 0 else -90),
                                 name=f"bolt_{i}_{sx}_{sp}_{gx}_{gz}", color=cq.Color(*COL["bolt"]))
+                        led.rec("Tornillería", "DIN912-M5x12", "Tornillo Allen M5", "M5x12", "Acero 8.8")
+                        # cada tornillo lleva su tuerca en T (1:1 con la geometría)
+                        led.rec("Tornillería", "MT800-TN-M5", "Tuerca en T M5", "M5", "Acero", source="derived")
 
     shaft = cq.Workplane("XZ").circle(6).extrude((lane_y[-1] - lane_y[0]) + bw + 40)
     shaft = shaft.translate((drive_sign * span / 2, lane_y[0] - bw / 2 - 20, z))
     asm.add(shaft, name="drive_shaft", color=cq.Color(*COL["shaft"]))
+    led.rec("Transmisión", "MT800-SH-12", "Eje motriz", f"Ø12x{W_i + 40}", "Acero")
 
     mx = drive_sign * (span / 2)
     my = lane_y[0] - 70
     asm.add(motor_unit(12), loc=L(V(mx, my + 30, z)), name="motor_plate", color=cq.Color(*COL["motor_plate"]))
+    led.rec("Accionamiento", "MTB800-207-M", "Placa de motor", "95x95x8", "Aluminio")
     gear = cq.Workplane("XY").box(160, 96, 72).translate((mx, my - 30, z))
     asm.add(gear, name="gearbox", color=cq.Color(*COL["motor"]))
+    led.rec("Accionamiento", "MT800-GM-160x72", "Motorreductor", "160x72", "Anodizado")
+    # barril del motor: parte del motorreductor (no se cuenta aparte)
     barrel = cq.Workplane("XZ").circle(36).extrude(70).translate((mx + 6, my - 78, z))
     asm.add(barrel, name="motor_body", color=cq.Color(*COL["motor"]))
 
@@ -236,42 +320,62 @@ def build(params: MT800Params) -> cq.Assembly:
     for yy in (-yExt, yExt):
         asm.add(beam(Ln, "X", p.rail), loc=L(V(0, yy, railZ)),
                 name=f"rail_{yy}", color=cq.Color(*COL["rail"]))
-    for xc in (-span / 2 + R, 0, span / 2 - R):
+        led.rec("Perfil", f"MT800-PF-40-L{Ln_i}", "Riel de chasis (T-slot 40)", f"40x40x{Ln_i}", "Aluminio anodizado")
+    cross_x = (-span / 2 + R, 0, span / 2 - R)
+    for xc in cross_x:
         asm.add(beam(2 * yExt, "Y", p.rail), loc=L(V(xc, 0, railZ - p.rail)),
                 name=f"cross_{xc}", color=cq.Color(*COL["rail"]))
+        led.rec("Perfil", f"MT800-PF-40-W{W_i}", "Travesaño de chasis", f"40x40x{int(2 * yExt)}", "Aluminio anodizado")
 
     if p.side_guides:
         guide = cq.Workplane("YZ").rect(6, 26).extrude(Ln).translate((-Ln / 2, 0, 0))
         for yy in (lane_y[0] - pitch / 2, lane_y[-1] + pitch / 2):
             asm.add(guide, loc=L(V(0, yy, z + R + 8)), name=f"guide_{yy}", color=cq.Color(*COL["rail"]))
+            led.rec("Soporte", f"MT800-LA2-L{Ln_i}", "Guía lateral (LA)", f"6x26x{Ln_i}", "Aluminio")
 
+    n_legs = 0
     if p.understructure == "legs":
         legL = p.leg_height
         for xc in (-span / 2 + R, span / 2 - R):
             for yy in (-yExt, yExt):
                 asm.add(beam(legL, "Z", p.rail), loc=L(V(xc, yy, caster_h + legL / 2)),
                         name=f"leg_{xc}_{yy}", color=cq.Color(*COL["rail"]))
+                led.rec("Perfil", "MTB800-302", "Pata de soporte (UGN)", f"40x40x{int(legL)}", "Aluminio anodizado")
+                n_legs += 1
                 if p.casters:
                     cw = 60
                     wheel = cq.Workplane("YZ").circle(cw / 2).extrude(18, both=True).translate((xc, yy, cw / 2))
                     asm.add(wheel, name=f"wheel_{xc}_{yy}", color=cq.Color(*COL["wheel"]))
+                    led.rec("Soporte", "MT800-CW-60", "Rueda con freno", "Ø60", "Caucho/acero")
+                    # horquilla: parte de la rueda (no se cuenta aparte)
                     fork = cq.Workplane("XY").box(14, 34, cw - 22).translate((xc, yy, cw / 2 + 6))
                     asm.add(fork, name=f"fork_{xc}_{yy}", color=cq.Color(*COL["foot"]))
                 else:
                     foot = cq.Workplane("XY").circle(28).extrude(10).translate((xc, yy, 5))
                     rod = cq.Workplane("XY").circle(7).extrude(40).translate((xc, yy, 25))
                     asm.add(foot.union(rod), name=f"foot_{xc}_{yy}", color=cq.Color(*COL["foot"]))
+                    led.rec("Soporte", "MT800-FT-M12", "Pie nivelador M12", "Ø56", "Acero")
 
+    # --- líneas derivadas (no modeladas como sólido) tras los conteos geométricos ---
+    led.rec("Conector", "MT800-217", "Tope de banda", "45x15x15", "Aluminio", qty=2 * n, source="derived")
+    led.rec("Conector", "MTB800-301", "Soporte de travesaño", "64x28x28", "Aluminio", qty=2 * len(cross_x), source="derived")
+    if n_legs:
+        led.rec("Conector", "MTB800-331", "Conector de esquina", "48x48x36", "Aluminio", qty=n_legs, source="derived")
+    led.rec("Accionamiento", "DM1-M10-M2", "Control board digital M10/M2", "—", "PCB", qty=1, source="derived")
+
+    return asm, led
+
+
+def build(params: MT800Params) -> cq.Assembly:
+    asm, _ = _assemble(params)
     return asm
 
 
-# banda hueca racetrack (igual que antes)
-def _band(span, pulley_d, belt_thk, width):
-    r_in = pulley_d / 2
-    r_out = r_in + belt_thk
-    outer = cq.Workplane("XZ").slot2D(span + 2 * r_out, 2 * r_out).extrude(width / 2, both=True)
-    inner = cq.Workplane("XZ").slot2D(span + 2 * r_in, 2 * r_in).extrude(width, both=True)
-    return outer.cut(inner)
+def bom(params: MT800Params) -> list:
+    """Despiece (BOM) contado de la geometría realmente colocada.
+    Cada línea lleva: pos, category, code, desc, qty, dim_mm, material, source."""
+    _, led = _assemble(params)
+    return led.aggregate()
 
 
 def metrics(params: MT800Params) -> dict:
@@ -279,14 +383,17 @@ def metrics(params: MT800Params) -> dict:
     n = p.lanes()
     base = p.leg_height if p.understructure == "legs" else 60
     total_h = base + p.profile_h + p.pulley_d + 8
+    rows = bom(p)
     return {
-        "code": f"MT800-Pro-FL-A-L{int(p.length)}-W{int(p.width)}-{int(p.belt_width)}T-UGN({p.understructure})",
+        "code": bom_code(p),
         "lanes": n,
         "belt_width_mm": p.belt_width,
         "envelope_mm": [round(p.length, 1), round(p.width + p.rail + 12, 1), round(total_h, 1)],
         "pitch_mm": round(p.width / n, 1),
         "understructure": p.understructure,
         "material_groups": len(COL),
+        "bom_lines": len(rows),
+        "total_parts": sum(r["qty"] for r in rows),
     }
 
 
@@ -297,78 +404,6 @@ def export(asm, stem, ang=0.25, tol=0.06):
     except TypeError:
         asm.export(f"{stem}.glb")
     return {"step": f"{stem}.step", "glb": f"{stem}.glb"}
-
-
-if __name__ == "__main__":
-    import time, os
-    p = MT800Params(length=1400, width=600)
-    t = time.time(); asm = build(p); print("build:", round(time.time() - t, 2), "s")
-    t = time.time(); out = export(asm, "/home/claude/out/mt800_demo"); print("export:", round(time.time() - t, 2), "s")
-    for k, v in out.items():
-        print(f"  {k}: {os.path.getsize(v)//1024} KB")
-    print("metrics:", metrics(p))
-
-
-# --------------------------------------------------------------------------
-# BOM — lista de materiales derivada de los parámetros, con códigos de catálogo
-# --------------------------------------------------------------------------
-def bom(params: MT800Params) -> list:
-    """Genera el despiece (BOM) trazable a los parámetros del configurador.
-    Códigos según el sistema M-haste (MT800 piezas, MTB800 brackets)."""
-    p = params.validate()
-    n = p.lanes()
-    Ln = int(p.length)
-    W = int(p.width)
-    bw = int(p.belt_width)
-    pd = int(p.pulley_d)
-    span = int(Ln - 2 * (p.pulley_d / 2 + 14))
-    belt_len = round(2 * span + 3.1416 * (pd + 6))  # longitud desarrollada
-    legs = p.understructure == "legs"
-
-    rows = []
-    def add(cat, code, desc, qty, dim, mat):
-        rows.append({"pos": len(rows) + 1, "category": cat, "code": code,
-                     "desc": desc, "qty": qty, "dim_mm": dim, "material": mat})
-
-    # --- Perfiles ---
-    add("Perfil", f"MT800-PF-40-L{Ln}", "Riel de chasis (T-slot 40)", 2, f"40x40x{Ln}", "Aluminio anodizado")
-    add("Perfil", f"MT800-PF-40-W{W}", "Travesaño de chasis", 3, f"40x40x{W+92}", "Aluminio anodizado")
-    add("Perfil", f"MT800-05-301-W{bw}-L{Ln}", "Perfil de banda (guía)", n, f"{bw+5}x80x{Ln}", "Aluminio")
-    if legs:
-        add("Perfil", "MTB800-302", "Pata de soporte (UGN)", 4, f"40x40x{int(p.leg_height)}", "Aluminio anodizado")
-
-    # --- Cabezales / accesorios ---
-    add("Cabezal", "MTB800-207", "Placa de cabezal motriz", 2, "250x220x6", "Aluminio mecanizado")
-    add("Cabezal", "MTB800-207-I", "Placa de cabezal idler (tensor)", 2, "250x220x6", "Aluminio mecanizado")
-    add("Conector", "MTB800-331", "Conector de esquina", 4 if legs else 0, "48x48x36", "Aluminio")
-    add("Conector", "MTB800-301", "Soporte de travesaño", 6, "64x28x28", "Aluminio")
-    add("Conector", "MT800-217", "Tope de banda", 2 * n, "45x15x15", "Aluminio")
-
-    # --- Transmisión ---
-    add("Transmisión", f"MT800-PUL-D{pd}", "Polea motriz", n, f"Ø{pd}x{bw}", "Acero")
-    add("Transmisión", f"MT800-PUL-D{pd}-I", "Polea idler", n, f"Ø{pd}x{bw}", "Acero")
-    add("Transmisión", "MT800-BRG-625", "Rodamiento", 4 * n, "Ø16x5", "Acero cromado")
-    add("Transmisión", "MT800-SH-12", "Eje motriz", 1, f"Ø12x{W+40}", "Acero")
-    add("Banda", f"MT800-BELT-PVC-W{bw}", f"Banda PVC {bw} mm", n, f"{bw}x{belt_len} (perim.)", "PVC")
-
-    # --- Accionamiento (DM) ---
-    add("Accionamiento", "MT800-GM-160x72", "Motorreductor", 1, "160x72", "Anodizado")
-    add("Accionamiento", "MTB800-207-M", "Placa de motor", 1, "95x95x8", "Aluminio")
-    add("Accionamiento", "DM1-M10-M2", "Control board digital M10/M2", 1, "—", "PCB")
-
-    # --- Soporte (UGN) ---
-    if legs and p.casters:
-        add("Soporte", "MT800-CW-60", "Rueda con freno", 4, "Ø60", "Caucho/acero")
-    elif legs:
-        add("Soporte", "MT800-FT-M12", "Pie nivelador M12", 4, "Ø56", "Acero")
-    if p.side_guides:
-        add("Soporte", f"MT800-LA2-L{Ln}", "Guía lateral (LA)", 2, f"6x26x{Ln}", "Aluminio")
-
-    # --- Tornillería ---
-    add("Tornillería", "DIN912-M5x12", "Tornillo Allen M5", 12 * n + 24, "M5x12", "Acero 8.8")
-    add("Tornillería", "MT800-TN-M5", "Tuerca en T M5", 12 * n + 24, "M5", "Acero")
-
-    return [r for r in rows if r["qty"] > 0]
 
 
 def bom_code(params: MT800Params) -> str:
@@ -386,10 +421,23 @@ def export_bom(params: MT800Params, stem: str):
     code = bom_code(params)
     with open(f"{stem}.bom.csv", "w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["Pos", "Categoría", "Código", "Descripción", "Cant.", "Dim (mm)", "Material"])
+        w.writerow(["Pos", "Categoría", "Código", "Descripción", "Cant.", "Dim (mm)", "Material", "Origen"])
         for r in rows:
-            w.writerow([r["pos"], r["category"], r["code"], r["desc"], r["qty"], r["dim_mm"], r["material"]])
+            w.writerow([r["pos"], r["category"], r["code"], r["desc"], r["qty"],
+                        r["dim_mm"], r["material"], r["source"]])
     with open(f"{stem}.bom.json", "w") as f:
         json.dump({"code": code, "params": asdict(params), "lines": rows,
                    "total_parts": sum(r["qty"] for r in rows)}, f, indent=2, ensure_ascii=False)
     return {"csv": f"{stem}.bom.csv", "json": f"{stem}.bom.json", "code": code, "lines": rows}
+
+
+if __name__ == "__main__":
+    import time, os
+    p = MT800Params(length=1400, width=600)
+    t = time.time(); asm = build(p); print("build:", round(time.time() - t, 2), "s")
+    t = time.time(); out = export(asm, "/tmp/mt800_demo"); print("export:", round(time.time() - t, 2), "s")
+    for k, v in out.items():
+        print(f"  {k}: {os.path.getsize(v)//1024} KB")
+    rows = bom(p)
+    print(f"BOM: {len(rows)} líneas, {sum(r['qty'] for r in rows)} piezas")
+    print("metrics:", metrics(p))

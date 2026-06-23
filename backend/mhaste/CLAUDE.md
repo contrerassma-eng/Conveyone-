@@ -55,8 +55,17 @@ Perfiles del sistema: secciones **15/28/30 mm** (no 40). Motorreductor **160×72
 
 - **MT800-Pro:** geometría CadQuery calibrada al STEP real (low-profile, banda
   estrecha, ~7 bandas de 25 mm en W600), 12 categorías de material discriminadas.
-- **BOM:** `mt800.bom(params)` → 21 líneas, ~319 piezas para L1400-W600, trazable a
-  parámetros, con códigos de catálogo. Export CSV + JSON.
+- **BOM contado de la geometría:** `mt800.bom(params)` ya no estima por fórmula:
+  un *ledger* registra cada pieza a medida que `build()` la coloca, así el BOM no
+  puede divergir del modelo. Para L1400-W600 → **21 líneas, 407 piezas** (antes la
+  fórmula daba 319: subcontaba 140 tornillos como 108 y 28 placas como 4). Líneas
+  no modeladas (tuercas 1:1, conectores, control board) se marcan `source:"derived"`.
+  Export CSV + JSON. **El BOM en JS del configurador replica estas cantidades 1:1.**
+- **Tests:** `tests/` (pytest) — `test_mt800.py` verifica que el BOM == geometría
+  colocada; `test_api.py` cubre la API con TestClient. `cd src/.. && pytest`.
+- **Deploy:** `Dockerfile` + `../DEPLOY.md` (Railway/Fly, volumen en `/data`).
+- **Visor ↔ API:** el configurador llama al backend con `?api=URL` (botón
+  “Generar CAD”): `POST /generate` y enlaces de descarga STEP/GLB/BOM reales.
 - **Configurador interactivo:** `web/configurador-mt800.html` — sliders/toggles que
   reconstruyen modelo + BOM + código en vivo. Autocontenido.
 - **App + biblioteca:** `src/app.py` + `src/library.py` — genera, archiva, lista,

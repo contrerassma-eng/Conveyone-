@@ -499,6 +499,32 @@
   toggle('#t-explode','exploded');
   toggle('#t-rotate','autoRotate');
 
+  // ---- integración con el backend: genera STEP+GLB REALES (CadQuery) ----
+  // Abre el visor con  ?api=https://tu-host  (o define window.CONVEYONE_API).
+  (function(){
+    const API=(new URLSearchParams(location.search).get('api')||window.CONVEYONE_API||'').replace(/\/$/,'');
+    const host=document.querySelector('.panel'); if(!host) return;
+    const w=document.createElement('div'); w.className='grp'; w.style.marginTop='6px';
+    w.innerHTML='<button id="gen" style="width:100%;padding:8px 0;border-radius:8px;border:1px solid rgba(57,208,200,.5);background:rgba(57,208,200,.16);color:var(--accent);font-family:var(--mono);font-size:11px;cursor:pointer">Generar CAD · STEP+GLB</button>'+
+      '<div id="genmsg" style="margin-top:7px;color:var(--ink-dim);font-family:var(--mono);font-size:9.5px;line-height:1.55;word-break:break-all"></div>';
+    host.appendChild(w);
+    const btn=w.querySelector('#gen'), msg=w.querySelector('#genmsg');
+    function payload(){ return {product:'sorter_multibanda',params:{lanes:CFG.lanes,belt_length:CFG.beltLength,belt_width:CFG.beltWidth,belt_thk:CFG.beltThk,pulley_d:CFG.pulleyR*2,lane_gap:CFG.laneGap,frame_h:CFG.frameH}}; }
+    if(!API){ msg.innerHTML='Vista previa procedural. Para CAD real abre con <b>?api=URL</b> del backend.'; }
+    btn.addEventListener('click', function(){
+      if(!API){ msg.innerHTML='Configura el backend: <b>'+location.pathname+'?api=https://tu-host</b>'; return; }
+      btn.disabled=true; msg.textContent='Generando en el backend (CadQuery)…';
+      fetch(API+'/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload())})
+        .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+        .then(function(d){ const dl=d.downloads;
+          msg.innerHTML='<b style="color:#39d0c8">'+d.key+'</b><br>'+
+            '<a style="color:var(--accent)" href="'+API+dl.step+'">STEP</a> · '+
+            '<a style="color:var(--accent)" href="'+API+dl.glb+'">GLB</a>'; })
+        .catch(function(e){ msg.innerHTML='<span style="color:#ff7a7a">Error: '+e.message+'</span>'; })
+        .finally(function(){ btn.disabled=false; });
+    });
+  })();
+
   // ---- arranque ----
   build();
   let hid=false;

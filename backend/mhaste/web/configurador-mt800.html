@@ -234,33 +234,35 @@
   }
 
   function computeBOM(){
+    // BOM contado de la geometria: MISMAS cantidades que mt800.bom() en el backend.
+    // (el backend las cuenta de los solidos colocados; aqui se replican 1:1)
     var n=Math.max(1,Math.round(C.width/C.belt_pitch));
     var Ln=Math.round(C.length),W=Math.round(C.width),bw=Math.round(C.belt_width),pd=Math.round(C.pulley_d);
     var span=Math.round(Ln-2*(C.pulley_d/2+14)),belt_len=Math.round(2*span+3.1416*(pd+6));
     var legs=C.understructure==='legs',rows=[],pos=0;
     function add(cat,code,desc,qty,dim){if(qty>0)rows.push({pos:++pos,category:cat,code:code,desc:desc,qty:qty,dim:dim});}
-    add('Perfil','MT800-PF-40-L'+Ln,'Riel de chasis (T-slot 40)',2,'40x40x'+Ln);
-    add('Perfil','MT800-PF-40-W'+W,'Travesano de chasis',3,'40x40x'+(W+92));
     add('Perfil','MT800-05-301-W'+bw+'-L'+Ln,'Perfil de banda (guia)',n,(bw+5)+'x80x'+Ln);
-    if(legs)add('Perfil','MTB800-302','Pata de soporte (UGN)',4,'40x40x'+Math.round(C.leg_height));
-    add('Cabezal','MTB800-207','Placa de cabezal motriz',2,'250x220x6');
-    add('Cabezal','MTB800-207-I','Placa de cabezal idler (tensor)',2,'250x220x6');
-    add('Conector','MTB800-331','Conector de esquina',legs?4:0,'48x48x36');
-    add('Conector','MTB800-301','Soporte de travesano',6,'64x28x28');
-    add('Conector','MT800-217','Tope de banda',2*n,'45x15x15');
-    add('Transmision','MT800-PUL-D'+pd,'Polea motriz',n,'D'+pd+'x'+bw);
-    add('Transmision','MT800-PUL-D'+pd+'-I','Polea idler',n,'D'+pd+'x'+bw);
-    add('Transmision','MT800-BRG-625','Rodamiento',4*n,'D16x5');
-    add('Transmision','MT800-SH-12','Eje motriz',1,'D12x'+(W+40));
     add('Banda','MT800-BELT-PVC-W'+bw,'Banda PVC '+bw+' mm',n,bw+'x'+belt_len+' (perim.)');
-    add('Accionamiento','MT800-GM-160x72','Motorreductor',1,'160x72');
+    add('Transmision','MT800-PUL-D'+pd,'Polea motriz',n,'D'+pd+'x'+bw);
+    add('Transmision','MT800-BRG-625','Rodamiento',4*n,'D16x5');            // 2 anillos x 2 extremos x n
+    add('Cabezal','MTB800-207','Placa de cabezal motriz',2*n,'250x220x6');  // 2 por lane (una por lado)
+    add('Transmision','MT800-PUL-D'+pd+'-I','Polea idler',n,'D'+pd+'x'+bw);
+    add('Cabezal','MTB800-207-I','Placa de cabezal idler (tensor)',2*n,'250x220x6');
+    add('Tornilleria','DIN912-M5x12','Tornillo Allen M5',20*n,'M5x12');     // 5 pts x 2 lados x 2 extremos x n
+    add('Tornilleria','MT800-TN-M5','Tuerca en T M5',20*n,'M5');            // 1:1 con cada tornillo
+    add('Transmision','MT800-SH-12','Eje motriz',1,'D12x'+(W+40));
     add('Accionamiento','MTB800-207-M','Placa de motor',1,'95x95x8');
-    add('Accionamiento','DM1-M10-M2','Control board digital M10/M2',1,'-');
+    add('Accionamiento','MT800-GM-160x72','Motorreductor',1,'160x72');
+    add('Perfil','MT800-PF-40-L'+Ln,'Riel de chasis (T-slot 40)',2,'40x40x'+Ln);
+    add('Perfil','MT800-PF-40-W'+W,'Travesano de chasis',3,'40x40x'+(W+52));
+    if(C.side_guides)add('Soporte','MT800-LA2-L'+Ln,'Guia lateral (LA)',2,'6x26x'+Ln);
+    if(legs)add('Perfil','MTB800-302','Pata de soporte (UGN)',4,'40x40x'+Math.round(C.leg_height));
     if(legs&&C.casters)add('Soporte','MT800-CW-60','Rueda con freno',4,'D60');
     else if(legs)add('Soporte','MT800-FT-M12','Pie nivelador M12',4,'D56');
-    if(C.side_guides)add('Soporte','MT800-LA2-L'+Ln,'Guia lateral (LA)',2,'6x26x'+Ln);
-    add('Tornilleria','DIN912-M5x12','Tornillo Allen M5',12*n+24,'M5x12');
-    add('Tornilleria','MT800-TN-M5','Tuerca en T M5',12*n+24,'M5');
+    add('Conector','MT800-217','Tope de banda',2*n,'45x15x15');
+    add('Conector','MTB800-301','Soporte de travesano',6,'64x28x28');
+    if(legs)add('Conector','MTB800-331','Conector de esquina',4,'48x48x36');
+    add('Accionamiento','DM1-M10-M2','Control board digital M10/M2',1,'-');
     return rows;
   }
   function code(){var s=C.understructure==='legs'?'S2':'S0',la=C.side_guides?'LA2':'LA0',ugn=C.understructure==='legs'?'UGN2':'UGN0',dm=C.drive_end==='left'?'DM1':'DM2';
@@ -305,6 +307,35 @@
     document.querySelectorAll('#col button').forEach(function(x){x.classList.remove('on');});b.classList.add('on');C.belt_color=b.dataset.c;drawBelt(C.belt_color);});});
 
   drawBelt(C.belt_color);buildModel();update(false);
+
+  // ---- integración con el backend: genera STEP+GLB+BOM REALES (CadQuery) ----
+  // Abre el configurador con  ?api=https://tu-host  (o define window.CONVEYONE_API).
+  (function(){
+    var API=(new URLSearchParams(location.search).get('api')||window.CONVEYONE_API||'').replace(/\/$/,'');
+    var host=document.querySelector('.params'); if(!host) return;
+    var w=document.createElement('div'); w.className='fld'; w.style.marginTop='6px';
+    w.innerHTML='<button id="gen" style="width:100%;padding:8px 0;border-radius:8px;border:1px solid rgba(57,208,200,.5);background:rgba(57,208,200,.16);color:var(--accent);font-family:var(--mono);font-size:11px;cursor:pointer">Generar CAD · STEP+GLB+BOM</button>'+
+      '<div id="genmsg" style="margin-top:7px;color:var(--dim);font-family:var(--mono);font-size:9.5px;line-height:1.55;word-break:break-all"></div>';
+    host.appendChild(w);
+    var btn=w.querySelector('#gen'), msg=w.querySelector('#genmsg');
+    function payload(){return {model:'mt800_pro',params:{length:C.length,width:C.width,belt_width:C.belt_width,belt_pitch:C.belt_pitch,pulley_d:C.pulley_d,understructure:C.understructure,leg_height:C.leg_height,drive_end:C.drive_end,side_guides:C.side_guides,casters:C.casters}};}
+    if(!API){ msg.innerHTML='Vista previa procedural. Para CAD real abre con <b>?api=URL</b> del backend.'; }
+    btn.addEventListener('click',function(){
+      if(!API){ msg.innerHTML='Configura el backend: <b>'+location.pathname+'?api=https://tu-host</b>'; return; }
+      btn.disabled=true; msg.textContent='Generando en el backend (CadQuery)…';
+      fetch(API+'/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload())})
+        .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+        .then(function(d){ var dl=d.downloads;
+          msg.innerHTML='<b style="color:var(--accent2)">'+d.code+'</b> · '+d.total_parts+' piezas<br>'+
+            '<a style="color:var(--accent)" href="'+API+dl.step+'">STEP</a> · '+
+            '<a style="color:var(--accent)" href="'+API+dl.glb+'">GLB</a> · '+
+            '<a style="color:var(--accent)" href="'+API+dl.bom_csv+'">BOM csv</a> · '+
+            '<a style="color:var(--accent)" href="'+API+dl.bom_json+'">json</a>'; })
+        .catch(function(e){ msg.innerHTML='<span style="color:#ff7a7a">Error: '+e.message+'</span>'; })
+        .finally(function(){ btn.disabled=false; });
+    });
+  })();
+
   document.getElementById('loader').classList.add('hidden');
   engine.runRenderLoop(function(){scene.render();});window.addEventListener('resize',function(){engine.resize();});
   }catch(err){showErr((err&&err.stack)?err.stack:String(err));}

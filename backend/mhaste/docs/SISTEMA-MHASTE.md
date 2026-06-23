@@ -68,13 +68,21 @@ ensamble mide **160×72 mm**.
 
 ## 3. BOM — generación
 
-`mt800.bom(params)` deriva el despiece de los parámetros, con cantidades en
-función del nº de bandas (W/paso), el largo y las opciones. Salida en CSV y JSON.
+`mt800.bom(params)` **cuenta el despiece de la geometría realmente colocada**: un
+ledger registra cada pieza de catálogo a medida que `build()` la añade al
+ensamblaje, y `bom()` lo agrega. A diferencia del BOM por fórmula de
+3Dfindit/PARTcommunity, aquí las cantidades **no pueden divergir del modelo** (si
+cambias parámetros o geometría se recalculan solas y siguen exactas). Las pocas
+líneas que no se modelan como sólido (tuerca en T 1:1 con cada tornillo,
+conectores estructurales, control board) se marcan `source:"derived"`. Salida en
+CSV y JSON.
 
-Ejemplo (`L1400-W600-25T`, 7 bandas) → **21 líneas, 319 piezas**, agrupadas en
+Ejemplo (`L1400-W600-25T`, 7 bandas) → **21 líneas, 407 piezas**, agrupadas en
 Perfil · Cabezal · Conector · Transmisión · Banda · Accionamiento · Soporte ·
 Tornillería. Cada línea lleva código de catálogo, descripción, cantidad,
-dimensión y material.
+dimensión, material y origen (`geom`/`derived`). Cada línea `geom` corresponde
+1:1 con sólidos del ensamblaje (p. ej. **140 tornillos reales, no 108** estimados;
+**28 placas de cabezal, no 4**).
 
 ---
 
