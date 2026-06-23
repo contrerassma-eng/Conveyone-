@@ -58,7 +58,10 @@ npx http-server . -p 8090         # o: python3 -m http.server 8090
 - **MT800-Pro**: motor + plan + BOM (407 piezas) + render + exportación STEP. ✔
 - **MC400** (curva de banda): motor + plan + BOM (90°/R400/W300 → 178 piezas) +
   render (rodillos radiales, bastidores en arco, banda sectorial) + STEP. ✔
-- Selector de modelo en `index.html` (MT800 / MC400).
+- **MB400** (módulo de banda modular): motor + plan + BOM (L2000/W400 → 404 piezas,
+  incl. módulos de banda) + render (piñones, tiras de desgaste) + STEP. ✔
+- Selector de modelo en `index.html` (MT800 / MC400 / MB400).
+- Vista: ocultar controles (tecla H), ver tornillería, auto-rotación, animación.
 - Tests `node --test` (17 verdes): el **BOM == piezas colocadas** y coincide con el
   backend (MT800 407 / 21 líneas; MC400 178 / 18 líneas).
 
