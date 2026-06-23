@@ -21,6 +21,8 @@ const MAT = {
   motor_plate:  [0.81, 0.82, 0.84, 0.85, 0.35],
   foot:         [0.34, 0.35, 0.38, 0.70, 0.50],
   wheel:        [0.12, 0.12, 0.13, 0.10, 0.60],
+  detail:       [0.16, 0.16, 0.18, 0.40, 0.55], // ranuras / barrenos / cubos
+  flange:       [0.85, 0.86, 0.88, 0.95, 0.30], // pestañas de polea/rodillo
 };
 
 export function createView(canvas, opts = {}) {
@@ -125,7 +127,7 @@ export function createView(canvas, opts = {}) {
       mesh = MB.CreateBox(p.id, dim, scene);
       mesh.position = v(p.pos);
     } else if (p.kind === 'cyl') {
-      mesh = MB.CreateCylinder(p.id, { diameter: p.args.d * S, height: p.args.len * S, tessellation: 24 }, scene);
+      mesh = MB.CreateCylinder(p.id, { diameter: p.args.d * S, height: p.args.len * S, tessellation: 32 }, scene);
       if (p.dir) {
         orientToDir(mesh, new V3(p.dir[0], p.dir[2], p.dir[1])); // CAD dir -> world
       } else if (p.axis === 'Y') { mesh.rotation.x = Math.PI / 2; }
@@ -158,6 +160,38 @@ export function createView(canvas, opts = {}) {
     mesh.parent = root;
     if (shadow) shadow.addShadowCaster(mesh, true);
     mesh.metadata = { part: p };
+    try { addDetail(p, mesh); } catch (e) { /* el detalle es opcional; nunca rompe la escena */ }
+  }
+
+  // detalle de pieza (hijos parentados al mesh -> heredan su orientación)
+  function addDetail(p, mesh) {
+    const MB = B.MeshBuilder;
+    const cyl = (opts, matKey, pos) => {
+      const m = MB.CreateCylinder('d', opts, scene);
+      m.material = mat(matKey); m.parent = mesh; if (pos) m.position = pos; m.isPickable = false;
+      if (shadow) shadow.addShadowCaster(m, true);
+    };
+    const box = (w, h, dp, matKey, pos) => {
+      const m = MB.CreateBox('g', { width: w, height: h, depth: dp }, scene);
+      m.material = mat(matKey); m.parent = mesh; m.position = pos; m.isPickable = false;
+    };
+    if (p.kind === 'cyl') {
+      const d = p.args.d * S, len = p.args.len * S;
+      if (/^(pulley|roller)/.test(p.id)) {            // poleas / rodillos: pestañas + barreno
+        cyl({ diameter: d * 1.12, height: 2 * S, tessellation: 30 }, 'flange', new V3(0, len / 2, 0));
+        cyl({ diameter: d * 1.12, height: 2 * S, tessellation: 30 }, 'flange', new V3(0, -len / 2, 0));
+        cyl({ diameter: d * 0.42, height: len * 1.04, tessellation: 20 }, 'detail');
+      } else if (/^bearing/.test(p.id)) {             // rodamiento: pista interior
+        cyl({ diameter: d * 0.55, height: len * 1.02, tessellation: 20 }, 'detail');
+      } else if (/^wheel/.test(p.id)) {               // rueda: cubo central
+        cyl({ diameter: d * 0.4, height: len * 1.06, tessellation: 18 }, 'flange');
+      }
+    } else if (p.kind === 'tslot') {                  // perfil: ranura en las 4 caras
+      const side = p.args.side * S, L = p.args.len * S * 0.96, t = 0.06 * side, g = 0.34 * side, h = side / 2;
+      if (p.axis === 'X') { box(L, t, g, 'detail', new V3(0, h, 0)); box(L, t, g, 'detail', new V3(0, -h, 0)); box(L, g, t, 'detail', new V3(0, 0, h)); box(L, g, t, 'detail', new V3(0, 0, -h)); }
+      else if (p.axis === 'Z') { box(t, L, g, 'detail', new V3(h, 0, 0)); box(t, L, g, 'detail', new V3(-h, 0, 0)); box(g, L, t, 'detail', new V3(0, 0, h)); box(g, L, t, 'detail', new V3(0, 0, -h)); }
+      else { box(t, g, L, 'detail', new V3(h, 0, 0)); box(t, g, L, 'detail', new V3(-h, 0, 0)); box(g, t, L, 'detail', new V3(0, h, 0)); box(g, t, L, 'detail', new V3(0, -h, 0)); }
+    }
   }
 
   function frameCamera() {
