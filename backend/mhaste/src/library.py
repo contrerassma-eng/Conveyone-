@@ -16,6 +16,7 @@ from dataclasses import asdict
 
 import mt800
 import mc400
+import mb400
 
 LIB = os.environ.get("MHASTE_LIB", os.path.join(os.path.dirname(__file__), "library"))
 
@@ -58,6 +59,16 @@ MODELS = {
         "code": mc400.bom_code,
         "export": mc400.export,
         "export_bom": mc400.export_bom,
+    },
+    "mb400": {
+        "schema": mb400.MB400_SCHEMA,
+        "params": mb400.MB400Params,
+        "build": mb400.build,
+        "metrics": mb400.metrics,
+        "bom": mb400.bom,
+        "code": mb400.bom_code,
+        "export": mb400.export,
+        "export_bom": mb400.export_bom,
     },
 }
 
