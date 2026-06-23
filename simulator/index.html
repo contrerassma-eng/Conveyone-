@@ -59,12 +59,13 @@
   #err pre{max-width:90%;white-space:pre-wrap;word-break:break-word;font-family:var(--mono);font-size:11px;color:var(--dim);background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:10px;padding:13px}
   .vista{border-top:1px solid var(--line);margin-top:6px;padding-top:10px}
   .ghost{width:100%;padding:8px 0;border-radius:8px;border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--dim);font-family:var(--mono);font-size:10.5px;cursor:pointer;margin-top:4px}
-  #showui{position:fixed;right:14px;bottom:14px;z-index:8;display:none;width:40px;height:40px;border-radius:50%;
-    border:1px solid var(--line);background:var(--panel);color:var(--accent);font-size:16px;cursor:pointer;
+  #uitoggle{position:fixed;left:50%;transform:translateX(-50%);bottom:14px;z-index:30;
+    padding:9px 16px;border-radius:22px;border:1px solid rgba(57,208,200,.5);background:var(--panel);color:var(--accent);
+    font-family:var(--mono);font-size:11px;letter-spacing:.04em;cursor:pointer;
     backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);box-shadow:0 10px 30px rgba(0,0,0,.45)}
   body.clean .params,body.clean .bom,body.clean .title,body.clean .hint{display:none!important}
-  body.clean #showui{display:block}
-  @media (max-width:820px){.title{right:16px;left:12px}.bom{right:10px;left:10px;width:auto;top:auto;bottom:10px;max-height:34vh}.params{left:10px;right:10px;width:auto;bottom:calc(34vh + 18px);max-height:42vh}}
+  @media (max-width:820px){.title{right:16px;left:12px}.bom{right:10px;left:10px;width:auto;top:auto;bottom:10px;max-height:34vh}.params{left:10px;right:10px;width:auto;bottom:calc(34vh + 18px);max-height:42vh}
+    #uitoggle{left:auto;right:10px;bottom:auto;top:60px;transform:none}}
 </style></head>
 <body>
   <canvas id="render"></canvas>
@@ -81,13 +82,12 @@
       <div class="tg">Ver tornillería <div class="toggle" id="v_bolts"></div></div>
       <div class="tg">Auto-rotación <div class="toggle on" id="v_rot"></div></div>
       <div class="tg">Animación <div class="toggle on" id="v_anim"></div></div>
-      <button class="ghost" id="hideui">Ocultar controles (H)</button>
     </div>
     <button class="btn" id="export" style="margin-top:8px">Exportar STEP (B-Rep real)</button>
     <div class="msg" id="exportmsg"></div>
   </div>
   <div class="bom"><div class="head"><h2>Despiece · BOM</h2><span class="tot" id="tot"></span></div><div class="body" id="bbody"></div></div>
-  <button id="showui" title="Mostrar controles (H)">⚙</button>
+  <button id="uitoggle" title="Ocultar/mostrar controles (H)">Ocultar panel</button>
   <div id="err"><h2>Error</h2><pre></pre></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babylonjs/8.20.0/babylon.js" crossorigin="anonymous"></script>
@@ -194,10 +194,10 @@
     vtoggle('v_rot',   (on)=>view.setAutoRotate(on));
     vtoggle('v_anim',  (on)=>view.setAnim(on));
 
-    // --- ocultar / mostrar controles (botón + tecla H) ---
-    function setClean(on){ document.body.classList.toggle('clean', on); }
-    document.getElementById('hideui').addEventListener('click', ()=>setClean(true));
-    document.getElementById('showui').addEventListener('click', ()=>setClean(false));
+    // --- ocultar / mostrar controles (botón flotante siempre visible + tecla H) ---
+    const uitoggle=document.getElementById('uitoggle');
+    function setClean(on){ document.body.classList.toggle('clean', on); uitoggle.textContent = on ? 'Mostrar panel' : 'Ocultar panel'; }
+    uitoggle.addEventListener('click', ()=> setClean(!document.body.classList.contains('clean')));
     window.addEventListener('keydown', (e)=>{ if((e.key==='h'||e.key==='H') && !/input|textarea/i.test(e.target.tagName)) setClean(!document.body.classList.contains('clean')); });
 
     // --- exportar STEP real vía backend CadQuery (?api=URL) ---
