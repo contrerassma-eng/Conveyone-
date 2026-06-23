@@ -99,12 +99,24 @@ export function createView(canvas, opts = {}) {
     return pts;
   }
 
+  // orienta un cilindro (eje local = up de Babylon) hacia una dirección mundial
+  function orientToDir(mesh, wd) {
+    const up = new V3(0, 1, 0);
+    const d = wd.normalizeToNew();
+    const dot = Math.max(-1, Math.min(1, B.Vector3.Dot(up, d)));
+    if (dot > 0.9999) return;
+    if (dot < -0.9999) { mesh.rotation.x = Math.PI; return; }
+    const axis = B.Vector3.Cross(up, d).normalize();
+    mesh.rotationQuaternion = B.Quaternion.RotationAxis(axis, Math.acos(dot));
+  }
+
   function addPart(p) {
     const B2 = B, MB = B.MeshBuilder;
     let mesh = null;
     if (p.kind === 'box') {
       mesh = MB.CreateBox(p.id, { width: p.args.dx * S, height: p.args.dz * S, depth: p.args.dy * S }, scene);
       mesh.position = v(p.pos);
+      if (p.yaw) mesh.rotation.y = -p.yaw; // giro alrededor de la vertical (CAD Z)
     } else if (p.kind === 'tslot') {
       const a = p.args, side = a.side * S, len = a.len * S;
       const dim = p.axis === 'X' ? { width: len, height: side, depth: side }
@@ -114,10 +126,25 @@ export function createView(canvas, opts = {}) {
       mesh.position = v(p.pos);
     } else if (p.kind === 'cyl') {
       mesh = MB.CreateCylinder(p.id, { diameter: p.args.d * S, height: p.args.len * S, tessellation: 24 }, scene);
-      if (p.axis === 'Y') mesh.rotation.x = Math.PI / 2;       // CAD Y -> world Z
-      else if (p.axis === 'X') mesh.rotation.z = Math.PI / 2;  // CAD X -> world X
+      if (p.dir) {
+        orientToDir(mesh, new V3(p.dir[0], p.dir[2], p.dir[1])); // CAD dir -> world
+      } else if (p.axis === 'Y') { mesh.rotation.x = Math.PI / 2; }
+      else if (p.axis === 'X') { mesh.rotation.z = Math.PI / 2; }
       mesh.position = v(p.pos);
-      if ((p.mat === 'pulley')) pulleys.push(mesh);
+      if (p.mat === 'pulley' && p.axis) pulleys.push(mesh); // solo poleas rectas se animan
+    } else if (p.kind === 'arc') {
+      const a = p.args, seg = Math.max(8, Math.round((a.a1 - a.a0) / 0.1));
+      const path = [];
+      for (let i = 0; i <= seg; i++) { const t = a.a0 + (a.a1 - a.a0) * i / seg; path.push(new V3(a.radius * Math.cos(t) * S, p.pos[2] * S, a.radius * Math.sin(t) * S)); }
+      mesh = MB.CreateTube(p.id, { path, radius: Math.max(a.w, a.h) / 2 * S, tessellation: 10 }, scene);
+    } else if (p.kind === 'beltArc') {
+      const a = p.args, seg = Math.max(8, Math.round((a.a1 - a.a0) / 0.08));
+      const inn = [], out = [];
+      for (let i = 0; i <= seg; i++) { const t = a.a0 + (a.a1 - a.a0) * i / seg;
+        inn.push(new V3(a.rIn * Math.cos(t) * S, p.pos[2] * S, a.rIn * Math.sin(t) * S));
+        out.push(new V3(a.rOut * Math.cos(t) * S, p.pos[2] * S, a.rOut * Math.sin(t) * S)); }
+      mesh = MB.CreateRibbon(p.id, { pathArray: [inn, out], sideOrientation: B2.Mesh.DOUBLESIDE }, scene);
+      mesh.material = beltMat;
     } else if (p.kind === 'beltLoop') {
       const seg = 22, pts = racetrack(p.args.span, p.args.r, seg), hw = p.args.width / 2;
       const pl = pts.map(([x, z]) => new V3((p.pos[0] + x) * S, (p.pos[2] + z) * S, (p.pos[1] - hw) * S));
@@ -126,7 +153,7 @@ export function createView(canvas, opts = {}) {
       mesh.material = beltMat;
     }
     if (!mesh) return;
-    if (p.kind !== 'beltLoop') mesh.material = mat(p.mat || 'rail');
+    if (p.kind !== 'beltLoop' && p.kind !== 'beltArc') mesh.material = mat(p.mat || 'rail');
     if (p.hideByDefault) mesh.setEnabled(state.showBolts);
     mesh.parent = root;
     if (shadow) shadow.addShadowCaster(mesh, true);

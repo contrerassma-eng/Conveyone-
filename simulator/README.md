@@ -56,10 +56,13 @@ npx http-server . -p 8090         # o: python3 -m http.server 8090
 ## Estado
 
 - **MT800-Pro**: motor + plan + BOM (407 piezas) + render + exportación STEP. ✔
-- Tests: `test/bom.test.mjs`, `test/plan.test.mjs` (11 verdes) — incluyen que el
-  **BOM == las piezas colocadas** y que coincide con el backend (407 / 21 líneas).
+- **MC400** (curva de banda): motor + plan + BOM (90°/R400/W300 → 178 piezas) +
+  render (rodillos radiales, bastidores en arco, banda sectorial) + STEP. ✔
+- Selector de modelo en `index.html` (MT800 / MC400).
+- Tests `node --test` (17 verdes): el **BOM == piezas colocadas** y coincide con el
+  backend (MT800 407 / 21 líneas; MC400 178 / 18 líneas).
 
 ## Siguiente
 
-- Registrar más modelos (MC400, sorter) en el motor.
+- Registrar el sorter multibanda como modelo del motor.
 - Animación de cajas sobre la banda (capa de simulación de flujo) si se necesita.
