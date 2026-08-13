@@ -2,7 +2,7 @@ name: Deploy Pages
 
 on:
   push:
-    branches: [ main, claude/google-drive-simulator-files-v5ri5z, claude/conveyor-configurator-website-hn604s ]
+    branches: [ main, claude/google-drive-simulator-files-v5ri5z ]
   workflow_dispatch:
 
 permissions:
