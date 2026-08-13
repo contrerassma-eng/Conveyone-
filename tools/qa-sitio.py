@@ -18,9 +18,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 SHOTS = Path("/tmp/qa-sitio")
 
-PAGINAS = ["index.html", "productos.html", "equipo.html?e=acumulacion-24v",
-           "configurador.html", "cotizacion.html", "ingenieria.html",
-           "nosotros.html", "contacto.html"]
+PAGINAS = ["index.html", "productos.html", "temporada.html", "seleccion.html",
+           "equipo.html?e=acumulacion-24v", "configurador.html",
+           "cotizacion.html", "ingenieria.html", "nosotros.html", "contacto.html"]
 
 # ruido esperado sin red: fuentes de Google y el CDN
 IGNORAR = ("fonts.googleapis.com", "fonts.gstatic.com", "cdn.jsdelivr.net")

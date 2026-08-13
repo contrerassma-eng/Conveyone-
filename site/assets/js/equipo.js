@@ -39,6 +39,25 @@ if (eq.engine) {
 }
 $('eqacc').innerHTML = acciones.join('');
 
+/* --- criterio de selección: cuándo sí, cuándo no ------------------------- */
+function bloqueLista(titulo, items, clase) {
+  if (!items || !items.length) return '';
+  return `<div class="decide-b ${clase}">
+    <h4>${titulo}</h4>
+    <ul>${items.map((i) => `<li>${i}</li>`).join('')}</ul>
+  </div>`;
+}
+
+$('eqDecide').innerHTML =
+  bloqueLista('Elígelo cuando', eq.cuando, 'si')
+  + bloqueLista('No es el equipo si', eq.noUsar, 'no')
+  + bloqueLista('Opciones', eq.opciones, 'op');
+
+if (eq.incluye && eq.incluye.length) {
+  $('eqIncluye').innerHTML = `<h3>Qué incluye el equipo</h3>
+    <ul class="lista-check">${eq.incluye.map((i) => `<li>${i}</li>`).join('')}</ul>`;
+}
+
 /* --- visual -------------------------------------------------------------- */
 const img = $('eqimg');
 if (eq.img) {

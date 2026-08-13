@@ -48,6 +48,31 @@ export const EQUIPOS = [
       ['Banda', 'PVC / PU, lisa o con grip'],
     ],
     chips: ['L hasta 6000', 'Banda continua', '3D real'],
+    fuente: 'cad',
+    cuando: [
+      'La caja o bandeja tiene base blanda, irregular o pequeña y no se apoyaría bien sobre rodillos.',
+      'Hay que subir o bajar un desnivel suave: la banda arrastra, el rodillo no.',
+      'El producto no puede girar ni cambiar de orientación en el trayecto.',
+      'Se necesita superficie continua para que nada se cuele entre elementos.',
+    ],
+    noUsar: [
+      'Si el objetivo es acumular producto detenido: la banda sigue rozando abajo y marca la caja. Ahí va acumulación de cero presión.',
+      'En tramos muy largos con carga alta, donde el rodillo motorizado consume menos y se mantiene mejor.',
+    ],
+    incluye: [
+      'Bastidor de perfil de aluminio anodizado con cama deslizante.',
+      'Motorreductor lateral, con lado motriz a elección.',
+      'Patas regulables con pie nivelante.',
+      'Tensor en el extremo de cola.',
+      'Despiece completo del equipo entregado con la máquina.',
+    ],
+    opciones: [
+      'Guías laterales regulables en altura y ancho.',
+      'Banda lisa, con grip o con tacos según pendiente.',
+      'Ejecución lavable para zona húmeda.',
+      'Variador de frecuencia y arranque suave.',
+      'Fotocélula de fin de línea y baliza.',
+    ],
     usos: ['Transporte de cajas', 'Enlace entre salas', 'Alimentación de estaciones'],
   },
   {
@@ -70,6 +95,31 @@ export const EQUIPOS = [
       ['Control', 'Tarjeta por zona, 24 VDC'],
     ],
     chips: ['24 VDC', 'Motor en rodillo', '3D real'],
+    fuente: 'cad',
+    cuando: [
+      'La caja tiene base rígida y plana: cartón corrugado, plástico, bandeja de madera.',
+      'Interesa bajar el consumo: solo arranca la zona que tiene producto encima.',
+      'Se quiere evitar cadenas y transmisiones expuestas por seguridad e higiene.',
+      'La línea va a crecer o cambiar: cada zona es un módulo independiente.',
+    ],
+    noUsar: [
+      'Con producto de base blanda, muy chico o que se cuela entre rodillos: ahí va banda.',
+      'En pendientes fuertes, donde el rodillo no arrastra lo suficiente.',
+    ],
+    incluye: [
+      'Bastidor con largueros laterales y travesaños estructurales.',
+      'Rodillos motorizados 24 VDC con arrastre a los rodillos vecinos.',
+      'Patas regulables ancladas al piso.',
+      'Guardas laterales, brackets y escalerilla portacables.',
+      'Fuente de poder y tarjeta de control por zona.',
+    ],
+    opciones: [
+      'Fotocélula por zona para lógica de arranque y parada.',
+      'Guardas altas para producto inestable.',
+      'Velocidad variable por zona.',
+      'Ejecución en inoxidable para zona húmeda.',
+      'Integración con PLC de planta.',
+    ],
     usos: ['Transporte de cajas', 'Enlace entre zonas', 'Líneas de despacho'],
   },
   {
@@ -92,6 +142,29 @@ export const EQUIPOS = [
       ['Control', 'Sensor + tarjeta por zona'],
     ],
     chips: ['Cero presión', 'Por zonas', '3D real'],
+    fuente: 'cad',
+    cuando: [
+      'Aguas abajo hay un proceso que se detiene: cambio de pallet, encajadora, control de calidad.',
+      'El producto no puede recibir presión: fruta en bandeja, caja liviana, producto apilado.',
+      'Se necesita un pulmón que absorba la variabilidad sin frenar la línea completa.',
+      'Interesa saber cuánto buffer hace falta, no estimarlo a ojo.',
+    ],
+    noUsar: [
+      'Si el flujo nunca se corta aguas abajo: un transporte simple sale más barato.',
+      'Si el producto admite presión y el volumen es bajo: la acumulación por gravedad puede bastar.',
+    ],
+    incluye: [
+      'Todo lo del transporte de rodillo motorizado 24 V.',
+      'Un sensor y una tarjeta por zona de acumulación.',
+      'Lógica de cero presión: cada zona detiene su carga sin tocar la de adelante.',
+      'Dimensionamiento del largo de acumulación según tu cadencia.',
+    ],
+    opciones: [
+      'Modo tren o modo singulado según lo que venga después.',
+      'Zonas de largo distinto en el mismo tramo.',
+      'Liberación por lote para alimentar una encajadora.',
+      'Señalización de pulmón lleno.',
+    ],
     usos: ['Buffer antes de paletizado', 'Absorber cambios de pallet', 'Zonas de espera'],
   },
   {
@@ -114,6 +187,27 @@ export const EQUIPOS = [
       ['Control', '24 VDC / PLC'],
     ],
     chips: ['90°', 'Rodillos Ø63', '3D real'],
+    fuente: 'cad',
+    cuando: [
+      'Hay que sacar producto de la troncal sin detenerla.',
+      'Se reparte a varias líneas o se separa por calidad, destino o calibre.',
+      'El producto debe cambiar de dirección conservando su orientación.',
+    ],
+    noUsar: [
+      'Si el desvío es ocasional y manual: una espuela con tope sale mucho más barato.',
+      'Si la caja es inestable de pie: conviene resolverlo antes del desvío.',
+    ],
+    incluye: [
+      'Módulo de transferencia montado en el hueco del equipo base.',
+      'Rodillos de transferencia Ø 63 mm.',
+      'Fotocélula de posición y lógica de disparo.',
+      'Cálculo de la ventana de admisión con el simulador de flujo.',
+    ],
+    opciones: [
+      'Salida a una o a ambas bandas.',
+      'Disparo automático por lectura o manual por operaria.',
+      'Integración con clasificación por código o por peso.',
+    ],
     usos: ['Clasificación por calidad', 'Reparto a varias líneas', 'Salida a repaso'],
   },
 

@@ -5,6 +5,7 @@ const DESTINO = 'scontreras@conveyone.tech';
 const $ = (id) => document.getElementById(id);
 
 const TIPOS = {
+  urgencia: 'URGENCIA DE TEMPORADA — línea corriendo',
   equipo: 'Un equipo puntual',
   linea: 'Una línea completa',
   ampliacion: 'Ampliar o modificar una línea existente',
@@ -12,11 +13,38 @@ const TIPOS = {
   repuestos: 'Repuestos y mantención',
 };
 
+const params = new URLSearchParams(location.search);
+
 // contacto.html?eq=<slug> llega desde una tarjeta del catálogo
-const eq = new URLSearchParams(location.search).get('eq');
+const eq = params.get('eq');
 if (eq) {
   $('tipo').value = 'equipo';
   $('msg').value = `Me interesa el equipo "${eq}". `;
+}
+
+// contacto.html?tipo=urgencia llega desde la página de temporada
+if (params.get('tipo') === 'urgencia') {
+  $('tipo').value = 'urgencia';
+  ajustaAyuda();
+}
+$('tipo').addEventListener('change', ajustaAyuda);
+
+/* En temporada la conversación es otra: se pide lo mínimo para poder responder
+   con un plazo, no una especificación completa. */
+function ajustaAyuda() {
+  const urgente = $('tipo').value === 'urgencia';
+  const hint = $('hintMsg');
+  const msg = $('msg');
+  if (hint) {
+    hint.textContent = urgente
+      ? 'Dinos qué pieza o tramo falta, la medida que tengas a mano y cuándo tienes ventana para intervenir. Adjunta una foto respondiendo el correo.'
+      : 'Mientras más sepamos del flujo, más precisa es la propuesta.';
+  }
+  if (msg) {
+    msg.placeholder = urgente
+      ? 'Qué se rompió o qué falta, la medida principal, qué producto pasa por ahí y cuándo puedes detener la línea.'
+      : 'Qué producto transportas, qué cadencia necesitas, el espacio disponible y el plazo.';
+  }
 }
 
 $('form').addEventListener('submit', (e) => {

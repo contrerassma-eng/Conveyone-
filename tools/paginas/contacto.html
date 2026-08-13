@@ -43,6 +43,7 @@
           <div class="field">
             <label for="tipo">Tipo de requerimiento</label>
             <select id="tipo" name="tipo">
+              <option value="urgencia">Urgencia de temporada (línea corriendo)</option>
               <option value="equipo">Un equipo puntual</option>
               <option value="linea">Una línea completa</option>
               <option value="ampliacion">Ampliar o modificar una línea existente</option>
@@ -54,6 +55,7 @@
           <div class="field">
             <label for="msg">Describe el requerimiento <span class="req">*</span></label>
             <textarea id="msg" name="msg" required placeholder="Qué producto transportas, qué cadencia necesitas, el espacio disponible y el plazo."></textarea>
+            <span class="hint" id="hintMsg">Mientras más sepamos del flujo, más precisa es la propuesta.</span>
           </div>
 
           <button class="btn" type="submit"><span>Enviar</span><span class="arw">&rarr;</span></button>
