@@ -1,0 +1,171 @@
+<!-- title: Ingeniería de líneas transportadoras — Conveyone SpA -->
+<!-- desc: Simulación de flujo, dimensionamiento de cadencia, levantamiento eléctrico y planificación de montaje para líneas de packing y centros de distribución. -->
+
+<section class="phead">
+  <div class="wrap">
+    <div class="crumb"><a href="index.html">Inicio</a> <span>/</span> <span>Ingeniería</span></div>
+    <h1>Ingeniería de línea</h1>
+    <p>
+      Un transportador se compra por metro. Una línea se compra por lo que
+      produce. Nuestro trabajo es asegurar lo segundo antes de cortar el primer
+      perfil.
+    </p>
+  </div>
+</section>
+
+<section class="sec">
+  <div class="wrap wrap-narrow prose" data-rv>
+    <span class="eyebrow">El problema real</span>
+    <h2>El equipo casi nunca es el problema.</h2>
+    <p class="mt">
+      La mayoría de las líneas que nos llaman no fallan por un transportador malo.
+      Fallan porque la acumulación quedó corta antes del paletizado, porque una
+      espuela mete cajas sin hueco y tranca la troncal, o porque la estación de
+      selección se dimensionó con la cadencia de la primera hora y no con la de
+      la séptima.
+    </p>
+    <p>
+      Esas fallas no se ven en un plano. Se ven cuando la línea corre. Por eso
+      simulamos el flujo completo — con la variabilidad real de la fruta, de las
+      cajas y de las personas — antes de comprometer un diseño.
+    </p>
+  </div>
+</section>
+
+<section class="sec sec-shell">
+  <div class="wrap">
+    <div class="head" data-rv>
+      <span class="eyebrow">Qué entregamos</span>
+      <h2>Cuatro entregables, no una presentación.</h2>
+    </div>
+    <div class="grid g2" data-rv-stagger="0.08">
+      <article class="card" data-rv>
+        <div class="card-ico"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2.5-7 5 14L17.5 12H21"/></svg></div>
+        <h3>Simulación de flujo</h3>
+        <p>
+          Modelo del layout con cajas reales moviéndose: acumulación de cero
+          presión, transferencias con hueco, fuentes con dispersión y ráfagas.
+          Sale el caudal por zona y dónde está el cuello de botella.
+        </p>
+      </article>
+      <article class="card" data-rv>
+        <div class="card-ico"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.4"/><path d="M5 20a7 7 0 0 1 14 0"/></svg></div>
+        <h3>Dimensionamiento de dotación</h3>
+        <p>
+          Cuántas estaciones y cuántas personas se necesitan para la cadencia
+          objetivo, considerando el tiempo base, su variabilidad y la curva de
+          fatiga de la jornada.
+        </p>
+      </article>
+      <article class="card" data-rv>
+        <div class="card-ico"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4.5 13H11l-1 9 8.5-11H12z"/></svg></div>
+        <h3>Levantamiento eléctrico</h3>
+        <p>
+          Tableros, fuentes, setas de emergencia, fotocélulas por zona y rutas de
+          cable cubicadas. Cada sensor con su correlativo y su condición de
+          parada.
+        </p>
+      </article>
+      <article class="card" data-rv>
+        <div class="card-ico"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/><path d="M7 14h5"/></svg></div>
+        <h3>Plan de montaje</h3>
+        <p>
+          Secuencia por zona con orden topológico y ruta crítica: qué se monta
+          primero, qué bloquea a qué y en qué semana se conecta cada tramo.
+        </p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<section class="sec">
+  <div class="wrap">
+    <div class="head center" data-rv>
+      <span class="eyebrow">Números que salen del modelo</span>
+      <h2>Lo que se mide antes de fabricar.</h2>
+    </div>
+    <div class="kpi" data-rv-stagger="0.07">
+      <div class="k" data-rv><b data-count="24">0</b><span>Horas de operación simuladas por escenario</span></div>
+      <div class="k" data-rv><b data-count="100" data-count-suffix=" %">0</b><span>Del despiece contado sobre la geometría</span></div>
+      <div class="k" data-rv><b data-count="4">0</b><span>Modos de admisión evaluados por nodo de traspaso</span></div>
+      <div class="k" data-rv><b data-count="500" data-count-suffix=" mm">0</b><span>Luz máxima entre viguetas de pasarela</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="sec sec-dark">
+  <div class="wrap">
+    <div class="split">
+      <div data-rv="l">
+        <span class="eyebrow on-dark">Método</span>
+        <h2>La física primero, el dibujo después.</h2>
+        <p class="lead on-dark mt-s">
+          El motor de simulación es independiente del render: calcula el
+          movimiento de las cajas sin dibujar nada y se valida solo, contra un
+          conjunto de comprobaciones, antes de cualquier trabajo visual.
+        </p>
+        <p class="lead on-dark mt-s">
+          Esa separación es lo que permite confiar en el resultado. Lo que se ve
+          en pantalla no es una animación bonita: es la consecuencia de un modelo
+          que ya pasó sus pruebas.
+        </p>
+      </div>
+      <div data-rv="r">
+        <ul class="flist">
+          <li><span class="ic"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5L19 7"/></svg></span>
+            <div><b>Cero presión</b><span>Ninguna caja se acerca a la de adelante más que el paso del tramo.</span></div></li>
+          <li><span class="ic"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5L19 7"/></svg></span>
+            <div><b>Transferencia con hueco</b><span>Una caja solo pasa al siguiente tramo si hay espacio real de entrada.</span></div></li>
+          <li><span class="ic"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5L19 7"/></svg></span>
+            <div><b>Generación realista</b><span>Tasa con dispersión y ráfagas, no un flujo constante de laboratorio.</span></div></li>
+          <li><span class="ic"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5L19 7"/></svg></span>
+            <div><b>Detección de cuellos</b><span>Media móvil que separa el flujo singulado normal de la acumulación real.</span></div></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="sec">
+  <div class="wrap wrap-narrow">
+    <div class="head" data-rv>
+      <span class="eyebrow">Preguntas frecuentes</span>
+      <h2>Lo que nos preguntan siempre.</h2>
+    </div>
+    <div class="faq" data-rv>
+      <details>
+        <summary>¿Puedo comprar un solo transportador o tengo que hacer un proyecto?</summary>
+        <div class="a">Puedes comprar un equipo suelto. El configurador está pensado exactamente para eso: eliges el equipo, lo dimensionas y lo cotizas. Los proyectos de línea completa son otro servicio, y parten con la ingeniería.</div>
+      </details>
+      <details>
+        <summary>¿El despiece que muestra el configurador es el real?</summary>
+        <div class="a">Sí. No es una estimación por fórmula: se cuenta pieza por pieza sobre el modelo que se construye con tus parámetros. Si el modelo coloca 140 tornillos, el despiece dice 140.</div>
+      </details>
+      <details>
+        <summary>¿Me entregan el archivo CAD?</summary>
+        <div class="a">Sí, a pedido. Generamos el sólido en STEP con el mismo modelo, para que lo montes en tu propio layout. Pídelo junto con la cotización.</div>
+      </details>
+      <details>
+        <summary>¿Hacen montaje en terreno?</summary>
+        <div class="a">Sí, montaje mecánico y eléctrico, conexionado y puesta en marcha. Se cotiza aparte porque depende del sitio, del acceso y de la ventana de detención de tu planta.</div>
+      </details>
+      <details>
+        <summary>¿Trabajan fuera de Chile?</summary>
+        <div class="a">Sí. Fabricamos en Chile y despachamos a Latinoamérica. Para proyectos fuera del país coordinamos el montaje con equipo local y supervisión nuestra.</div>
+      </details>
+    </div>
+  </div>
+</section>
+
+<section class="sec-tight" style="padding-bottom:clamp(64px,5vw,116px)">
+  <div class="wrap">
+    <div class="cta" data-rv>
+      <h2>Cuéntanos qué tiene que producir tu línea.</h2>
+      <p>Con la cadencia objetivo, el producto y el espacio disponible ya podemos proponerte algo concreto.</p>
+      <div class="cta-btns">
+        <a class="btn" href="contacto.html"><span>Plantear un proyecto</span><span class="arw">&rarr;</span></a>
+        <a class="btn btn-light" href="configurador.html"><span>Configurar un equipo</span></a>
+      </div>
+    </div>
+  </div>
+</section>
