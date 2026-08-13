@@ -45,17 +45,20 @@ function paintCount() {
 function initHeader() {
   const hdr = document.querySelector('.hdr');
   if (!hdr) return;
-  const overHero = hdr.dataset.overHero === '1';
+  // la cabecera va en claro mientras esté sobre una portada oscura
+  const primera = document.querySelector('main > section:first-of-type, main > div:first-of-type');
+  const overHero = !!primera && /hero|phead/.test(primera.className);
   const prog = document.querySelector('.prog');
+  const railProg = document.getElementById('railProg');
 
   const onScroll = () => {
     const y = window.scrollY;
     hdr.classList.toggle('stuck', y > 24);
     if (overHero) hdr.classList.toggle('on-dark', y <= 24);
-    if (prog) {
-      const h = document.documentElement.scrollHeight - window.innerHeight;
-      prog.style.width = (h > 0 ? (y / h) * 100 : 0) + '%';
-    }
+    const h = document.documentElement.scrollHeight - window.innerHeight;
+    const k = h > 0 ? Math.min(1, y / h) : 0;
+    if (prog) prog.style.width = (k * 100) + '%';
+    if (railProg) railProg.style.height = (k * 100) + '%';
   };
   if (overHero) hdr.classList.add('on-dark');
   onScroll();
@@ -76,6 +79,34 @@ function initHeader() {
     const target = (a.getAttribute('href') || '').split('/').pop();
     if (target === here) a.classList.add('active');
   });
+}
+
+/* --- riel lateral: un punto por sección, con la sección activa marcada --- */
+function initRail() {
+  const host = document.getElementById('railDots');
+  if (!host) return;
+  const secs = Array.from(document.querySelectorAll('[data-sec]'));
+  if (!secs.length) { host.remove(); return; }
+
+  host.innerHTML = secs.map((s) =>
+    `<button class="rail-dot" data-id="${s.id}" title="${s.dataset.sec}" aria-label="${s.dataset.sec}"></button>`).join('');
+  const dots = Array.from(host.children);
+
+  host.addEventListener('click', (e) => {
+    const b = e.target.closest('.rail-dot');
+    if (!b) return;
+    const dest = document.getElementById(b.dataset.id);
+    if (dest) dest.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+
+  if (!('IntersectionObserver' in window)) return;
+  const io = new IntersectionObserver((entries) => {
+    entries.forEach((en) => {
+      if (!en.isIntersecting) return;
+      dots.forEach((d) => d.classList.toggle('on', d.dataset.id === en.target.id));
+    });
+  }, { rootMargin: '-45% 0px -50% 0px' });
+  secs.forEach((s) => io.observe(s));
 }
 
 /* --- revelado al hacer scroll ------------------------------------------- */
@@ -182,6 +213,7 @@ function initYear() {
 /* --- arranque ------------------------------------------------------------ */
 function boot() {
   initHeader();
+  initRail();
   initStagger();
   initReveal();
   initCounters();
