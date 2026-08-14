@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ficha de equipo — Conveyone SpA</title>
+<meta name="description" content="Ficha técnica del equipo: modelo 3D real navegable, especificaciones, aplicaciones y cotización.">
+<meta name="theme-color" content="#16233C">
+<link rel="icon" type="image/png" href="assets/img/favicon.png">
+<meta property="og:title" content="Ficha de equipo — Conveyone SpA">
+<meta property="og:description" content="Ficha técnica del equipo: modelo 3D real navegable, especificaciones, aplicaciones y cotización.">
+<meta property="og:type" content="website">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/css/site.css">
+<script type="importmap">
+{"imports":{
+  "three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
+</head>
+<body>
+
+<div class="prog"></div>
+<div class="scrim"></div>
+
+<!-- riel lateral: el sitio se recorre como una línea -->
+<aside class="rail" aria-label="Barra lateral">
+  <span class="rail-prog" id="railProg"></span>
+  <a class="rail-logo" href="index.html" aria-label="Conveyone — inicio">
+    <img src="assets/img/mark.png" alt="Conveyone">
+  </a>
+  <div class="rail-word">CONVEYONE&nbsp;&nbsp;<b>SpA</b></div>
+  <div class="rail-dots" id="railDots"></div>
+  <div class="rail-ig">
+    <a href="mailto:scontreras@conveyone.tech" aria-label="Correo" title="scontreras@conveyone.tech">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4.5" width="19" height="15" rx="2.5"/><path d="m3 6.5 9 6.5 9-6.5"/></svg>
+    </a>
+    <a href="tel:+56979583700" aria-label="Teléfono" title="+56 9 7958 3700">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4.5h4l2 5-2.5 1.5a12 12 0 0 0 5.5 5.5L14.5 14l5 2v4a1 1 0 0 1-1 1A16 16 0 0 1 3 5.5a1 1 0 0 1 1-1Z"/></svg>
+    </a>
+  </div>
+</aside>
+
+<header class="hdr">
+  <div class="wrap">
+    <a class="hdr-logo" href="index.html" aria-label="Conveyone — inicio">
+      <img class="lg-dark" src="assets/img/logo.png" alt="Conveyone SpA">
+      <img class="lg-light" src="assets/img/logo-dark.png" alt="Conveyone SpA">
+    </a>
+    <nav class="nav" aria-label="Principal">
+      <a href="productos.html">Equipos</a>
+      <a href="temporada.html">Repuestos</a>
+      <a href="seleccion.html">Cómo elegir</a>
+      <a href="configurador.html">Configurador</a>
+      <a href="ingenieria.html">Ingeniería</a>
+      <a href="nosotros.html">Nosotros</a>
+      <a href="contacto.html">Contacto</a>
+    </nav>
+    <div class="hdr-actions">
+      <a class="hdr-quote" href="cotizacion.html" data-cart-host data-empty="1">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2 6 6v14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V6l-3-4Z"/><path d="M6 6h12"/><path d="M10 11h4"/></svg>
+        <span class="lbl">Cotización</span>
+        <span class="cnt" data-cart-count>0</span>
+      </a>
+      <button class="burger" aria-label="Abrir menú"><span></span><span></span><span></span></button>
+    </div>
+  </div>
+</header>
+
+<main>
+<section class="phead" id="phead">
+  <div class="phead-bg" style="background-image:url('assets/img/det-estructura.jpg')"></div>
+  <div class="wrap">
+    <div class="crumb">
+      <a href="index.html">Inicio</a> <span>/</span>
+      <a href="productos.html">Equipos</a> <span>/</span>
+      <span id="crumbNom">Equipo</span>
+    </div>
+    <span class="mono" id="eqCod" style="display:block;color:var(--blue-400);font-size:12px;letter-spacing:.12em;margin-bottom:10px"></span>
+    <h1 id="eqNom">—</h1>
+    <p id="eqRes"></p>
+  </div>
+</section>
+
+<section class="sec">
+  <div class="wrap">
+    <div class="eqtop">
+      <!-- visor / imagen -->
+      <div>
+        <div class="eqvis" id="eqvis">
+          <img id="eqimg" alt="">
+          <div class="eqvis-ph" id="eqph" style="display:none"></div>
+          <button class="eqvis-go" id="ver3d" style="display:none">
+            <span class="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 8.5 4.9v9.8L12 21.6 3.5 16.7V6.9z"/><path d="M12 12.2 20.5 7M12 12.2 3.5 7M12 12.2v9.4"/></svg></span>
+            Ver el modelo 3D real
+          </button>
+          <div class="eqvis-load" id="eq3dload" style="display:none">
+            <div class="spin"></div><span class="mono">Cargando el ensamble CAD…</span>
+          </div>
+          <div class="eqvis-hud" id="eq3dhud" style="display:none">
+            <span class="mono">Arrastra para girar · rueda para acercar</span>
+            <button class="eqvis-btn" id="eqGirar">Girar</button>
+          </div>
+        </div>
+        <p class="eqvis-cap mono" id="eqcap"></p>
+      </div>
+
+      <!-- ficha -->
+      <aside class="eqinfo">
+        <h2 class="cfg-h">Especificaciones</h2>
+        <table class="eqspecs" id="eqspecs"></table>
+
+        <h2 class="cfg-h" style="margin-top:26px">Aplicaciones</h2>
+        <div class="pcard-specs" id="equsos"></div>
+
+        <div class="eqacc" id="eqacc"></div>
+      </aside>
+    </div>
+  </div>
+</section>
+
+<section class="sec sec-shell">
+  <div class="wrap">
+    <div class="split" style="align-items:start">
+      <div class="prose" data-rv="l">
+        <span class="eyebrow">Descripción</span>
+        <h2 id="eqTit2">El equipo</h2>
+        <p class="mt" id="eqDesc"></p>
+        <div id="eqIncluye"></div>
+      </div>
+      <div data-rv="r">
+        <div class="decide" id="eqDecide"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= SIMULADOR ZPA ================= -->
+<section class="sec sec-dark" id="secSim" style="display:none">
+  <div class="wrap">
+    <div class="head" data-rv>
+      <span class="eyebrow on-dark">Lógica de acumulación</span>
+      <h2>La lógica corriendo sobre el equipo real.</h2>
+      <p class="lead on-dark">
+        Es el mismo ensamble CAD de arriba, con cajas circulando por sus
+        rodillos. Cada zona tiene su fotocélula, su tarjeta y su motor, y decide
+        sola mirando únicamente a la zona siguiente. Bloquea la salida y cambia
+        de modo para ver la diferencia. Puedes girar la escena con el mouse.
+      </p>
+    </div>
+
+    <div class="sim" data-rv>
+      <div class="sim-barra">
+        <div class="sim-modos" id="simModos">
+          <button class="on" data-m="cero">Cero presión</button>
+          <button data-m="singulado">Singulado</button>
+          <button data-m="tren">Tren / lote</button>
+        </div>
+        <div class="sim-acc">
+          <button class="vopt on" id="simSalida">Salida libre</button>
+          <button class="vopt" id="simPlay">Pausa</button>
+          <button class="vopt" id="simReset">Reiniciar</button>
+        </div>
+      </div>
+      <div class="sim-lienzo" id="simHost">
+        <div class="sim-carga" id="simCarga"><div class="spin"></div><span>Cargando el ensamble CAD…</span></div>
+      </div>
+      <p class="sim-nota mono" id="simNota"></p>
+    </div>
+  </div>
+</section>
+
+<section class="sec">
+  <div class="wrap">
+    <div class="head" data-rv>
+      <span class="eyebrow">También te puede servir</span>
+      <h2>Otros equipos de la línea</h2>
+    </div>
+    <div class="grid g3" id="relacionados"></div>
+  </div>
+</section>
+
+<section class="sec-tight" style="padding-bottom:clamp(64px,5vw,116px)">
+  <div class="wrap">
+    <div class="cta" data-rv>
+      <h2>¿Lo necesitas a otra medida?</h2>
+      <p>Todos nuestros equipos se fabrican a la medida de tu línea. Cuéntanos las restricciones y lo dimensionamos.</p>
+      <div class="cta-btns">
+        <a class="btn" href="contacto.html"><span>Consultar por este equipo</span><span class="arw">&rarr;</span></a>
+        <a class="btn btn-light" href="configurador.html"><span>Abrir el configurador</span></a>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="ftr">
+  <div class="wrap">
+    <div class="ftr-top">
+      <div>
+        <img class="flogo" src="assets/img/logo-dark.png" alt="Conveyone SpA">
+        <p>Diseño, fabricación y montaje de transportadores modulares para la industria agroalimentaria y logística.</p>
+        <div class="paises">
+          <span class="pais">
+            <svg viewBox="0 0 30 20" width="24" height="16" aria-hidden="true">
+              <rect width="30" height="10" fill="#fff"/><rect y="10" width="30" height="10" fill="#D52B1E"/>
+              <rect width="10" height="10" fill="#0039A6"/>
+              <path fill="#fff" d="M5 2.2l.86 2.64h2.78l-2.25 1.63.86 2.64L5 7.48 2.75 9.11l.86-2.64L1.36 4.84h2.78z"/>
+            </svg>
+            Chile
+          </span>
+          <span class="pais">
+            <svg viewBox="0 0 30 20" width="24" height="16" aria-hidden="true">
+              <rect width="10" height="20" fill="#006847"/><rect x="10" width="10" height="20" fill="#fff"/>
+              <rect x="20" width="10" height="20" fill="#CE1126"/>
+              <circle cx="15" cy="10" r="3.1" fill="none" stroke="#8B5A2B" stroke-width="1.1"/>
+            </svg>
+            México
+          </span>
+        </div>
+      </div>
+      <div>
+        <h5>Equipos</h5>
+        <ul>
+          <li><a href="configurador.html?m=mt800_pro">MT800-Pro · Banda estrecha</a></li>
+          <li><a href="configurador.html?m=mb400">MB400 · Banda modular</a></li>
+          <li><a href="configurador.html?m=mc400">MC400 · Curva</a></li>
+          <li><a href="productos.html">Catálogo completo</a></li>
+          <li><a href="seleccion.html">Cómo elegir</a></li>
+        </ul>
+      </div>
+      <div>
+        <h5>Empresa</h5>
+        <ul>
+          <li><a href="temporada.html">Componentes y repuestos</a></li>
+          <li><a href="nosotros.html">Nosotros</a></li>
+          <li><a href="ingenieria.html">Ingeniería</a></li>
+          <li><a href="contacto.html">Contacto</a></li>
+          <li><a href="cotizacion.html">Mi cotización</a></li>
+        </ul>
+      </div>
+      <div>
+        <h5>Contacto</h5>
+        <ul>
+          <li><a href="mailto:scontreras@conveyone.tech">scontreras@conveyone.tech</a></li>
+          <li><a href="tel:+56979583700">+56 9 7958 3700</a></li>
+          <li>Santiago, Chile</li>
+          <li>Ciudad de México, México</li>
+        </ul>
+      </div>
+    </div>
+    <div class="ftr-bt">
+      <span>© <span data-year>2026</span> Conveyone SpA · Chile</span>
+      <span>Transportadores modulares · Plug and play, a medida</span>
+    </div>
+  </div>
+</footer>
+
+<script type="module" src="assets/js/equipo.js"></script>
+<script type="module" src="assets/js/site.js"></script>
+</body>
+</html>

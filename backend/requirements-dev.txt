@@ -1,0 +1,4 @@
+# Dependencias de desarrollo/CI (ambos subsistemas)
+-r sorter/requirements.txt
+pytest
+httpx

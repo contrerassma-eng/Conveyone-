@@ -1,0 +1,98 @@
+<!-- title: Contacto — Conveyone SpA -->
+<!-- desc: Habla con ingeniería de Conveyone SpA. Transportadores modulares, líneas de packing y centros de distribución en Chile y Latinoamérica. -->
+<!-- scripts: <script type="module" src="assets/js/contacto.js"></script>\n -->
+
+<section class="phead">
+  <div class="phead-bg" style="background-image:url('assets/img/det-transferencia.jpg')"></div>
+  <div class="wrap">
+    <div class="crumb"><a href="index.html">Inicio</a> <span>/</span> <span>Contacto</span></div>
+    <h1>Hablemos de tu línea.</h1>
+    <p>
+      Respondemos con una propuesta concreta, no con un catálogo. Mientras más
+      sepamos del producto y de la cadencia, más útil será la primera respuesta.
+    </p>
+  </div>
+</section>
+
+<section class="sec">
+  <div class="wrap">
+    <div class="contacto">
+      <div data-rv="l">
+        <span class="eyebrow">Cuéntanos</span>
+        <h2>Formulario de contacto</h2>
+        <form id="form" class="mt" novalidate>
+          <div class="grid g2" style="gap:0 18px">
+            <div class="field">
+              <label for="nombre">Nombre y apellido <span class="req">*</span></label>
+              <input id="nombre" name="nombre" autocomplete="name" required>
+            </div>
+            <div class="field">
+              <label for="empresa">Empresa <span class="req">*</span></label>
+              <input id="empresa" name="empresa" autocomplete="organization" required>
+            </div>
+            <div class="field">
+              <label for="email">Correo <span class="req">*</span></label>
+              <input id="email" name="email" type="email" autocomplete="email" required>
+            </div>
+            <div class="field">
+              <label for="fono">Teléfono</label>
+              <input id="fono" name="fono" type="tel" autocomplete="tel" placeholder="+56 9 ...">
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="tipo">Tipo de requerimiento</label>
+            <select id="tipo" name="tipo">
+              <option value="urgencia">Repuesto o componente</option>
+              <option value="equipo">Un equipo puntual</option>
+              <option value="linea">Una línea completa</option>
+              <option value="ampliacion">Ampliar o modificar una línea existente</option>
+              <option value="ingenieria">Solo ingeniería / simulación</option>
+              <option value="repuestos">Repuestos y mantención</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label for="msg">Describe el requerimiento <span class="req">*</span></label>
+            <textarea id="msg" name="msg" required placeholder="Qué producto transportas, qué cadencia necesitas, el espacio disponible y el plazo."></textarea>
+            <span class="hint" id="hintMsg">Mientras más sepamos del flujo, más precisa es la propuesta.</span>
+          </div>
+
+          <button class="btn" type="submit"><span>Enviar</span><span class="arw">&rarr;</span></button>
+
+          <div class="note mt-s" id="aviso" style="display:none">
+            <span class="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5L19 7"/></svg></span>
+            <div id="avisoTxt"></div>
+          </div>
+        </form>
+      </div>
+
+      <aside data-rv="r">
+        <div class="card" style="padding:26px 26px 10px">
+          <h3 style="margin-bottom:8px">Contacto directo</h3>
+          <div class="cbox">
+            <span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4.5" width="19" height="15" rx="2.5"/><path d="m3 6.5 9 6.5 9-6.5"/></svg></span>
+            <div><b>Correo</b><a href="mailto:scontreras@conveyone.tech">scontreras@conveyone.tech</a></div>
+          </div>
+          <div class="cbox">
+            <span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4.5h4l2 5-2.5 1.5a12 12 0 0 0 5.5 5.5L14.5 14l5 2v4a1 1 0 0 1-1 1A16 16 0 0 1 3 5.5a1 1 0 0 1 1-1Z"/></svg></span>
+            <div><b>Teléfono</b><a href="tel:+56979583700">+56 9 7958 3700</a></div>
+          </div>
+          <div class="cbox">
+            <span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s7-5.7 7-11a7 7 0 1 0-14 0c0 5.3 7 11 7 11Z"/><circle cx="12" cy="10" r="2.6"/></svg></span>
+            <div><b>Ubicación</b><span class="v">Santiago, Chile</span></div>
+          </div>
+        </div>
+
+        <div class="note mt" style="align-items:flex-start">
+          <span class="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.6v.6"/></svg></span>
+          <div>
+            <b>¿Ya sabes qué equipo necesitas?</b><br>
+            Configúralo en línea y mándanos la lista con el despiece incluido.
+            <a href="configurador.html" style="color:var(--blue);font-weight:600">Abrir el configurador &rarr;</a>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </div>
+</section>

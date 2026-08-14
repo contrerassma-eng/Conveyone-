@@ -1,0 +1,7 @@
+library/
+__pycache__/
+*.pyc
+*.pdf
+*.zip
+*.step
+*.glb

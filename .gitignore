@@ -1,3 +1,7 @@
 node_modules/
 *.log
 .DS_Store
+
+# artefactos de las herramientas de render/QA del sitio
+.render-stage/
+.render-glb/

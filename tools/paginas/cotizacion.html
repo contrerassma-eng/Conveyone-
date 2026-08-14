@@ -1,0 +1,82 @@
+<!-- title: Mi cotización — Conveyone SpA -->
+<!-- desc: Revisa los equipos que configuraste y envíanos la solicitud de cotización con el despiece completo. -->
+<!-- scripts: <script type="module" src="assets/js/cotizacion.js"></script>\n -->
+
+<section class="phead">
+  <div class="phead-bg" style="background-image:url('assets/img/det-motriz.jpg')"></div>
+  <div class="wrap">
+    <div class="crumb"><a href="index.html">Inicio</a> <span>/</span> <span>Mi cotización</span></div>
+    <h1>Mi cotización</h1>
+    <p>
+      Estos son los equipos que configuraste. Envíanos la lista y te respondemos
+      con precio, plazo de fabricación y condiciones de montaje.
+    </p>
+  </div>
+</section>
+
+<section class="sec">
+  <div class="wrap">
+    <div class="cot">
+      <!-- lista de equipos -->
+      <div>
+        <div id="lista"></div>
+
+        <div class="cot-vacia" id="vacia">
+          <h3>Todavía no hay equipos en tu lista</h3>
+          <p>Arma tu primer transportador en el configurador: elige el equipo, ajusta las medidas y agrégalo aquí.</p>
+          <a class="btn mt" href="configurador.html"><span>Abrir el configurador</span><span class="arw">&rarr;</span></a>
+        </div>
+
+        <div class="cot-acc" id="acciones" style="display:none">
+          <button class="cot-vaciar" id="vaciar">Vaciar la lista</button>
+          <a class="link-arw" href="configurador.html">Agregar otro equipo <span class="arw">&rarr;</span></a>
+        </div>
+      </div>
+
+      <!-- formulario -->
+      <aside class="cot-form">
+        <h2 class="cfg-h">Tus datos</h2>
+        <form id="form" novalidate>
+          <div class="field">
+            <label for="nombre">Nombre y apellido <span class="req">*</span></label>
+            <input id="nombre" name="nombre" autocomplete="name" required>
+          </div>
+          <div class="field">
+            <label for="empresa">Empresa <span class="req">*</span></label>
+            <input id="empresa" name="empresa" autocomplete="organization" required>
+          </div>
+          <div class="field">
+            <label for="email">Correo <span class="req">*</span></label>
+            <input id="email" name="email" type="email" autocomplete="email" required>
+          </div>
+          <div class="field">
+            <label for="fono">Teléfono</label>
+            <input id="fono" name="fono" type="tel" autocomplete="tel" placeholder="+56 9 ...">
+          </div>
+          <div class="field">
+            <label for="ciudad">Ciudad / región</label>
+            <input id="ciudad" name="ciudad" autocomplete="address-level2">
+          </div>
+          <div class="field">
+            <label for="msg">Contexto del proyecto</label>
+            <textarea id="msg" name="msg" placeholder="Producto a transportar, cadencia esperada, plazo, si necesitas montaje…"></textarea>
+            <span class="hint">Mientras más sepamos del flujo, más precisa es la propuesta.</span>
+          </div>
+
+          <button class="btn" type="submit" style="width:100%"><span>Enviar solicitud</span><span class="arw">&rarr;</span></button>
+
+          <div class="note mt-s" id="aviso" style="display:none">
+            <span class="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5L19 7"/></svg></span>
+            <div id="avisoTxt"></div>
+          </div>
+
+          <p class="cfg-legal">
+            Al enviar se abre tu correo con la solicitud ya redactada, incluyendo el
+            código y el despiece de cada equipo. También puedes escribirnos directo a
+            <a href="mailto:scontreras@conveyone.tech">scontreras@conveyone.tech</a>.
+          </p>
+        </form>
+      </aside>
+    </div>
+  </div>
+</section>

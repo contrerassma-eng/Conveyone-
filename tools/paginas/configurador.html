@@ -1,0 +1,90 @@
+<!-- title: Configurador de transportadores — Conveyone SpA -->
+<!-- desc: Configura tu transportador en línea: mueve los parámetros, mira el modelo 3D, revisa el despiece completo y agrégalo a tu cotización. -->
+<!-- extrahead: <script src="https://cdn.jsdelivr.net/npm/babylonjs@8.20.0/babylon.js" crossorigin="anonymous"></script>\n -->
+<!-- bodyattr: class="app" -->
+<!-- scripts: <script type="module" src="assets/js/configurador.js"></script>\n -->
+
+<div class="cfg">
+
+  <!-- ---------- panel de parámetros ---------- -->
+  <aside class="cfg-side" id="sideParams">
+    <div class="cfg-sec">
+      <h2 class="cfg-h">Equipo</h2>
+      <div class="modelsel" id="modelSel"></div>
+    </div>
+
+    <div class="cfg-sec">
+      <h2 class="cfg-h">Parámetros</h2>
+      <div id="campos"></div>
+    </div>
+
+    <div class="cfg-sec">
+      <h2 class="cfg-h">Vista</h2>
+      <div class="vopts">
+        <button class="vopt" id="vBolts">Tornillería</button>
+        <button class="vopt on" id="vAnim">Animar banda</button>
+        <button class="vopt" id="vRot">Girar</button>
+      </div>
+      <button class="cfg-reset" id="reset">Volver a los valores estándar</button>
+    </div>
+  </aside>
+
+  <!-- ---------- visor ---------- -->
+  <section class="cfg-view">
+    <canvas id="cv"></canvas>
+
+    <div class="cfg-hud top">
+      <div class="hud-code">
+        <span class="k">Código de catálogo</span>
+        <b class="mono" id="code">—</b>
+      </div>
+      <div class="hud-stats mono" id="stats"></div>
+    </div>
+
+    <div class="cfg-hud bottom">
+      <span class="mono hint">Arrastra para girar · rueda para acercar</span>
+    </div>
+
+    <div class="cfg-load" id="cargando">
+      <div class="spin"></div>
+      <span class="mono">Cargando el motor 3D…</span>
+    </div>
+    <div class="cfg-fail" id="fallo">
+      <h3>No se pudo iniciar el visor 3D</h3>
+      <p>Tu navegador o tu red bloquearon el motor gráfico. Puedes seguir configurando: el despiece y el código se calculan igual.</p>
+    </div>
+  </section>
+
+  <!-- ---------- despiece ---------- -->
+  <aside class="cfg-side right" id="sideBom">
+    <div class="cfg-bomhead">
+      <div>
+        <h2 class="cfg-h" style="margin:0">Despiece</h2>
+        <span class="mono tot" id="tot">—</span>
+      </div>
+      <button class="cfg-csv" id="csv" title="Descargar el despiece en CSV">CSV</button>
+    </div>
+    <div class="cfg-bom" id="bom"></div>
+
+    <div class="cfg-add">
+      <label class="qty">
+        <span>Cantidad</span>
+        <input type="number" id="qty" value="1" min="1" max="99">
+      </label>
+      <button class="btn" id="add" style="width:100%"><span>Agregar a mi cotización</span><span class="arw">&rarr;</span></button>
+      <a class="cfg-golist" href="cotizacion.html" id="verLista" style="display:none">Ver mi cotización (<span data-cart-count>0</span>) &rarr;</a>
+      <p class="cfg-legal">
+        El despiece se cuenta pieza por pieza sobre el modelo. La cotización
+        incluye materiales, fabricación y plazo; el montaje se cotiza aparte
+        según el sitio.
+      </p>
+    </div>
+  </aside>
+
+  <!-- ---------- conmutador móvil ---------- -->
+  <nav class="cfg-tabs" role="tablist">
+    <button class="on" data-tab="params">Parámetros</button>
+    <button data-tab="view">Modelo 3D</button>
+    <button data-tab="bom">Despiece</button>
+  </nav>
+</div>

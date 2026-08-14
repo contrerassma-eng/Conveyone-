@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Sorter Multibanda · Conveyone</title>
+<style>
+  :root{
+    --bg:#0e1116; --panel:rgba(20,24,31,.82); --line:rgba(255,255,255,.08);
+    --ink:#e7ebf0; --ink-dim:#8b95a3; --accent:#39d0c8;
+    --mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;
+    --sans:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);
+    font-family:var(--sans);color:var(--ink)}
+  #app{position:fixed;inset:0}
+  #render{width:100%;height:100%;display:block;outline:none;touch-action:none}
+
+  .hud{position:absolute;pointer-events:none;z-index:5}
+  .title{top:18px;left:20px}
+  .title h1{margin:0;font-size:13px;letter-spacing:.18em;font-weight:600;
+    text-transform:uppercase;color:var(--ink)}
+  .title h1 b{color:var(--accent);font-weight:600}
+  .title .meta{margin-top:6px;font-family:var(--mono);font-size:10.5px;
+    letter-spacing:.04em;color:var(--ink-dim);line-height:1.55}
+  .title .meta span{color:#c6cdd6}
+
+  .panel{position:absolute;top:18px;right:18px;width:248px;
+    background:var(--panel);border:1px solid var(--line);border-radius:14px;
+    backdrop-filter:blur(18px) saturate(1.3);-webkit-backdrop-filter:blur(18px) saturate(1.3);
+    padding:14px 14px 16px;pointer-events:auto;z-index:6;
+    box-shadow:0 18px 50px rgba(0,0,0,.45)}
+  .panel .grp{margin-bottom:13px}
+  .panel .grp:last-child{margin-bottom:0}
+  .panel label{display:flex;justify-content:space-between;align-items:baseline;
+    font-family:var(--mono);font-size:10px;letter-spacing:.06em;
+    text-transform:uppercase;color:var(--ink-dim);margin-bottom:7px}
+  .panel label .v{color:var(--accent);font-size:10.5px}
+  input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:3px;
+    background:rgba(255,255,255,.13);border-radius:3px;outline:none;margin:2px 0}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;
+    border-radius:50%;background:var(--accent);cursor:pointer;
+    box-shadow:0 0 0 4px rgba(57,208,200,.16);transition:transform .12s}
+  input[type=range]::-webkit-slider-thumb:active{transform:scale(1.25)}
+  input[type=range]::-moz-range-thumb{width:14px;height:14px;border:none;border-radius:50%;
+    background:var(--accent);cursor:pointer}
+  .seg{display:flex;gap:5px}
+  .seg button{flex:1;font-family:var(--mono);font-size:11px;padding:7px 0;
+    background:rgba(255,255,255,.05);border:1px solid var(--line);color:var(--ink-dim);
+    border-radius:8px;cursor:pointer;transition:.15s}
+  .seg button.on{background:rgba(57,208,200,.16);border-color:rgba(57,208,200,.5);color:var(--accent)}
+  .seg button:active{transform:translateY(1px)}
+  .swatch{display:flex;gap:7px}
+  .swatch button{flex:1;height:26px;border-radius:8px;border:2px solid transparent;cursor:pointer}
+  .swatch button.on{border-color:#fff;box-shadow:0 0 0 3px rgba(255,255,255,.14)}
+  .toggles{display:flex;flex-direction:column;gap:8px}
+  .tg{display:flex;justify-content:space-between;align-items:center;
+    font-family:var(--mono);font-size:10.5px;letter-spacing:.04em;color:#c6cdd6}
+  .sw{position:relative;width:38px;height:21px;border-radius:21px;
+    background:rgba(255,255,255,.12);cursor:pointer;transition:.18s;flex:none}
+  .sw.on{background:var(--accent)}
+  .sw::after{content:"";position:absolute;top:2.5px;left:2.5px;width:16px;height:16px;
+    border-radius:50%;background:#fff;transition:.18s}
+  .sw.on::after{transform:translateX(17px)}
+  .divider{height:1px;background:var(--line);margin:13px -2px}
+
+  .hint{position:absolute;bottom:14px;left:50%;transform:translateX(-50%);
+    font-family:var(--mono);font-size:10px;letter-spacing:.05em;color:var(--ink-dim);
+    pointer-events:none;z-index:5;text-align:center;opacity:.8}
+
+  #loader{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    flex-direction:column;gap:18px;background:var(--bg);z-index:20;transition:opacity .6s}
+  #loader.hidden{opacity:0;pointer-events:none}
+  .spin{width:34px;height:34px;border:2px solid rgba(255,255,255,.1);
+    border-top-color:var(--accent);border-radius:50%;animation:sp 1s linear infinite}
+  #loader p{font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;
+    text-transform:uppercase;color:var(--ink-dim);margin:0}
+  @keyframes sp{to{transform:rotate(360deg)}}
+
+  #err{position:absolute;inset:0;display:none;align-items:center;justify-content:center;
+    flex-direction:column;gap:14px;background:#0e1116;z-index:40;padding:30px;text-align:center}
+  #err h2{margin:0;font-size:14px;letter-spacing:.05em;color:#ff7a7a;font-family:var(--mono)}
+  #err pre{max-width:90%;white-space:pre-wrap;word-break:break-word;font-family:var(--mono);
+    font-size:11px;color:var(--ink-dim);line-height:1.5;background:rgba(255,255,255,.04);
+    border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+
+  @media (max-width:600px){
+    .panel{width:auto;left:12px;right:12px;top:auto;bottom:12px;
+      display:grid;grid-template-columns:1fr 1fr;gap:0 16px}
+    .panel .grp{margin-bottom:10px}
+    .divider{grid-column:1/-1}
+    .title{left:14px;top:12px}
+    .hint{display:none}
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <canvas id="render"></canvas>
+
+  <div class="hud title">
+    <h1>Sorter <b>Multibanda</b> · Conveyone</h1>
+    <div class="meta">
+      <span id="m-lanes">3</span> bandas · paso <span>Min.50</span> · eje motriz <span>&Oslash;20</span><br>
+      motorreductor <span>160&times;72</span> · banda estrecha sincronizada
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="grp">
+      <label>Velocidad de banda <span class="v" id="v-speed">1.0&times;</span></label>
+      <input id="speed" type="range" min="0" max="3" step="0.05" value="1">
+    </div>
+    <div class="grp">
+      <label>N&uacute;mero de bandas <span class="v" id="v-lanes">3</span></label>
+      <div class="seg" id="lanes">
+        <button data-n="2">2</button>
+        <button data-n="3" class="on">3</button>
+        <button data-n="4">4</button>
+        <button data-n="5">5</button>
+      </div>
+    </div>
+    <div class="grp">
+      <label>Banda</label>
+      <div class="swatch" id="belt">
+        <button data-c="#171717" style="background:#171717" class="on"></button>
+        <button data-c="#1f5e5a" style="background:#2aa39a"></button>
+        <button data-c="#1b3a6b" style="background:#2f6cff"></button>
+        <button data-c="#5a4a1f" style="background:#caa23a"></button>
+      </div>
+    </div>
+    <div class="divider"></div>
+    <div class="grp toggles">
+      <div class="tg">Estructura <div class="sw on" id="t-frame"></div></div>
+      <div class="tg">Cajas en tr&aacute;nsito <div class="sw on" id="t-boxes"></div></div>
+      <div class="tg">Vista explosionada <div class="sw" id="t-explode"></div></div>
+      <div class="tg">Auto-rotaci&oacute;n <div class="sw on" id="t-rotate"></div></div>
+    </div>
+  </div>
+
+  <div class="hint">Arrastra para orbitar · rueda / pellizca para zoom</div>
+  <div id="loader"><div class="spin"></div><p>Cargando escena</p></div>
+  <div id="err"><h2>No se pudo iniciar la escena</h2><pre></pre></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babylonjs/8.20.0/babylon.js" crossorigin="anonymous"></script>
+<script>
+(function(){
+  function showErr(m){
+    var d=document.getElementById('err'); if(!d) return;
+    d.style.display='flex'; d.querySelector('pre').textContent=m;
+    var l=document.getElementById('loader'); if(l) l.classList.add('hidden');
+  }
+  window.addEventListener('error', function(e){
+    showErr((e.message||'Error')+(e.filename?('\n@ '+e.filename+':'+e.lineno+':'+e.colno):''));
+  });
+  window.addEventListener('unhandledrejection', function(e){
+    showErr('Promise: '+((e.reason&&e.reason.message)||e.reason));
+  });
+  if(typeof BABYLON==='undefined'){
+    showErr('Babylon.js no cargó desde el CDN.\nAbre este archivo en un navegador con acceso a cdnjs.cloudflare.com.');
+    return;
+  }
+
+  try{
+  const V3=BABYLON.Vector3, C3=BABYLON.Color3;
+  const MB=BABYLON.MeshBuilder, Mesh=BABYLON.Mesh;
+
+  const canvas=document.getElementById('render');
+  const engine=new BABYLON.Engine(canvas, true, {preserveDrawingBuffer:true, stencil:true, antialias:true}, true);
+  const scene=new BABYLON.Scene(engine);
+  scene.clearColor=new BABYLON.Color4(0.80,0.84,0.875,1);
+
+  // ---- parámetros (mm) ----
+  const CFG={
+    lanes:3, beltLength:720, pulleyR:26, beltWidth:46, beltThk:3.2,
+    plateThk:6, plateGap:2.5, laneGap:50, frameH:540, shaftR:10,
+    overhangX:70, marginZ:26, casterH:56, boxH:70,
+    speed:1.0, beltColor:'#171717',
+    showFrame:true, showBoxes:true, exploded:false, autoRotate:true,
+  };
+  const S=0.01;
+
+  // ---- cámara ----
+  const camera=new BABYLON.ArcRotateCamera('cam', -Math.PI/2.35, 1.12, 18, V3.Zero(), scene);
+  camera.attachControl(canvas, true);
+  camera.lowerRadiusLimit=7; camera.upperRadiusLimit=46;
+  camera.lowerBetaLimit=0.18; camera.upperBetaLimit=Math.PI/2-0.04;
+  camera.wheelDeltaPercentage=0.012; camera.pinchDeltaPercentage=0.012;
+  camera.panningSensibility=0; camera.minZ=0.1; camera.maxZ=1000;
+
+  // ---- IBL procedural (sin red): gradiente esférico ----
+  let ibl=null;
+  try{
+    const t=new BABYLON.DynamicTexture('ibl',{width:256,height:256},scene,true);
+    const c=t.getContext();
+    const g=c.createLinearGradient(0,0,0,256);
+    g.addColorStop(0.00,'#eef3f7'); g.addColorStop(0.45,'#ccd6de');
+    g.addColorStop(0.52,'#aab4bd'); g.addColorStop(1.00,'#7c848c');
+    c.fillStyle=g; c.fillRect(0,0,256,256);
+    // un par de reflejos suaves
+    c.fillStyle='rgba(255,255,255,0.5)'; c.beginPath(); c.ellipse(80,70,55,30,0,0,7); c.fill();
+    t.update();
+    t.coordinatesMode=BABYLON.Texture.SPHERICAL_MODE;
+    t.gammaSpace=false;
+    ibl=t; scene.environmentTexture=t; scene.environmentIntensity=0.9;
+  }catch(e){ console.warn('ibl',e); }
+
+  // ---- fondo (cielo de estudio) ----
+  try{
+    const sky=MB.CreateSphere('sky',{diameter:600, sideOrientation:Mesh.BACKSIDE, segments:16}, scene);
+    const sm=new BABYLON.StandardMaterial('skyM', scene);
+    const gt=new BABYLON.DynamicTexture('skyT',{width:8,height:256},scene,true);
+    const gc=gt.getContext();
+    const gg=gc.createLinearGradient(0,0,0,256);
+    gg.addColorStop(0.0,'#cdd9e3'); gg.addColorStop(0.5,'#e9eef2'); gg.addColorStop(1.0,'#b7c0c8');
+    gc.fillStyle=gg; gc.fillRect(0,0,8,256); gt.update();
+    sm.emissiveTexture=gt; sm.disableLighting=true; sm.backFaceCulling=false;
+    sky.material=sm; sky.infiniteDistance=true; sky.isPickable=false;
+  }catch(e){ console.warn('sky',e); }
+
+  // ---- luces ----
+  const hemi=new BABYLON.HemisphericLight('hemi', new V3(0.1,1,0.15), scene);
+  hemi.intensity=0.55; hemi.groundColor=new C3(0.45,0.48,0.53);
+  const key=new BABYLON.DirectionalLight('key', new V3(-0.55,-1,-0.42), scene);
+  key.position=new V3(9,18,7); key.intensity=2.1;
+  const rim=new BABYLON.DirectionalLight('rim', new V3(0.6,-0.45,0.7), scene);
+  rim.intensity=0.7;
+  const fill=new BABYLON.DirectionalLight('fill', new V3(0.2,-0.3,-1.0), scene);
+  fill.intensity=0.55;
+
+  let shadow=null;
+  try{
+    shadow=new BABYLON.ShadowGenerator(1024, key);
+    shadow.useBlurExponentialShadowMap=true; shadow.blurKernel=32;
+    shadow.darkness=0.46; shadow.bias=0.0009;
+  }catch(e){ console.warn('shadow',e); }
+
+  // ---- suelo ----
+  const ground=MB.CreateGround('ground',{width:200,height:200}, scene);
+  const gm=new BABYLON.PBRMetallicRoughnessMaterial('groundM', scene);
+  gm.baseColor=new C3(0.86,0.885,0.905); gm.metallic=0.0; gm.roughness=0.85;
+  ground.material=gm; ground.receiveShadows=true; ground.position.y=0;
+
+  // ---- post-proceso ----
+  try{
+    const dp=new BABYLON.DefaultRenderingPipeline('dp', true, scene, [camera]);
+    dp.fxaaEnabled=true; dp.samples=4; dp.imageProcessingEnabled=true;
+    dp.imageProcessing.toneMappingEnabled=true;
+    dp.imageProcessing.toneMappingType=BABYLON.ImageProcessingConfiguration.TONEMAPPING_ACES;
+    dp.imageProcessing.exposure=1.05; dp.imageProcessing.contrast=1.12;
+  }catch(e){ console.warn('pipeline',e); }
+  try{
+    const ssao=new BABYLON.SSAO2RenderingPipeline('ssao', scene, {ssaoRatio:0.5, blurRatio:0.5}, [camera]);
+    ssao.totalStrength=0.8; ssao.radius=1.4; ssao.base=0.06; ssao.samples=16; ssao.maxZ=250; ssao.expensiveBlur=true;
+  }catch(e){ console.warn('ssao',e); }
+
+  // ---- materiales ----
+  function pbr(name,alb,metal,rough){
+    const m=new BABYLON.PBRMetallicRoughnessMaterial(name, scene);
+    m.baseColor=alb; m.metallic=metal; m.roughness=rough;
+    return m;
+  }
+  const MAT={
+    alu:     pbr('alu',     new C3(0.80,0.815,0.835),0.82,0.50),
+    bracket: pbr('bracket', new C3(0.865,0.875,0.895),0.95,0.32),
+    steel:   pbr('steel',   new C3(0.74,0.76,0.785),0.95,0.26),
+    shaft:   pbr('shaft',   new C3(0.70,0.72,0.745),0.95,0.24),
+    motor:   pbr('motor',   new C3(0.30,0.315,0.345),0.55,0.48),
+    motorBox:pbr('motorBox',new C3(0.355,0.37,0.40),0.65,0.42),
+    wheel:   pbr('wheel',   new C3(0.10,0.105,0.115),0.10,0.62),
+    caster:  pbr('caster',  new C3(0.62,0.63,0.65),0.9,0.36),
+  };
+
+  function drawBelt(ctx,hex){
+    ctx.fillStyle=hex; ctx.fillRect(0,0,512,64);
+    ctx.strokeStyle='rgba(255,255,255,0.05)'; ctx.lineWidth=2;
+    for(let x=0;x<512;x+=128){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,64); ctx.stroke(); }
+    ctx.strokeStyle='rgba(0,0,0,0.22)'; ctx.lineWidth=1;
+    for(let x=64;x<512;x+=128){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,64); ctx.stroke(); }
+  }
+  function beltTexture(hex){
+    const t=new BABYLON.DynamicTexture('belt-'+hex,{width:512,height:64},scene,false);
+    drawBelt(t.getContext(),hex);
+    t.wrapU=BABYLON.Texture.WRAP_ADDRESSMODE; t.wrapV=BABYLON.Texture.CLAMP_ADDRESSMODE;
+    t.uScale=7; t.vScale=1; t.update();
+    return t;
+  }
+
+  function racetrack(L,rad,seg){
+    const pts=[], hx=L/2;
+    for(let i=0;i<=seg;i++){ pts.push([-hx+(i/seg)*L, rad]); }
+    for(let i=1;i<seg;i++){ const a=Math.PI/2-(i/seg)*Math.PI; pts.push([hx+rad*Math.cos(a), rad*Math.sin(a)]); }
+    for(let i=0;i<=seg;i++){ pts.push([hx-(i/seg)*L, -rad]); }
+    for(let i=1;i<seg;i++){ const a=-Math.PI/2-(i/seg)*Math.PI; pts.push([-hx+rad*Math.cos(a), rad*Math.sin(a)]); }
+    return pts;
+  }
+
+  let root=null, beltTex=[], pulleys=[], laneNodes=[], boxes=[], frameNode=null, motorNode=null;
+  function cast(m){ if(shadow&&m) shadow.addShadowCaster(m,true); }
+
+  function buildLane(i, laneZ, geom){
+    const lane=new BABYLON.TransformNode('lane'+i, scene); lane.parent=root;
+    const {L,rb,Yc,bw,pulleyR}=geom;
+
+    const seg=22, pts=racetrack(L,rb,seg);
+    const pl=pts.map(p=>new V3(p[0], Yc+p[1], -bw/2));
+    const pr=pts.map(p=>new V3(p[0], Yc+p[1],  bw/2));
+    const belt=MB.CreateRibbon('belt'+i,{pathArray:[pl,pr], closePath:true, sideOrientation:Mesh.DOUBLESIDE}, scene);
+    const bm=new BABYLON.PBRMetallicRoughnessMaterial('beltM'+i, scene);
+    const tex=beltTexture(CFG.beltColor);
+    bm.baseTexture=tex; bm.baseColor=new C3(1,1,1); bm.metallic=0.0; bm.roughness=0.66;
+    belt.material=bm; belt.parent=lane; beltTex.push(tex); cast(belt);
+
+    [-1,1].forEach(s=>{
+      const spin=new BABYLON.TransformNode('spin'+i+s, scene); spin.parent=lane;
+      spin.position=new V3(s*L/2, Yc, 0);
+      const roll=MB.CreateCylinder('roll',{diameter:pulleyR*2, height:bw, tessellation:28}, scene);
+      roll.rotation.x=Math.PI/2; roll.material=MAT.steel; roll.parent=spin; cast(roll);
+      [-1,1].forEach(e=>{
+        const fl=MB.CreateCylinder('fl',{diameter:pulleyR*2.1, height:4, tessellation:28}, scene);
+        fl.rotation.x=Math.PI/2; fl.position.z=e*(bw/2-2); fl.material=MAT.bracket; fl.parent=spin;
+      });
+      const bolt=MB.CreateCylinder('bolt',{diameter:13, height:bw+10, tessellation:6}, scene);
+      bolt.rotation.x=Math.PI/2; bolt.material=MAT.steel; bolt.parent=spin;
+      pulleys.push({node:spin});
+    });
+
+    [-1,1].forEach(s=>{
+      const z=s*(bw/2+CFG.plateGap+CFG.plateThk/2);
+      const parts=[];
+      const bar=MB.CreateBox('bar',{width:L, height:pulleyR*2, depth:CFG.plateThk}, scene);
+      bar.position=new V3(0,Yc,z); parts.push(bar);
+      [-1,1].forEach(e=>{
+        const d=MB.CreateCylinder('cap',{diameter:pulleyR*2, height:CFG.plateThk, tessellation:28}, scene);
+        d.rotation.x=Math.PI/2; d.position=new V3(e*L/2,Yc,z); parts.push(d);
+      });
+      const plate=Mesh.MergeMeshes(parts,true,true,undefined,false,false);
+      plate.material=MAT.bracket; plate.parent=lane; cast(plate);
+      for(let k=-1;k<=1;k++){
+        const b=MB.CreateCylinder('pb',{diameter:7, height:3, tessellation:8}, scene);
+        b.rotation.x=Math.PI/2; b.position=new V3(k*L*0.3, Yc+pulleyR*0.55, z+s*(CFG.plateThk/2+1));
+        b.material=MAT.steel; b.parent=lane;
+      }
+    });
+
+    lane.position.z=laneZ; laneNodes.push(lane);
+
+    if(CFG.showBoxes){
+      const topY=Yc+rb, n=3;
+      const tints=[[0.80,0.67,0.46],[0.74,0.60,0.40],[0.83,0.72,0.52]];
+      for(let k=0;k<n;k++){
+        const w=80+(k%2)*18, d=bw*0.78, h=CFG.boxH-(k%2)*12;
+        const bx=MB.CreateBox('cargo',{width:w, height:h, depth:d}, scene);
+        bx.material=pbr('cargoM', new C3(tints[k%3][0],tints[k%3][1],tints[k%3][2]),0.0,0.86);
+        const tape=MB.CreateBox('tape',{width:w, height:0.6, depth:d*0.18}, scene);
+        tape.position=new V3(0,h/2+0.3,0); tape.material=pbr('tapeM', new C3(0.55,0.46,0.32),0,0.8); tape.parent=bx;
+        bx.position=new V3(-L/2+(k/n)*L, topY+h/2, 0); bx.parent=lane; cast(bx);
+        boxes.push({mesh:bx, half:L/2});
+      }
+    }
+  }
+
+  function buildDrive(geom){
+    const {Yc,L,lanePositions}=geom;
+    const z0=lanePositions[0], zN=lanePositions[lanePositions.length-1];
+    const motorZ=z0-130;
+    const zStart=motorZ+30, zEnd=zN+CFG.beltWidth/2+14, len=zEnd-zStart;
+    const shaft=MB.CreateCylinder('shaft',{diameter:CFG.shaftR*2, height:len, tessellation:20}, scene);
+    shaft.rotation.x=Math.PI/2; shaft.position=new V3(-L/2,Yc,(zStart+zEnd)/2);
+    shaft.material=MAT.shaft; shaft.parent=root; cast(shaft);
+    lanePositions.forEach(z=>{
+      const c=MB.CreateCylinder('cpl',{diameter:CFG.shaftR*3.1, height:22, tessellation:16}, scene);
+      c.rotation.x=Math.PI/2; c.position=new V3(-L/2,Yc,z); c.material=MAT.steel; c.parent=root;
+    });
+    motorNode=new BABYLON.TransformNode('motor', scene); motorNode.parent=root;
+    const gbX=-L/2, gbZ=motorZ;
+    const gear=MB.CreateBox('gearbox',{width:160, height:104, depth:96}, scene);
+    gear.position=new V3(gbX,Yc-6,gbZ); gear.material=MAT.motorBox; gear.parent=motorNode; cast(gear);
+    const barrel=MB.CreateCylinder('barrel',{diameter:86, height:150, tessellation:28}, scene);
+    barrel.rotation.x=Math.PI/2; barrel.position=new V3(gbX+8,Yc-6,gbZ-118); barrel.material=MAT.motor; barrel.parent=motorNode; cast(barrel);
+    for(let k=0;k<8;k++){
+      const fin=MB.CreateCylinder('fin',{diameter:96, height:3, tessellation:28}, scene);
+      fin.rotation.x=Math.PI/2; fin.position=new V3(gbX+8,Yc-6,gbZ-60-k*14); fin.material=MAT.motor; fin.parent=motorNode;
+    }
+    const out=MB.CreateCylinder('out',{diameter:CFG.shaftR*2, height:60, tessellation:16}, scene);
+    out.rotation.x=Math.PI/2; out.position=new V3(gbX,Yc,gbZ+58); out.material=MAT.shaft; out.parent=motorNode;
+    const mp=MB.CreateBox('mp',{width:8, height:150, depth:150}, scene);
+    mp.position=new V3(gbX-84,Yc-10,gbZ); mp.material=MAT.bracket; mp.parent=motorNode; cast(mp);
+  }
+
+  function buildFrame(geom){
+    const {coreW,frameH,L}=geom;
+    frameNode=new BABYLON.TransformNode('frame', scene); frameNode.parent=root;
+    const prof=40, zExt=coreW/2+CFG.marginZ, xExt=L/2+CFG.overhangX, legH=frameH-CFG.casterH;
+    function beam(w,h,d,x,y,z){
+      const b=MB.CreateBox('beam',{width:w, height:h, depth:d}, scene);
+      b.position=new V3(x,y,z); b.material=MAT.alu; b.parent=frameNode; cast(b); return b;
+    }
+    const legY=CFG.casterH+legH/2;
+    [[-xExt,-zExt],[xExt,-zExt],[-xExt,zExt],[xExt,zExt]].forEach(c=>beam(prof,legH,prof,c[0],legY,c[1]));
+    [-zExt,zExt].forEach(z=>beam(2*xExt,prof,prof,0,frameH-prof/2,z));
+    [-zExt,zExt].forEach(z=>beam(2*xExt,prof,prof,0,CFG.casterH+prof/2+40,z));
+    [-L/2,L/2].forEach(x=>beam(prof,prof,2*zExt,x,frameH-prof/2,0));
+    beam(prof,prof,2*zExt,0,frameH-prof/2,0);
+    [[-xExt,-zExt],[xExt,-zExt],[-xExt,zExt],[xExt,zExt]].forEach(c=>{
+      const x=c[0], z=c[1];
+      const plate=MB.CreateBox('cp',{width:prof+10, height:8, depth:prof+10}, scene);
+      plate.position=new V3(x,CFG.casterH,z); plate.material=MAT.caster; plate.parent=frameNode;
+      const fork=MB.CreateBox('fork',{width:14, height:CFG.casterH-26, depth:36}, scene);
+      fork.position=new V3(x,CFG.casterH/2+6,z); fork.material=MAT.caster; fork.parent=frameNode;
+      const wh=MB.CreateCylinder('wh',{diameter:CFG.casterH-18, height:20, tessellation:24}, scene);
+      wh.rotation.z=Math.PI/2; wh.position=new V3(x,(CFG.casterH-18)/2,z); wh.material=MAT.wheel; wh.parent=frameNode; cast(wh);
+    });
+  }
+
+  function disposeMachine(){
+    if(root) root.dispose(false,true);
+    beltTex.forEach(t=>{ try{t.dispose();}catch(e){} });
+    beltTex=[]; pulleys=[]; laneNodes=[]; boxes=[]; frameNode=null; motorNode=null;
+  }
+
+  function build(){
+    disposeMachine();
+    root=new BABYLON.TransformNode('machine', scene);
+    root.scaling=new V3(S,S,S);
+    const L=CFG.beltLength, pulleyR=CFG.pulleyR, bw=CFG.beltWidth;
+    const rb=pulleyR+CFG.beltThk, Yc=CFG.frameH+pulleyR+4;
+    const zHalf=bw/2+CFG.plateGap+CFG.plateThk;
+    const coreW=CFG.lanes*(2*zHalf)+(CFG.lanes-1)*CFG.laneGap;
+    const lanePositions=[];
+    for(let i=0;i<CFG.lanes;i++){ lanePositions.push(-coreW/2+zHalf+i*(2*zHalf+CFG.laneGap)); }
+    const geom={L,rb,Yc,bw,pulleyR,coreW,frameH:CFG.frameH,lanePositions};
+    for(let i=0;i<CFG.lanes;i++) buildLane(i, lanePositions[i], geom);
+    buildDrive(geom);
+    buildFrame(geom);
+    if(frameNode) frameNode.setEnabled(CFG.showFrame);
+    root.computeWorldMatrix(true);
+    const bb=root.getHierarchyBoundingVectors(true);
+    const ctr=bb.min.add(bb.max).scale(0.5);
+    const size=bb.max.subtract(bb.min).length();
+    camera.setTarget(ctr); camera.radius=size*0.92;
+  }
+
+  // ---- animación ----
+  const ex={cur:0,tgt:0};
+  scene.onBeforeRenderObservable.add(function(){
+    const dt=Math.min(engine.getDeltaTime()/1000,0.05);
+    const v=230*CFG.speed;
+    const loopLen=2*CFG.beltLength+Math.PI*2*(CFG.pulleyR+CFG.beltThk);
+    const du=(v/loopLen)*dt;
+    for(const t of beltTex){ t.uOffset-=du; }
+    const omega=v/CFG.pulleyR;
+    for(const p of pulleys){ p.node.rotation.z-=omega*dt; }
+    for(const b of boxes){
+      b.mesh.position.x+=v*dt;
+      if(b.mesh.position.x>b.half+70) b.mesh.position.x=-b.half-70+(b.mesh.position.x-(b.half+70));
+    }
+    ex.tgt=CFG.exploded?1:0; ex.cur+=(ex.tgt-ex.cur)*Math.min(1,dt*6);
+    const e=ex.cur;
+    laneNodes.forEach(function(ln,i){ ln.position.y=(i-(CFG.lanes-1)/2)*70*e; });
+    if(frameNode) frameNode.position.y=-180*e;
+    if(motorNode) motorNode.position.y=laneNodes.length?laneNodes[0].position.y:0;
+    if(CFG.autoRotate && !pointerDown){ camera.alpha+=0.0016; }
+  });
+
+  let pointerDown=false;
+  canvas.addEventListener('pointerdown', function(){ pointerDown=true; });
+  window.addEventListener('pointerup', function(){ pointerDown=false; });
+
+  // ---- UI ----
+  const $=function(s){ return document.querySelector(s); };
+  $('#speed').addEventListener('input', function(e){
+    CFG.speed=parseFloat(e.target.value); $('#v-speed').textContent=CFG.speed.toFixed(1)+'×';
+  });
+  document.querySelectorAll('#lanes button').forEach(function(b){
+    b.addEventListener('click', function(){
+      document.querySelectorAll('#lanes button').forEach(function(x){ x.classList.remove('on'); });
+      b.classList.add('on'); CFG.lanes=parseInt(b.dataset.n);
+      $('#v-lanes').textContent=CFG.lanes; $('#m-lanes').textContent=CFG.lanes; build();
+    });
+  });
+  document.querySelectorAll('#belt button').forEach(function(b){
+    b.addEventListener('click', function(){
+      document.querySelectorAll('#belt button').forEach(function(x){ x.classList.remove('on'); });
+      b.classList.add('on'); CFG.beltColor=b.dataset.c;
+      beltTex.forEach(function(t){ drawBelt(t.getContext(),CFG.beltColor); t.update(); });
+    });
+  });
+  function toggle(id,key,fn){
+    const el=$(id);
+    el.addEventListener('click', function(){
+      el.classList.toggle('on'); CFG[key]=el.classList.contains('on'); if(fn) fn(CFG[key]);
+    });
+  }
+  toggle('#t-frame','showFrame', function(v){ if(frameNode) frameNode.setEnabled(v); });
+  toggle('#t-boxes','showBoxes', function(){ build(); });
+  toggle('#t-explode','exploded');
+  toggle('#t-rotate','autoRotate');
+
+  // ---- integración con el backend: genera STEP+GLB REALES (CadQuery) ----
+  // Abre el visor con  ?api=https://tu-host  (o define window.CONVEYONE_API).
+  (function(){
+    const API=(new URLSearchParams(location.search).get('api')||window.CONVEYONE_API||'').replace(/\/$/,'');
+    const host=document.querySelector('.panel'); if(!host) return;
+    const w=document.createElement('div'); w.className='grp'; w.style.marginTop='6px';
+    w.innerHTML='<button id="gen" style="width:100%;padding:8px 0;border-radius:8px;border:1px solid rgba(57,208,200,.5);background:rgba(57,208,200,.16);color:var(--accent);font-family:var(--mono);font-size:11px;cursor:pointer">Generar CAD · STEP+GLB</button>'+
+      '<div id="genmsg" style="margin-top:7px;color:var(--ink-dim);font-family:var(--mono);font-size:9.5px;line-height:1.55;word-break:break-all"></div>';
+    host.appendChild(w);
+    const btn=w.querySelector('#gen'), msg=w.querySelector('#genmsg');
+    function payload(){ return {product:'sorter_multibanda',params:{lanes:CFG.lanes,belt_length:CFG.beltLength,belt_width:CFG.beltWidth,belt_thk:CFG.beltThk,pulley_d:CFG.pulleyR*2,lane_gap:CFG.laneGap,frame_h:CFG.frameH}}; }
+    if(!API){ msg.innerHTML='Vista previa procedural. Para CAD real abre con <b>?api=URL</b> del backend.'; }
+    btn.addEventListener('click', function(){
+      if(!API){ msg.innerHTML='Configura el backend: <b>'+location.pathname+'?api=https://tu-host</b>'; return; }
+      btn.disabled=true; msg.textContent='Generando en el backend (CadQuery)…';
+      fetch(API+'/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload())})
+        .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+        .then(function(d){ const dl=d.downloads;
+          msg.innerHTML='<b style="color:#39d0c8">'+d.key+'</b><br>'+
+            '<a style="color:var(--accent)" href="'+API+dl.step+'">STEP</a> · '+
+            '<a style="color:var(--accent)" href="'+API+dl.glb+'">GLB</a>'; })
+        .catch(function(e){ msg.innerHTML='<span style="color:#ff7a7a">Error: '+e.message+'</span>'; })
+        .finally(function(){ btn.disabled=false; });
+    });
+  })();
+
+  // ---- arranque ----
+  build();
+  let hid=false;
+  function hide(){ if(!hid){ hid=true; const l=document.getElementById('loader'); if(l) l.classList.add('hidden'); } }
+  scene.executeWhenReady(function(){ setTimeout(hide,250); });
+  scene.onAfterRenderObservable.addOnce(hide);
+  engine.runRenderLoop(function(){ scene.render(); });
+  window.addEventListener('resize', function(){ engine.resize(); });
+
+  }catch(err){ showErr((err&&err.stack)?err.stack:String(err)); }
+})();
+</script>
+</body>
+</html>

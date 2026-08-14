@@ -1,0 +1,10 @@
+{
+  "name": "conveyone-simulator",
+  "version": "0.1.0",
+  "description": "Simulador modular de catálogo: motor headless (plan + BOM contado de geometría) + render Babylon + exportación STEP vía backend CadQuery.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  },
+  "license": "MIT"
+}

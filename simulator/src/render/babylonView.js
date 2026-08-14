@@ -1,0 +1,243 @@
+// babylonView.js — render Babylon de un PLAN del motor.
+// Dibuja cada pieza colocada (representación). La geometría EXACTA (B-Rep) la da
+// el STEP del backend; aquí se representa con primitivas teseladas.
+//
+// Requiere el global BABYLON (CDN) cargado antes de instanciar.
+// Convención del plan: CAD Z-arriba (X largo, Y ancho, Z vertical).
+// Babylon es Y-arriba => world = (x, z, y).
+
+const S = 0.01; // mm -> unidades de escena
+
+const MAT = {
+  belt_profile: [0.78, 0.79, 0.81, 0.82, 0.50],
+  rail:         [0.63, 0.65, 0.68, 0.78, 0.52],
+  head_plate:   [0.87, 0.88, 0.90, 0.90, 0.34],
+  pulley:       [0.72, 0.74, 0.77, 0.95, 0.26],
+  bearing:      [0.50, 0.52, 0.56, 0.95, 0.30],
+  belt:         [0.09, 0.09, 0.10, 0.00, 0.66],
+  shaft:        [0.69, 0.71, 0.74, 0.95, 0.24],
+  bolt:         [0.40, 0.41, 0.44, 0.90, 0.40],
+  motor:        [0.27, 0.28, 0.31, 0.55, 0.48],
+  motor_plate:  [0.81, 0.82, 0.84, 0.85, 0.35],
+  foot:         [0.34, 0.35, 0.38, 0.70, 0.50],
+  wheel:        [0.12, 0.12, 0.13, 0.10, 0.60],
+  detail:       [0.16, 0.16, 0.18, 0.40, 0.55], // ranuras / barrenos / cubos
+  flange:       [0.85, 0.86, 0.88, 0.95, 0.30], // pestañas de polea/rodillo
+};
+
+export function createView(canvas, opts = {}) {
+  const B = window.BABYLON;
+  if (!B) throw new Error('Babylon.js no está cargado (global BABYLON ausente).');
+  const V3 = B.Vector3, C3 = B.Color3;
+
+  const engine = new B.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true, antialias: true }, true);
+  const scene = new B.Scene(engine);
+  scene.clearColor = new B.Color4(0.80, 0.84, 0.875, 1);
+
+  const camera = new B.ArcRotateCamera('cam', -Math.PI / 2.5, 1.05, 14, V3.Zero(), scene);
+  camera.attachControl(canvas, true);
+  camera.lowerRadiusLimit = 2; camera.upperRadiusLimit = 120;
+  camera.lowerBetaLimit = 0.12; camera.upperBetaLimit = Math.PI / 2 - 0.03;
+  camera.wheelDeltaPercentage = 0.012; camera.pinchDeltaPercentage = 0.012;
+  camera.minZ = 0.05; camera.maxZ = 2000; camera.panningSensibility = 0;
+
+  // luces
+  const hemi = new B.HemisphericLight('h', new V3(0.1, 1, 0.15), scene);
+  hemi.intensity = 0.55; hemi.groundColor = new C3(0.45, 0.48, 0.53);
+  const key = new B.DirectionalLight('k', new V3(-0.55, -1, -0.42), scene);
+  key.position = new V3(9, 22, 7); key.intensity = 2.0;
+  new B.DirectionalLight('r', new V3(0.6, -0.45, 0.7), scene).intensity = 0.7;
+
+  let shadow = null;
+  try {
+    shadow = new B.ShadowGenerator(1024, key);
+    shadow.useBlurExponentialShadowMap = true; shadow.blurKernel = 22; shadow.darkness = 0.5;
+  } catch (e) { /* sin sombras */ }
+
+  const ground = B.MeshBuilder.CreateGround('g', { width: 600, height: 600 }, scene);
+  const gm = new B.PBRMetallicRoughnessMaterial('gm', scene);
+  gm.baseColor = new C3(0.86, 0.885, 0.905); gm.metallic = 0; gm.roughness = 0.85;
+  ground.material = gm; ground.receiveShadows = true;
+
+  try {
+    const dp = new B.DefaultRenderingPipeline('dp', true, scene, [camera]);
+    dp.fxaaEnabled = true; dp.samples = 4; dp.imageProcessingEnabled = true;
+    dp.imageProcessing.toneMappingEnabled = true;
+    dp.imageProcessing.toneMappingType = B.ImageProcessingConfiguration.TONEMAPPING_ACES;
+    dp.imageProcessing.exposure = 1.05; dp.imageProcessing.contrast = 1.12;
+  } catch (e) { /* sin post */ }
+
+  const matCache = new Map();
+  function mat(name) {
+    if (matCache.has(name)) return matCache.get(name);
+    const [r, g, b, metal, rough] = MAT[name] || [0.7, 0.7, 0.72, 0.4, 0.5];
+    const m = new B.PBRMetallicRoughnessMaterial('m_' + name, scene);
+    m.baseColor = new C3(r, g, b); m.metallic = metal; m.roughness = rough;
+    matCache.set(name, m);
+    return m;
+  }
+
+  // material de banda: color sólido configurable. Sin DynamicTexture a propósito
+  // (getContext() puede devolver null en WebKit/Safari y romper la escena).
+  const beltMat = new B.PBRMetallicRoughnessMaterial('beltM', scene);
+  beltMat.metallic = 0; beltMat.roughness = 0.66;
+  function setBeltColor(hex) {
+    try { beltMat.baseColor = B.Color3.FromHexString(hex); }
+    catch (e) { beltMat.baseColor = new C3(0.09, 0.09, 0.10); }
+  }
+  setBeltColor(opts.beltColor || '#161616');
+
+  const v = (pos) => new V3(pos[0] * S, pos[2] * S, pos[1] * S); // CAD -> world
+
+  let root = null, pulleys = [];
+  const state = { showBolts: false, anim: true, autoRotate: true };
+
+  function racetrack(span, r, seg = 20) {
+    const pts = [], hx = span / 2;
+    for (let i = 0; i <= seg; i++) pts.push([-hx + (i / seg) * span, r]);
+    for (let i = 1; i < seg; i++) { const a = Math.PI / 2 - (i / seg) * Math.PI; pts.push([hx + r * Math.cos(a), r * Math.sin(a)]); }
+    for (let i = 0; i <= seg; i++) pts.push([hx - (i / seg) * span, -r]);
+    for (let i = 1; i < seg; i++) { const a = -Math.PI / 2 - (i / seg) * Math.PI; pts.push([-hx + r * Math.cos(a), r * Math.sin(a)]); }
+    return pts;
+  }
+
+  // orienta un cilindro (eje local = up de Babylon) hacia una dirección mundial
+  function orientToDir(mesh, wd) {
+    const up = new V3(0, 1, 0);
+    const d = wd.normalizeToNew();
+    const dot = Math.max(-1, Math.min(1, B.Vector3.Dot(up, d)));
+    if (dot > 0.9999) return;
+    if (dot < -0.9999) { mesh.rotation.x = Math.PI; return; }
+    const axis = B.Vector3.Cross(up, d).normalize();
+    mesh.rotationQuaternion = B.Quaternion.RotationAxis(axis, Math.acos(dot));
+  }
+
+  function addPart(p) {
+    const B2 = B, MB = B.MeshBuilder;
+    let mesh = null;
+    if (p.kind === 'box') {
+      mesh = MB.CreateBox(p.id, { width: p.args.dx * S, height: p.args.dz * S, depth: p.args.dy * S }, scene);
+      mesh.position = v(p.pos);
+      if (p.yaw) mesh.rotation.y = -p.yaw; // giro alrededor de la vertical (CAD Z)
+    } else if (p.kind === 'tslot') {
+      const a = p.args, side = a.side * S, len = a.len * S;
+      const dim = p.axis === 'X' ? { width: len, height: side, depth: side }
+        : p.axis === 'Y' ? { width: side, height: side, depth: len }
+        : { width: side, height: len, depth: side };
+      mesh = MB.CreateBox(p.id, dim, scene);
+      mesh.position = v(p.pos);
+    } else if (p.kind === 'cyl') {
+      mesh = MB.CreateCylinder(p.id, { diameter: p.args.d * S, height: p.args.len * S, tessellation: 32 }, scene);
+      if (p.dir) {
+        orientToDir(mesh, new V3(p.dir[0], p.dir[2], p.dir[1])); // CAD dir -> world
+      } else if (p.axis === 'Y') { mesh.rotation.x = Math.PI / 2; }
+      else if (p.axis === 'X') { mesh.rotation.z = Math.PI / 2; }
+      mesh.position = v(p.pos);
+      if (p.mat === 'pulley' && p.axis) pulleys.push(mesh); // solo poleas rectas se animan
+    } else if (p.kind === 'arc') {
+      const a = p.args, seg = Math.max(8, Math.round((a.a1 - a.a0) / 0.1));
+      const path = [];
+      for (let i = 0; i <= seg; i++) { const t = a.a0 + (a.a1 - a.a0) * i / seg; path.push(new V3(a.radius * Math.cos(t) * S, p.pos[2] * S, a.radius * Math.sin(t) * S)); }
+      mesh = MB.CreateTube(p.id, { path, radius: Math.max(a.w, a.h) / 2 * S, tessellation: 10 }, scene);
+    } else if (p.kind === 'beltArc') {
+      const a = p.args, seg = Math.max(8, Math.round((a.a1 - a.a0) / 0.08));
+      const inn = [], out = [];
+      for (let i = 0; i <= seg; i++) { const t = a.a0 + (a.a1 - a.a0) * i / seg;
+        inn.push(new V3(a.rIn * Math.cos(t) * S, p.pos[2] * S, a.rIn * Math.sin(t) * S));
+        out.push(new V3(a.rOut * Math.cos(t) * S, p.pos[2] * S, a.rOut * Math.sin(t) * S)); }
+      mesh = MB.CreateRibbon(p.id, { pathArray: [inn, out], sideOrientation: B2.Mesh.DOUBLESIDE }, scene);
+      mesh.material = beltMat;
+    } else if (p.kind === 'beltLoop') {
+      const seg = 22, pts = racetrack(p.args.span, p.args.r, seg), hw = p.args.width / 2;
+      const pl = pts.map(([x, z]) => new V3((p.pos[0] + x) * S, (p.pos[2] + z) * S, (p.pos[1] - hw) * S));
+      const pr = pts.map(([x, z]) => new V3((p.pos[0] + x) * S, (p.pos[2] + z) * S, (p.pos[1] + hw) * S));
+      mesh = MB.CreateRibbon(p.id, { pathArray: [pl, pr], closePath: true, sideOrientation: B2.Mesh.DOUBLESIDE }, scene);
+      mesh.material = beltMat;
+    }
+    if (!mesh) return;
+    if (p.kind !== 'beltLoop' && p.kind !== 'beltArc') mesh.material = mat(p.mat || 'rail');
+    if (p.hideByDefault) mesh.setEnabled(state.showBolts);
+    mesh.parent = root;
+    if (shadow) shadow.addShadowCaster(mesh, true);
+    mesh.metadata = { part: p };
+    try { addDetail(p, mesh); } catch (e) { /* el detalle es opcional; nunca rompe la escena */ }
+  }
+
+  // detalle de pieza (hijos parentados al mesh -> heredan su orientación)
+  function addDetail(p, mesh) {
+    const MB = B.MeshBuilder;
+    const cyl = (opts, matKey, pos) => {
+      const m = MB.CreateCylinder('d', opts, scene);
+      m.material = mat(matKey); m.parent = mesh; if (pos) m.position = pos; m.isPickable = false;
+      if (shadow) shadow.addShadowCaster(m, true);
+    };
+    const box = (w, h, dp, matKey, pos) => {
+      const m = MB.CreateBox('g', { width: w, height: h, depth: dp }, scene);
+      m.material = mat(matKey); m.parent = mesh; m.position = pos; m.isPickable = false;
+    };
+    if (p.kind === 'cyl') {
+      const d = p.args.d * S, len = p.args.len * S;
+      if (/^(pulley|roller)/.test(p.id)) {            // poleas / rodillos: pestañas + barreno
+        cyl({ diameter: d * 1.12, height: 2 * S, tessellation: 30 }, 'flange', new V3(0, len / 2, 0));
+        cyl({ diameter: d * 1.12, height: 2 * S, tessellation: 30 }, 'flange', new V3(0, -len / 2, 0));
+        cyl({ diameter: d * 0.42, height: len * 1.04, tessellation: 20 }, 'detail');
+      } else if (/^bearing/.test(p.id)) {             // rodamiento: pista interior
+        cyl({ diameter: d * 0.55, height: len * 1.02, tessellation: 20 }, 'detail');
+      } else if (/^wheel/.test(p.id)) {               // rueda: cubo central
+        cyl({ diameter: d * 0.4, height: len * 1.06, tessellation: 18 }, 'flange');
+      }
+    } else if (p.kind === 'tslot') {                  // perfil: ranura en las 4 caras
+      const side = p.args.side * S, L = p.args.len * S * 0.96, t = 0.06 * side, g = 0.34 * side, h = side / 2;
+      if (p.axis === 'X') { box(L, t, g, 'detail', new V3(0, h, 0)); box(L, t, g, 'detail', new V3(0, -h, 0)); box(L, g, t, 'detail', new V3(0, 0, h)); box(L, g, t, 'detail', new V3(0, 0, -h)); }
+      else if (p.axis === 'Z') { box(t, L, g, 'detail', new V3(h, 0, 0)); box(t, L, g, 'detail', new V3(-h, 0, 0)); box(g, L, t, 'detail', new V3(0, 0, h)); box(g, L, t, 'detail', new V3(0, 0, -h)); }
+      else { box(t, g, L, 'detail', new V3(h, 0, 0)); box(t, g, L, 'detail', new V3(-h, 0, 0)); box(g, t, L, 'detail', new V3(0, h, 0)); box(g, t, L, 'detail', new V3(0, -h, 0)); }
+    }
+  }
+
+  function frameCamera() {
+    root.computeWorldMatrix(true);
+    const bb = root.getHierarchyBoundingVectors(true);
+    const ctr = bb.min.add(bb.max).scale(0.5);
+    const size = bb.max.subtract(bb.min).length();
+    root.position.y -= bb.min.y; // apoyar en el suelo
+    camera.setTarget(new V3(ctr.x, (bb.max.y - bb.min.y) / 2, ctr.z));
+    camera.radius = size * 0.95;
+  }
+
+  function setPlan(plan) {
+    if (root) root.dispose(false, true);
+    pulleys = [];
+    root = new B.TransformNode('machine', scene);
+    for (const p of plan.parts) addPart(p);
+    if (plan.meta && plan.meta.belt_color) setBeltColor(plan.meta.belt_color);
+    frameCamera();
+  }
+
+  // animación: giro de poleas + auto-rotación
+  scene.onBeforeRenderObservable.add(() => {
+    const dt = Math.min(engine.getDeltaTime() / 1000, 0.05);
+    if (state.anim) {
+      for (const m of pulleys) m.rotation.y += 1.5 * dt;
+    }
+    if (state.autoRotate) camera.alpha += 0.0012;
+  });
+  let down = false;
+  canvas.addEventListener('pointerdown', () => { down = true; });
+  window.addEventListener('pointerup', () => { down = false; });
+  scene.registerBeforeRender(() => { if (down) state.autoRotate = false; });
+
+  engine.runRenderLoop(() => scene.render());
+  window.addEventListener('resize', () => engine.resize());
+
+  return {
+    scene, engine, camera,
+    setPlan,
+    setBeltColor,
+    setShowBolts: (on) => { state.showBolts = on; if (root) root.getChildMeshes().forEach((m) => { if (m.metadata?.part?.hideByDefault) m.setEnabled(on); }); },
+    setAnim: (on) => { state.anim = on; },
+    setAutoRotate: (on) => { state.autoRotate = on; },
+    dispose: () => engine.dispose(),
+  };
+}
+
+export default { createView };
