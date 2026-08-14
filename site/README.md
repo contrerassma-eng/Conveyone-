@@ -70,6 +70,29 @@ Los renderizadores necesitan Playwright con Chromium y una copia local de
 `three.js` (`--three`) o de `babylon.js` (`--babylon`) cuando no hay salida a
 los CDN.
 
+## Simulación de la lógica ZPA
+
+`assets/js/zpa.js` es el motor de la acumulación de cero presión: zonas con
+fotocélula, tarjeta y motor, donde cada tarjeta decide mirando SOLO la zona
+siguiente. No dibuja nada. Lo consumen dos vistas:
+
+- `assets/js/sim3d.js` — corre **sobre el ensamble CAD real**: carga el mismo
+  `.glb` de la ficha y hace circular cajas por sus rodillos. La superficie de
+  transporte no se asume: se encuentra lanzando rayos hacia abajo sobre el eje
+  de la línea.
+- `assets/js/simzp.js` — vista 2D de respaldo, con la misma lógica, para
+  navegadores sin WebGL o si el ensamble no carga.
+
+Modos: `cero` (cada zona frena su caja sin tocar la de adelante), `singulado`
+(entrega de a una) y `tren` (todas arrancan a la vez y sale el lote).
+
+## Import map de three.js
+
+Las páginas que usan three (`equipo.html`) llevan un `<script type="importmap">`
+que resuelve `three` y `three/addons/`. **Es obligatorio**: `GLTFLoader` importa
+internamente el especificador `three`, y sin el mapa el visor no carga en
+ningún navegador. También evita que se instancien dos copias de THREE.
+
 ## Pendientes conocidos
 
 - La solicitud de cotización se envía por `mailto:` con el detalle redactado. Al

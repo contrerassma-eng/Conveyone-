@@ -1090,8 +1090,17 @@ table.comp .no{ color:#C4562F; }
 .sim .vopt{ background:rgba(255,255,255,.06); border-color:rgba(255,255,255,.18); color:rgba(255,255,255,.72); }
 .sim .vopt:hover{ border-color:var(--cyan); color:#fff; }
 .sim .vopt.on{ background:var(--cyan); border-color:var(--cyan); color:var(--navy-950); }
-.sim-lienzo{ background:linear-gradient(180deg,#EDF1F7,#DCE4EF); }
-.sim-lienzo canvas{ display:block; width:100%; }
+.sim-lienzo{
+  background:linear-gradient(180deg,#EDF1F7,#DCE4EF); position:relative;
+  height:clamp(300px, 38vw, 480px);
+}
+.sim-lienzo canvas{ display:block; width:100%; height:100%; touch-action:none; }
+.sim-carga{
+  position:absolute; inset:0; display:flex; flex-direction:column;
+  align-items:center; justify-content:center; gap:13px;
+  background:linear-gradient(180deg,#EDF1F7,#DCE4EF);
+}
+.sim-carga span{ font-family:var(--mono); font-size:11.5px; color:var(--muted); }
 .sim-nota{
   margin:0; padding:14px 18px; font-size:11.5px; line-height:1.7;
   color:rgba(255,255,255,.6); border-top:1px solid rgba(255,255,255,.1);

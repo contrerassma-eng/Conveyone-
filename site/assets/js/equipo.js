@@ -113,10 +113,31 @@ const NOTAS = {
   tren: 'Tren o lote — al liberar la salida arrancan todas las zonas a la vez y el grupo sale como un bloque. Evacúa el pulmón en el menor tiempo posible.',
 };
 
+/* La simulación corre sobre el MODELO CAD REAL del equipo. Si el navegador no
+   puede con WebGL o el ensamble no carga, cae a la vista 2D con la misma
+   lógica: lo importante es que se vea el control, no el 3D. */
+async function montaSimulacion() {
+  const host = $('simHost');
+  try {
+    const { montaSim3D } = await import('./sim3d.js');
+    return await montaSim3D(host, {
+      glb: 'assets/models/' + eq.glb,
+      logo: 'assets/img/mark.png',
+      largoMM: 3000, zonas: 4,
+      cajaL: 400, cajaW: 300, cajaH: 220,
+      yaw: 30, pitch: 20, fit: 0.95,
+    });
+  } catch (e) {
+    const { montaSimZP } = await import('./simzp.js');
+    return montaSimZP(host, { logo: 'assets/img/mark.png' });
+  }
+}
+
 if (eq.zpa) {
   $('secSim').style.display = '';
-  import('./simzp.js').then(({ montaSimZP }) => {
-    const sim = montaSimZP($('simHost'), { logo: 'assets/img/mark.png' });
+  montaSimulacion().then((sim) => {
+    const carga = $('simCarga');
+    if (carga) carga.remove();
     $('simNota').innerHTML = '<b>Cero presión.</b> ' + NOTAS.cero.split('— ')[1];
 
     $('simModos').addEventListener('click', (e) => {

@@ -1,5 +1,6 @@
 <!-- title: Ficha de equipo — Conveyone SpA -->
 <!-- desc: Ficha técnica del equipo: modelo 3D real navegable, especificaciones, aplicaciones y cotización. -->
+<!-- extrahead: <script type="importmap">\n{"imports":{\n  "three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",\n  "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"\n}}\n</script>\n -->
 <!-- scripts: <script type="module" src="assets/js/equipo.js"></script>\n -->
 
 <section class="phead" id="phead">
@@ -74,11 +75,12 @@
   <div class="wrap">
     <div class="head" data-rv>
       <span class="eyebrow on-dark">Lógica de acumulación</span>
-      <h2>Mira cómo trabaja el control, zona por zona.</h2>
+      <h2>La lógica corriendo sobre el equipo real.</h2>
       <p class="lead on-dark">
-        Cada zona tiene su fotocélula, su tarjeta y su motor, y decide sola
-        mirando únicamente a la zona siguiente. Bloquea la salida y elige el
-        modo para ver la diferencia.
+        Es el mismo ensamble CAD de arriba, con cajas circulando por sus
+        rodillos. Cada zona tiene su fotocélula, su tarjeta y su motor, y decide
+        sola mirando únicamente a la zona siguiente. Bloquea la salida y cambia
+        de modo para ver la diferencia. Puedes girar la escena con el mouse.
       </p>
     </div>
 
@@ -95,7 +97,9 @@
           <button class="vopt" id="simReset">Reiniciar</button>
         </div>
       </div>
-      <div class="sim-lienzo" id="simHost"></div>
+      <div class="sim-lienzo" id="simHost">
+        <div class="sim-carga" id="simCarga"><div class="spin"></div><span>Cargando el ensamble CAD…</span></div>
+      </div>
       <p class="sim-nota mono" id="simNota"></p>
     </div>
   </div>

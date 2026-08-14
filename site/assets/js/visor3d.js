@@ -10,21 +10,19 @@
    como equipo y no como maqueta blanca.
    ========================================================================== */
 
-const CDN = 'https://cdn.jsdelivr.net/npm/three@0.160.0';
-const MODULOS = {
-  three: `${CDN}/build/three.module.js`,
-  gltf: `${CDN}/examples/jsm/loaders/GLTFLoader.js`,
-  orbit: `${CDN}/examples/jsm/controls/OrbitControls.js`,
-  room: `${CDN}/examples/jsm/environments/RoomEnvironment.js`,
-  meshopt: `${CDN}/examples/jsm/libs/meshopt_decoder.module.js`,
-};
-
+/* Los módulos se piden por especificador BARE y se resuelven con el import map
+   de la página. Es obligatorio: GLTFLoader importa internamente "three", y sin
+   el mapa el navegador no sabe resolverlo y el visor no carga. Además evita
+   cargar dos instancias distintas de THREE. */
 let libs = null;
 async function carga() {
   if (libs) return libs;
   const [THREE, g, o, r, m] = await Promise.all([
-    import(MODULOS.three), import(MODULOS.gltf), import(MODULOS.orbit),
-    import(MODULOS.room), import(MODULOS.meshopt),
+    import('three'),
+    import('three/addons/loaders/GLTFLoader.js'),
+    import('three/addons/controls/OrbitControls.js'),
+    import('three/addons/environments/RoomEnvironment.js'),
+    import('three/addons/libs/meshopt_decoder.module.js'),
   ]);
   libs = { THREE, GLTFLoader: g.GLTFLoader, OrbitControls: o.OrbitControls,
            RoomEnvironment: r.RoomEnvironment, MeshoptDecoder: m.MeshoptDecoder };
