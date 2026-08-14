@@ -77,6 +77,7 @@ export const EQUIPOS = [
   },
   {
     slug: 'mdr-24v',
+    zpa: true,
     codigo: 'ZP2026-MDR',
     nombre: 'Rodillos motorizados 24 V',
     familia: 'rodillo',
@@ -124,6 +125,7 @@ export const EQUIPOS = [
   },
   {
     slug: 'acumulacion-24v',
+    zpa: true,
     codigo: 'ZP2026',
     nombre: 'Acumulación de cero presión 24 V',
     familia: 'rodillo',

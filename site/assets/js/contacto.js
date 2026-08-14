@@ -5,7 +5,7 @@ const DESTINO = 'scontreras@conveyone.tech';
 const $ = (id) => document.getElementById(id);
 
 const TIPOS = {
-  urgencia: 'URGENCIA DE TEMPORADA — línea corriendo',
+  urgencia: 'Repuesto o componente',
   equipo: 'Un equipo puntual',
   linea: 'Una línea completa',
   ampliacion: 'Ampliar o modificar una línea existente',
@@ -37,12 +37,12 @@ function ajustaAyuda() {
   const msg = $('msg');
   if (hint) {
     hint.textContent = urgente
-      ? 'Dinos qué pieza o tramo falta, la medida que tengas a mano y cuándo tienes ventana para intervenir. Adjunta una foto respondiendo el correo.'
+      ? 'Indica la pieza o el tramo, su código del despiece si lo tienes, la medida principal y la cantidad.'
       : 'Mientras más sepamos del flujo, más precisa es la propuesta.';
   }
   if (msg) {
     msg.placeholder = urgente
-      ? 'Qué se rompió o qué falta, la medida principal, qué producto pasa por ahí y cuándo puedes detener la línea.'
+      ? 'Pieza o tramo, código del despiece, medida principal y cantidad.'
       : 'Qué producto transportas, qué cadencia necesitas, el espacio disponible y el plazo.';
   }
 }

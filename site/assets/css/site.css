@@ -1066,3 +1066,42 @@ table.comp .no{ color:#C4562F; }
 .banda p{ margin-top:16px; color:rgba(255,255,255,.7); font-size:15.4px; max-width:62ch; line-height:1.68; }
 .banda-cta{ display:flex; flex-direction:column; gap:16px; align-items:flex-start; }
 @media (max-width:860px){ .banda{ grid-template-columns:1fr; } }
+
+/* ==========================================================================
+   Simulador de lógica de acumulación
+   ========================================================================== */
+.sim{
+  background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.12);
+  border-radius:var(--r); overflow:hidden;
+}
+.sim-barra{
+  display:flex; flex-wrap:wrap; gap:14px; align-items:center; justify-content:space-between;
+  padding:16px 18px; border-bottom:1px solid rgba(255,255,255,.1);
+}
+.sim-modos{ display:flex; gap:6px; background:rgba(0,0,0,.25); padding:4px; border-radius:100px; }
+.sim-modos button{
+  padding:9px 18px; border:0; border-radius:100px; background:none; cursor:pointer;
+  font-size:13px; font-weight:600; color:rgba(255,255,255,.6);
+  transition:all var(--t-f) var(--ease);
+}
+.sim-modos button:hover{ color:#fff; }
+.sim-modos button.on{ background:var(--cyan); color:var(--navy-950); }
+.sim-acc{ display:flex; gap:7px; }
+.sim .vopt{ background:rgba(255,255,255,.06); border-color:rgba(255,255,255,.18); color:rgba(255,255,255,.72); }
+.sim .vopt:hover{ border-color:var(--cyan); color:#fff; }
+.sim .vopt.on{ background:var(--cyan); border-color:var(--cyan); color:var(--navy-950); }
+.sim-lienzo{ background:linear-gradient(180deg,#EDF1F7,#DCE4EF); }
+.sim-lienzo canvas{ display:block; width:100%; }
+.sim-nota{
+  margin:0; padding:14px 18px; font-size:11.5px; line-height:1.7;
+  color:rgba(255,255,255,.6); border-top:1px solid rgba(255,255,255,.1);
+}
+.sim-nota b{ color:var(--cyan); font-weight:500; }
+
+/* --- países donde operamos ---------------------------------------------- */
+.paises{ display:flex; gap:18px; margin-top:20px; flex-wrap:wrap; }
+.pais{
+  display:inline-flex; align-items:center; gap:9px;
+  font-size:13.5px; color:rgba(255,255,255,.72); font-weight:500;
+}
+.pais svg{ border-radius:2px; box-shadow:0 0 0 1px rgba(255,255,255,.16); flex:none; }

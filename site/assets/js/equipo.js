@@ -106,6 +106,48 @@ async function abre3d() {
   }
 }
 
+/* --- simulador de la lógica de acumulación ------------------------------ */
+const NOTAS = {
+  cero: 'Cero presión — cada zona detiene su caja en su punto de parada cuando la zona siguiente está ocupada. Las cajas nunca se tocan: no hay empuje, no hay daño por presión.',
+  singulado: 'Singulado — al liberar la salida se entrega de a una. Una zona solo arranca cuando la siguiente quedó completamente libre. Es lo que necesita un lector, una pesadora o un desviador.',
+  tren: 'Tren o lote — al liberar la salida arrancan todas las zonas a la vez y el grupo sale como un bloque. Evacúa el pulmón en el menor tiempo posible.',
+};
+
+if (eq.zpa) {
+  $('secSim').style.display = '';
+  import('./simzp.js').then(({ montaSimZP }) => {
+    const sim = montaSimZP($('simHost'), { logo: 'assets/img/mark.png' });
+    $('simNota').innerHTML = '<b>Cero presión.</b> ' + NOTAS.cero.split('— ')[1];
+
+    $('simModos').addEventListener('click', (e) => {
+      const b = e.target.closest('button');
+      if (!b) return;
+      $('simModos').querySelectorAll('button').forEach((x) => x.classList.remove('on'));
+      b.classList.add('on');
+      sim.modo(b.dataset.m);
+      const [titulo, cuerpo] = NOTAS[b.dataset.m].split(' — ');
+      $('simNota').innerHTML = `<b>${titulo}.</b> ${cuerpo}`;
+    });
+
+    const bs = $('simSalida');
+    bs.addEventListener('click', () => {
+      const libre = !bs.classList.contains('on');
+      bs.classList.toggle('on', libre);
+      bs.textContent = libre ? 'Salida libre' : 'Salida bloqueada';
+      sim.salida(libre);
+    });
+
+    const bp = $('simPlay');
+    bp.addEventListener('click', () => {
+      const pausa = bp.textContent === 'Pausa';
+      bp.textContent = pausa ? 'Reanudar' : 'Pausa';
+      sim.play(!pausa);
+    });
+
+    $('simReset').addEventListener('click', () => sim.reset());
+  }).catch(() => { $('secSim').style.display = 'none'; });
+}
+
 /* --- relacionados -------------------------------------------------------- */
 const otros = EQUIPOS.filter((x) => x.slug !== eq.slug)
   .sort((a, b) => (b.familia === eq.familia) - (a.familia === eq.familia))
